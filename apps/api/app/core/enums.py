@@ -1,0 +1,40 @@
+from enum import StrEnum
+
+
+class ContractStatus(StrEnum):
+    DRAFT = "DRAFT"
+    ANALYZING = "ANALYZING"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    NEGOTIATING = "NEGOTIATING"
+    READY_TO_SIGN = "READY_TO_SIGN"
+    SIGNING = "SIGNING"
+    SIGNED = "SIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    RENEWAL_DUE = "RENEWAL_DUE"
+
+
+class AdjustmentRequestStatus(StrEnum):
+    DRAFT = "DRAFT"
+    SENT = "SENT"
+    OPENED = "OPENED"
+    RESPONDED = "RESPONDED"
+    CONFIRMED = "CONFIRMED"
+    EXPIRED = "EXPIRED"
+
+
+class ModusignStatus(StrEnum):
+    DRAFT = "DRAFT"
+    SCHEDULED = "SCHEDULED"
+    ON_PROCESSING = "ON_PROCESSING"
+    ON_GOING = "ON_GOING"
+    COMPLETED = "COMPLETED"
+    ABORTED = "ABORTED"
+    PROCESSING_FAILED = "PROCESSING_FAILED"
+
+
+class ObligationStatus(StrEnum):
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    DISPUTED = "DISPUTED"

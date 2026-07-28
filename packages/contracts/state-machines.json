@@ -1,0 +1,23 @@
+{
+  "contract": {
+    "DRAFT": ["ANALYZING"],
+    "ANALYZING": ["REVIEW_REQUIRED"],
+    "REVIEW_REQUIRED": ["NEGOTIATING", "READY_TO_SIGN"],
+    "NEGOTIATING": ["READY_TO_SIGN"],
+    "READY_TO_SIGN": ["SIGNING"],
+    "SIGNING": ["SIGNED"],
+    "SIGNED": ["IN_PROGRESS"],
+    "IN_PROGRESS": ["COMPLETED", "RENEWAL_DUE"],
+    "COMPLETED": [],
+    "RENEWAL_DUE": []
+  },
+  "adjustmentRequest": [
+    "DRAFT",
+    "SENT",
+    "OPENED",
+    "RESPONDED",
+    "CONFIRMED",
+    "EXPIRED"
+  ],
+  "obligation": ["PENDING", "SUBMITTED", "APPROVED", "DISPUTED"]
+}

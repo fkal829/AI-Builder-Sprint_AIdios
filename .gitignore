@@ -1,0 +1,30 @@
+# macOS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# Node.js
+node_modules/
+.next/
+.vinext/
+dist/
+coverage/
+.wrangler/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# Local artifacts
+outputs/
+work/
+*.log

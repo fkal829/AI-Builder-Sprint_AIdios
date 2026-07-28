@@ -1,0 +1,255 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f7f5ef;
+  --surface: #fffdf8;
+  --foreground: #17211b;
+  --muted: #647069;
+  --brand: #176b4d;
+  --brand-strong: #0d5139;
+  --line: #dfe4de;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.landing {
+  min-height: 100vh;
+}
+
+.landing__hero,
+.workflow {
+  width: min(1120px, calc(100% - 40px));
+  margin-inline: auto;
+}
+
+.landing__hero {
+  display: grid;
+  align-content: center;
+  min-height: 68vh;
+  padding-block: 88px 64px;
+}
+
+.landing__hero h1 {
+  max-width: 820px;
+  margin: 16px 0 24px;
+  font-size: clamp(2.5rem, 7vw, 5rem);
+  font-weight: 760;
+  letter-spacing: -0.06em;
+  line-height: 1.04;
+}
+
+.landing__hero p {
+  max-width: 680px;
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  line-height: 1.75;
+}
+
+.eyebrow {
+  color: var(--brand);
+  font-size: 0.82rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.landing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 36px;
+}
+
+.button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+.button--primary {
+  background: var(--brand);
+  color: white;
+}
+
+.button--primary:hover {
+  background: var(--brand-strong);
+}
+
+.button--secondary {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.workflow {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 48px;
+  padding-block: 64px 96px;
+  border-top: 1px solid var(--line);
+}
+
+.workflow h2 {
+  margin: 12px 0 0;
+  font-size: clamp(1.75rem, 4vw, 2.7rem);
+  letter-spacing: -0.045em;
+  line-height: 1.15;
+}
+
+.workflow ol {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow li {
+  display: grid;
+  gap: 8px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.workflow li strong {
+  color: var(--brand);
+}
+
+.workflow li span {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.app-shell {
+  width: min(1120px, calc(100% - 40px));
+  margin-inline: auto;
+}
+
+.app-header {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-header__brand {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.app-header nav {
+  display: flex;
+  gap: 20px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.page {
+  padding-block: 48px 80px;
+}
+
+.page__header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.page h1 {
+  margin: 8px 0 0;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  letter-spacing: -0.05em;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.card {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.card__label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.card__value {
+  display: block;
+  margin-top: 12px;
+  font-size: 2.25rem;
+  font-weight: 760;
+}
+
+.placeholder {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+  padding: 40px;
+  border: 1px dashed #b9c3bc;
+  border-radius: 16px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .workflow {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .app-header nav {
+    gap: 12px;
+    font-size: 0.82rem;
+  }
+}

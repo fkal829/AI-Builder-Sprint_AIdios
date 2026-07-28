@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   안심홍보계약 — 디자인 토큰 (기획안/와이어프레임 0번 섹션 기준)
+   경고색·빨강 없음. 거절/원안유지는 amber가 아닌 gray 계열.
+   =========================================================================== */
+@theme {
+  --color-ink: #2a2a2a;
+  --color-paper: #f6f4ef;
+
+  --color-gray100: #eeece5;
+  --color-gray200: #e5e2d8;
+  --color-gray300: #d8d4c8;
+  --color-gray400: #c9c4b6;
+  --color-gray500: #8f8a7c;
+  --color-gray700: #4a463c;
+
+  --color-amber50: #fdf8ee;
+  --color-amber100: #faeed0;
+  --color-amber200: #f3dca3;
+  --color-amber400: #e0af4c;
+  --color-amber600: #b8842a;
+  --color-amber700: #a9752a;
+  --color-amber800: #7a561a;
+
+  --font-sans: var(--font-noto), ui-sans-serif, system-ui, "Apple SD Gothic Neo",
+    "Malgun Gothic", sans-serif;
+  --font-hand: var(--font-gaegu), var(--font-noto), cursive;
+
+  --radius-card: 12px;
+  --radius-phone: 24px;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  word-break: keep-all; /* 한글 어절 단위 줄바꿈 */
+}
+
+::selection {
+  background: var(--color-amber200);
+}
+
+/* 스크롤 가능한 가로 영역(발표용 데스크탑 흐름도 등) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 분석 진행 스피너 */
+@keyframes acc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-acc-spin {
+  animation: acc-spin 1s linear infinite;
+}
+
+@keyframes acc-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  animation: acc-fade-up 0.35s ease both;
+}

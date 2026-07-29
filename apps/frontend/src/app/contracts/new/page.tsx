@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ProgressDots } from "@/components/Bits";
 import { DEMO_CONTRACT_ID, UNDERSTOOD_QUESTIONS } from "@/lib/mock";
+import { saveUnderstood, type UnderstoodKey } from "@/lib/understood";
 
 /** 바이트를 사람이 읽기 쉬운 크기로 변환 */
 function formatBytes(bytes: number) {
@@ -22,9 +23,17 @@ export default function NewContractPage() {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [qIndex, setQIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Partial<Record<UnderstoodKey, string>>>({});
+  const [customText, setCustomText] = useState("");
 
   const uploaded = !!file;
+
+  // 특정 문항의 직접입력 칸에 채워둘 값(이전에 직접 입력한 값, 없으면 빈 문자열)
+  const prefillFor = (i: number) => {
+    const cur = UNDERSTOOD_QUESTIONS[i];
+    const prev = cur ? answers[cur.key] : undefined;
+    return prev && !cur.options.includes(prev) ? prev : "";
+  };
 
   /** 파일 검증 후 상태 반영 — 파일 선택/드롭 공통 진입점 */
   const acceptFile = (f: File | undefined | null) => {
@@ -159,17 +168,30 @@ export default function NewContractPage() {
   const isLast = qIndex === UNDERSTOOD_QUESTIONS.length - 1;
 
   const choose = (opt: string) => {
-    setAnswers((a) => ({ ...a, [q.key]: opt }));
+    const next = { ...answers, [q.key]: opt };
+    setAnswers(next);
     if (isLast) {
+      // 설문 응답 저장 → 분석 결과의 '내가 이해한 조건 요약'에서 사용
+      saveUnderstood(DEMO_CONTRACT_ID, next);
       router.push(`/contracts/${DEMO_CONTRACT_ID}/analysis`);
     } else {
-      setQIndex((i) => i + 1);
+      setQIndex(qIndex + 1);
+      setCustomText(prefillFor(qIndex + 1));
     }
   };
 
+  const submitCustom = () => {
+    const v = customText.trim();
+    if (v) choose(v);
+  };
+
   const goBack = () => {
-    if (qIndex === 0) setPhase("upload");
-    else setQIndex((i) => i - 1);
+    if (qIndex === 0) {
+      setPhase("upload");
+    } else {
+      setQIndex(qIndex - 1);
+      setCustomText(prefillFor(qIndex - 1));
+    }
   };
 
   return (
@@ -204,6 +226,39 @@ export default function NewContractPage() {
               </button>
             );
           })}
+
+          {/* 직접 입력 — 보기에 없는 답변을 회색 placeholder로 안내 */}
+          {(() => {
+            const answer = answers[q.key];
+            const customSelected = !!answer && !q.options.includes(answer);
+            return (
+              <div
+                className={`flex min-h-[52px] items-center rounded-lg pl-4 pr-2 transition ${
+                  customSelected
+                    ? "border-2 border-amber700 bg-amber200"
+                    : "border-2 border-dashed border-gray300 bg-white focus-within:border-ink"
+                }`}
+              >
+                <input
+                  value={customText}
+                  onChange={(e) => setCustomText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitCustom();
+                  }}
+                  placeholder="직접 입력…"
+                  className="min-w-0 flex-1 bg-transparent text-sm font-bold text-ink outline-none placeholder:font-medium placeholder:text-gray400"
+                />
+                <button
+                  type="button"
+                  onClick={submitCustom}
+                  disabled={!customText.trim()}
+                  className="ml-2 flex-none rounded-md bg-ink px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-30"
+                >
+                  {isLast ? "완료" : "다음"}
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         <ProgressDots total={UNDERSTOOD_QUESTIONS.length} current={qIndex + 1} />

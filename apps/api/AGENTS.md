@@ -1,10 +1,10 @@
 # Backend guide
 
-이 파일은 저장소의 `apps/api/` 디렉터리와 그 하위에 적용되는 백엔드 전용 Codex 작업
-지침이다. 저장소 최상위 `AGENTS.md`의 공통 규칙도 함께 따르며, 백엔드 작업에서 두
-파일이 충돌하면 이 파일의 더 구체적인 규칙을 적용한다. 사용자의 현재 요청과 확정된
-프로젝트 문서가 이 파일보다 우선한다. 이 문서에 표시된 경로는 별도 설명이 없으면
-저장소 루트 기준이다.
+이 파일은 `apps/api/AGENTS.md`에 두며 저장소의 `apps/api/` 디렉터리와 그 하위에
+적용하는 백엔드 전용 Codex 작업 지침이다. 저장소 최상위 `AGENTS.md`의 공통 규칙도 함께
+따르며, 백엔드 작업에서 두 파일이 충돌하면 이 파일의 더 구체적인 규칙을 적용한다.
+사용자의 현재 요청과 확정된 프로젝트 문서가 이 파일보다 우선한다. 이 문서에 표시된
+경로는 별도 설명이 없으면 저장소 루트 기준이다.
 
 ## Product
 
@@ -14,7 +14,8 @@
 
 P0 데모 경로는 다음과 같다.
 
-`계약서 업로드 → 이해조건 5문항 → 조건 추출 → 불일치·누락 검토 → 조정 요청 링크 → 대행사 1회 응답 → 변경·확인 합의서 → 모두싸인 서명 → 산출물 증빙 확인 → 만료·재계약 확인`
+`계약서 업로드 → 이해조건 5문항 → 조건 추출 → 불일치·누락 검토 → 조정 요청 링크 →`
+`대행사 1회 응답 → 변경·확인 합의서 → 모두싸인 서명 → 산출물 증빙 확인 → 만료·재계약 확인`
 
 이 서비스는 법률 자문, 사기 판정, 위법성 판정, 승소 가능성 예측을 제공하지 않는다.
 사용자와 계약 상대방이 같은 조건을 확인하고 합의 과정을 기록하도록 돕는 것이 목적이다.
@@ -25,7 +26,9 @@ P0 데모 경로는 다음과 같다.
 
 - 제품 범위와 사용자 흐름: `docs/PRD.md`, `docs/USER_FLOW.md`
 - 백엔드 런타임·의존성: `apps/api/pyproject.toml`, `backend-dev-environment.md`
-- 공개 API와 응답 스키마: `openapi.yaml` 또는 `docs/API_CONTRACT.md`
+- 공개 API의 path·field·enum·응답 스키마: `openapi.yaml`
+- API 설명, B·C 담당과 개발 순서: `api-명세서.md`
+- 영속성·보안·멱등성·상태 불변식: `api-data-contract.md`
 - 데이터 모델과 상태: `docs/DATA_MODEL.md`
 - AI 입력·출력·프롬프트·평가: `docs/AI_SPEC.md`
 - 확정된 기술·제품 결정: `docs/DECISIONS.md`
@@ -39,14 +42,16 @@ P0 데모 경로는 다음과 같다.
 확인한다.
 
 API 응답, 영속 상태, AI 스키마를 변경할 때는 관련 명세를 구현과 같은 변경에 포함한다.
-문서와 코드가 충돌하면 조용히 한쪽에 맞추지 말고 충돌을 알린 뒤 확정된 기준으로 둘 다
+공개 HTTP 계약은 `openapi.yaml`, 영속·보안 규칙은 `api-data-contract.md`를 우선한다.
+`api-명세서.md`는 두 계약을 사람이 읽을 수 있게 설명한다. 문서와 코드가 충돌하면
+조용히 한쪽에 맞추지 말고 충돌을 알린 뒤 확정된 기준으로 관련 문서와 구현을 모두
 수정한다.
 
 ## Backend scope and boundaries
 
 - `apps/api`: FastAPI 백엔드. 검증, 유스케이스, 상태 전이, 권한 확인, 외부 연동을 담당한다.
-- `packages/contracts`: 공유 OpenAPI/JSON 스키마와 생성 타입만 둔다. 런타임 비즈니스
-  로직이나 비밀정보를 두지 않는다.
+- `packages/contracts`: 루트 `openapi.yaml`에서 생성한 공유 타입과 JSON Schema만 둔다.
+  별도의 OpenAPI 원본, 런타임 비즈니스 로직이나 비밀정보를 두지 않는다.
 - `supabase/migrations`: PostgreSQL 마이그레이션을 둔다. 이미 병합되었거나 적용된
   마이그레이션은 수정하지 않고 새 마이그레이션을 추가한다.
 - `apps/api/fixtures`: 가상 데모 데이터와 고정 AI 평가 계약만 둔다. 실제 개인정보를
@@ -87,7 +92,7 @@ B(문서·AI)와 C(계약·모두싸인)는 별도 백엔드를 만들지 않고
 | DB·파일 스토리지 | Supabase PostgreSQL · Storage | 공통, Adapter는 C |
 | 문서·AI | Upstage Document Parse · Information Extract · Solar | B |
 | 전자서명 | 모두싸인 API · Webhook | C |
-| API 배포 | 관리형 Python 배포 환경 | D |
+| API 배포 | 관리형 Python 배포 환경 | 공통 |
 
 ### Version source of truth
 
@@ -164,17 +169,18 @@ uvicorn app.main:app --reload
 
 | 경로 | 담당 | 책임 |
 | --- | --- | --- |
-| `apps/api/app/adapters/upstage.py` | B | Document Parse·Extract·Solar mock/live |
+| `apps/api/app/adapters/upstage.py` | B | Upstage Parse·Extract·Solar |
 | `apps/api/app/services/analysis.py` | B | 추출·Evaluator Loop |
+| `apps/api/app/services/counterproposal.py` | B | 역제안 차이 비교 |
 | `apps/api/app/schemas/analysis.py` | B | 추출 필드 스키마 |
 | `apps/api/fixtures/evaluation/` | B | 고정 평가 데이터 10건 |
 | `apps/api/app/adapters/modusign.py` | C | 서명 요청·상태·웹훅 |
-| `apps/api/app/services/state_machine.py` | C | 계약·조정·이행 상태 전환 |
+| `apps/api/app/services/state_machine.py` | C | 계약·조정·서명·이행 상태 전환 |
 | `apps/api/app/api/v1/endpoints/webhooks.py` | C | 모두싸인 웹훅 수신 |
 | `apps/api/app/adapters/supabase.py` | C | DB·Storage Adapter |
 | `apps/api/app/core/config.py` | 공통 | 설정 스키마 |
 | `apps/api/app/schemas/common.py` | 공통 | 공통 응답·오류 스키마 |
-| `packages/contracts/` | 공통 | API·JSON 계약; 명세를 먼저 변경 |
+| `packages/contracts/` | 공통 | `openapi.yaml`에서 생성한 API·JSON 타입 |
 
 - 담당 경계는 코드 소유권을 나누기 위한 것이며 다른 담당자의 파일을 절대 수정할 수
   없다는 뜻은 아니다. 다른 담당 영역을 바꿀 때는 이유와 영향을 먼저 공유한다.
@@ -182,6 +188,15 @@ uvicorn app.main:app --reload
   `packages/contracts/`처럼 공통 파일을 바꾸기 전에는 B·C가 변경 내용을 맞춘다.
 - 한 기능이 여러 담당 파일을 건드리면 API·스키마 변경을 먼저 합의하고 작은 PR로
   통합한다.
+- API별 B·C 담당, 각 담당의 개발 순서와 병렬 체크포인트는 `api-명세서.md` 1절과
+  10~13절을 따른다. B는 문서·이해조건·분석·검토 5개 API, C는 나머지 22개 API를
+  담당한다.
+- B의 문서 업로드는 C가 제공하는 소유자 인증, `StoragePort`와 Document repository를
+  사용한다. B가 계약 상태 enum을 DB에 직접 대입하지 않고 C의 상태 전이 함수를 호출한다.
+- C의 조정 초안은 B가 만든 완료된 `ReviewItem`과 실제 3종 문구를 사용한다. 대행사
+  응답은 먼저 영속화한 뒤 B의 `CounterproposalComparator`를 호출하여 비교 실패로
+  원본 응답을 잃지 않게 한다.
+- C는 B의 AI 추출값을 검증 없이 계약 canonical 값으로 덮어쓰지 않는다.
 
 ### Adapter modes and environment variables
 
@@ -193,6 +208,7 @@ Upstage와 모두싸인 Adapter는 생성자에서 `mode: "mock" | "live"`를 �
 ```dotenv
 UPSTAGE_MODE=mock
 MODUSIGN_MODE=mock
+MODUSIGN_WEBHOOK_SECRET=
 ```
 
 - 새 환경변수를 사용하면 코드와 같은 PR에서 `.env.example`과 설정 스키마도 갱신한다.
@@ -271,6 +287,7 @@ P0 정상 흐름이나 오류 처리가 깨져 있으면 P1 기능을 시작하�
 - 업체 신뢰점수, 사기·불법·승소 가능성 판정
 - 반복 자동 협상 Agent
 - 범용 가변 길이 합의서 편집기
+- `정부지원 대상` 저장·분석 필드 또는 별도 API
 - 사용자의 승인 없는 자동 발송·서명·이행 승인·재계약
 
 ## Domain invariants
@@ -278,6 +295,12 @@ P0 정상 흐름이나 오류 처리가 깨져 있으면 P1 기능을 시작하�
 ### Evidence and wording
 
 - 모든 `ExtractedTerm`에는 `source_page`, `source_text`, `confidence`를 보존한다.
+- `ExtractedTerm.verification_status=VERIFIED`이면 `value`, `source_page`,
+  `source_text`가 모두 있어야 한다. `NOT_FOUND`이면 세 필드는 모두 `null`이어야 하며,
+  `MISSING_EVIDENCE`와 `NEEDS_CHECK`는 확정값으로 표시하지 않는다.
+- 추출값은 `field`와 `value_type`을 함께 검증한다. 날짜 필드는 `DATE`, 금액 필드는
+  `MONEY_KRW`, 콘텐츠 수량은 `INTEGER`, 위약금 비율은 `PERCENT`, 자동갱신·중도해지
+  가능 여부는 `BOOLEAN`, 나머지 설명·책임·산출물 필드는 `TEXT`를 사용한다.
 - 모든 근거 기반 `ReviewItem`에는 원문 근거를 연결한다. 모델 기반 항목은
   `model_confidence`와 근거를, 규칙 기반 항목은 `detection_method`와 사용한 근거를
   구분해 저장하며 규칙 결과에 가짜 모델 확신도를 붙이지 않는다. 현재 데이터 모델이 이를
@@ -300,8 +323,9 @@ P0 정상 흐름이나 오류 처리가 깨져 있으면 P1 기능을 시작하�
 - 별도 결정이 없다면 원화 금액은 부동소수점이 아닌 정수 KRW로 저장하고 계산한다.
 - 별도 결정이 없다면 시각은 timezone-aware UTC로 저장하고, 한국 사용자 표시 기준은
   `Asia/Seoul`로 변환한다. 계약상 기한만 필요한 값은 `date`로 다룬다.
-- `days_remaining`은 한국 날짜 기준의 대상일과 오늘 차이로 계산한다. D-30·D-14·D-7은
-  대시보드 알림 임계값이며 계약서에 없는 해지 통보기한을 만들어내는 값이 아니다.
+- API의 `expiry_d_day`와 `termination_notice_d_day`는 한국 날짜 기준의 대상일과 오늘
+  차이로 계산한다. D-30·D-14·D-7은 대시보드 알림 임계값이며 계약서에 없는 해지
+  통보기한을 만들어내는 값이 아니다.
 - 입력값에서 계산한 총액과 AI 추출 총액이 다르면 덮어쓰지 말고 확인 신호를 만든다.
 - 로컬 상태 변경과 해당 `AuditEvent` 기록은 하나의 DB 트랜잭션으로 원자 처리한다.
 
@@ -314,10 +338,15 @@ P0 정상 흐름이나 오류 처리가 깨져 있으면 P1 기능을 시작하�
 대입해 우회하지 않는다. 허용되지 않은 전이는 `INVALID_STATUS_TRANSITION`으로 거부한다.
 
 - Contract:
-  `DRAFT → ANALYZING → REVIEW_REQUIRED → NEGOTIATING → READY_TO_SIGN → SIGNING → SIGNED → IN_PROGRESS → COMPLETED / RENEWAL_DUE`
+  `DRAFT → ANALYZING → REVIEW_REQUIRED → NEGOTIATING → READY_TO_SIGN →`
+  `SIGNING → SIGNED → IN_PROGRESS → COMPLETED / RENEWAL_DUE`
+- AnalysisTask:
+  `QUEUED → PROCESSING → COMPLETED / FAILED`
 - AdjustmentRequest:
   `DRAFT → SENT → OPENED → RESPONDED → CONFIRMED / EXPIRED`
-- Modusign:
+- Signature:
+  `REQUEST_READY → REQUESTING → SIGNING → COMPLETED / ABORTED / FAILED`
+- Modusign 원본 상태:
   `ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED`
 - Obligation:
   `PENDING → SUBMITTED → APPROVED / DISPUTED`
@@ -339,33 +368,47 @@ AI 또는 백그라운드 작업이 다음 행동을 자동 실행하면 안 된
 - 재계약·조건 변경·종료 선택
 
 각 행동은 미리보기와 명시적인 사용자 요청을 받은 API 호출에서만 실행한다.
+P0 공개 API는 재계약·조건 변경·종료의 선택 저장을 제공하지 않고 D-day와 임박 상태만
+조회한다. 관련 endpoint를 임의로 추가하지 않는다.
 
 ## API contract
 
-Base path는 `/api/v1`이다. 최소 공개 계약은 다음과 같다.
+Base path는 `/api/v1`이다. 아래 목록은 담당 경계를 빠르게 확인하기 위한 요약이며
+path·method·schema의 최종 기준은 `openapi.yaml`, 상세 동작과 개발 순서는
+`api-명세서.md`다. 한 문서만 따로 변경하지 않는다.
 
 ```text
-POST  /api/v1/contracts
-GET   /api/v1/contracts/{contractId}
-POST  /api/v1/contracts/{contractId}/documents
-POST  /api/v1/contracts/{contractId}/analysis
-GET   /api/v1/contracts/{contractId}/analysis
+C  GET   /api/v1/health
+C  GET   /api/v1/contracts
+C  POST  /api/v1/contracts
+C  GET   /api/v1/contracts/{contract_id}
+C  GET   /api/v1/contracts/{contract_id}/timeline
 
-PATCH /api/v1/contracts/{contractId}/review-items/{itemId}
-POST  /api/v1/contracts/{contractId}/adjustment-requests
-GET   /api/v1/public/adjustment-requests/{token}
-POST  /api/v1/public/adjustment-requests/{token}/responses
-POST  /api/v1/contracts/{contractId}/adjustment-confirmation
+B  POST  /api/v1/contracts/{contract_id}/documents
+B  PUT   /api/v1/contracts/{contract_id}/understood-terms
+B  POST  /api/v1/contracts/{contract_id}/analysis
+B  GET   /api/v1/contracts/{contract_id}/analysis
+B  PATCH /api/v1/contracts/{contract_id}/review-items/{item_id}
 
-POST  /api/v1/contracts/{contractId}/agreement
-POST  /api/v1/contracts/{contractId}/signature-requests
-GET   /api/v1/contracts/{contractId}/signature
-POST  /api/v1/webhooks/modusign
+C  POST  /api/v1/contracts/{contract_id}/adjustment-requests
+C  GET   /api/v1/contracts/{contract_id}/adjustment-requests/{adjustment_request_id}
+C  POST  /api/v1/contracts/{contract_id}/adjustment-requests/{adjustment_request_id}/send
+C  GET   /api/v1/public/adjustment-requests/{token}
+C  POST  /api/v1/public/adjustment-requests/{token}/responses
+C  POST  /api/v1/contracts/{contract_id}/adjustment-confirmation
 
-GET   /api/v1/contracts/{contractId}/obligations
-POST  /api/v1/public/obligations/{token}/evidence
-PATCH /api/v1/contracts/{contractId}/obligations/{obligationId}
-GET   /api/v1/dashboard
+C  POST  /api/v1/contracts/{contract_id}/agreement
+C  GET   /api/v1/contracts/{contract_id}/agreement
+C  POST  /api/v1/contracts/{contract_id}/signature-requests
+C  GET   /api/v1/contracts/{contract_id}/signature
+C  POST  /api/v1/webhooks/modusign
+
+C  GET   /api/v1/contracts/{contract_id}/obligations
+C  POST  /api/v1/contracts/{contract_id}/obligations
+C  POST  /api/v1/contracts/{contract_id}/obligations/{obligation_id}/evidence-link
+C  POST  /api/v1/public/obligations/{token}/evidence
+C  PATCH /api/v1/contracts/{contract_id}/obligations/{obligation_id}
+C  GET   /api/v1/dashboard
 ```
 
 공통 응답 envelope는 다음 형태를 유지한다.
@@ -382,17 +425,51 @@ GET   /api/v1/dashboard
 - 오류 시 `data`는 `null`이고 `error`에는 안정적인 코드와 사용자에게 안전한 메시지를
   넣는다. 내부 예외, SQL, 원문 계약, 외부 응답 전문을 노출하지 않는다.
 - HTTP 상태 코드를 의미에 맞게 사용하며 모든 결과를 `200`으로 감싸지 않는다.
-- 최소 오류 코드는 `DOCUMENT_PARSE_FAILED`, `ANALYSIS_SCHEMA_INVALID`,
-  `ADJUSTMENT_LINK_EXPIRED`, `INVALID_STATUS_TRANSITION`,
-  `MODUSIGN_REQUEST_FAILED`, `WEBHOOK_DUPLICATED`, `UNAUTHORIZED_ACCESS`다.
+- `ApiError.code` 허용값은 `DOCUMENT_PARSE_FAILED`, `ANALYSIS_SCHEMA_INVALID`,
+  `ANALYSIS_START_FAILED`, `ADJUSTMENT_LINK_EXPIRED`, `OBLIGATION_LINK_EXPIRED`,
+  `INVALID_STATUS_TRANSITION`, `MODUSIGN_REQUEST_FAILED`, `WEBHOOK_DUPLICATED`,
+  `WEBHOOK_AUTH_FAILED`, `UNAUTHORIZED_ACCESS`, `ADJUSTMENT_TOKEN_SCOPE_INVALID`,
+  `OBLIGATION_TOKEN_SCOPE_INVALID`, `IDEMPOTENCY_CONFLICT`, `NOT_FOUND`,
+  `VALIDATION_ERROR`로 제한한다. `WEBHOOK_DUPLICATED`는 외부 반환이 아닌 내부 관측과
+  테스트 분류로만 사용한다. 추가가 필요하면 명세와 테스트를 먼저 변경한다.
 - 새 필드나 enum을 추가할 때 Pydantic 스키마, OpenAPI, 공유 계약 타입, 테스트를
   함께 갱신한다.
 - 외부 JSON 필드 명명 규칙은 OpenAPI에서 하나로 확정하고 Pydantic alias로 관리한다.
   DB의 `snake_case`와 API의 field case를 우연히 섞지 않는다.
 - 목록 API에는 순서가 재현되도록 명시적인 정렬을 적용한다.
 - 클라이언트가 보낸 `owner_id`, 계약 상태, 계산 결과를 신뢰하지 않는다.
+- 분석 조회는 가장 최근에 생성된 `AnalysisTask` 한 건을 반환하며 같은 계약에 실행 중인
+  작업이 있으면 새 작업을 만들지 않는다.
+- 조정 초안 생성은 링크나 토큰을 만들지 않는다. 사용자가 실제 요청 문구를 확인한 뒤
+  `/send`를 명시적으로 호출할 때만 공개 링크를 만든다.
 - 모두싸인 웹훅처럼 vendor가 응답 형식을 정한 endpoint에는 공통 envelope를 강제하지
   않고 공식 명세의 acknowledgment 형식을 따른다.
+
+다음 7개 작업에는 UUID 형식의 `Idempotency-Key`가 필수다.
+
+- 분석 시작
+- 조정 요청 초안 생성
+- 조정 링크 활성화
+- 합의서 생성
+- 모두싸인 서명 요청
+- 대표 산출물 생성
+- 산출물 증빙 링크 생성
+
+멱등 키는 owner·operation·resource 범위로 저장한다. 같은 키와 같은 요청은 최초 상태
+코드와 응답을 재생하고, 같은 키와 다른 요청은 `409 IDEMPOTENCY_CONFLICT`로 거부한다.
+외부 부작용이 있는 호출은 외부 ID와 DB 유일성 제약도 함께 사용한다.
+
+### Adjustment integrity
+
+- 조정 초안은 서로 다른 `review_item_id` 1~4개로 만들고 응답에 `user_choice`와 외부에
+  보낼 실제 `request_text`를 포함한다. 초안에는 토큰이나 `public_url`을 넣지 않는다.
+- `/send`는 `confirmed=true`인 명시적 사용자 승인에서만 링크를 만들 수 있다.
+- 공개 화면에서는 내부 UUID 대신 해당 공개 요청에서만 유효한 불투명 `item_id`를 쓴다.
+- 대행사는 공개 요청의 모든 항목을 빠짐없이 정확히 한 번씩 제출한다. `REJECT`에는
+  `reason`, `COUNTER`에는 `counter_text`와 `reason`이 필수다.
+- 최종 확정은 각 항목에 `ACCEPT_REQUEST`, `ACCEPT_COUNTERPROPOSAL`,
+  `KEEP_ORIGINAL` 중 하나만 허용한다. 클라이언트가 임의의 최종 문구를 보내지 않으며
+  서버가 저장된 요청·응답에서 최종 문구를 결정한다.
 
 인증 공급자는 기획안에서 확정되지 않았다. 임의로 특정 공급자를 도입하지 않는다.
 인증이 연결되면 `owner_id`는 검증된 서버 측 인증 컨텍스트에서 얻는다. 연결 전 데모
@@ -405,15 +482,12 @@ README와 `docs/DECISIONS.md`에 한계를 기록한다.
 함께 결정하고 `docs/DECISIONS.md`에 기록한다.
 
 - 인증 공급자, 사용자 모델, 데모 인증의 종료 조건
-- 모두싸인 서명자 이름·연락처의 입력 시점, 보관 필드와 최소 보존 범위
-- 조정 요청용 토큰과 산출물 제출용 토큰의 별도 scope·만료·폐기 모델
-- 첫 번째 대표 산출물의 선택 순서, due date 산식, 산출물이 없을 때의 처리
 - `지급 조건 충족 금액`의 배분 규칙. 규칙 없이 계약 총액을 첫 산출물 금액으로 간주하지
   않는다.
 - PDF 크기·페이지 수·보존·삭제 제한과 signed URL 정책
 - 합의서 생성 형식, 템플릿 버전, 미서명·서명 문서 보관 정책
+- 멱등 키, 요청 hash와 최초 응답의 보관·정리 기간
 - 실패 이후 재시도·복구 상태와 `SIGNED → IN_PROGRESS → COMPLETED` 전이 조건
-- 데모 설명의 `정부지원 대상`을 고정 5문항 밖의 선택 필드로 둘지 여부
 
 ## AI pipeline
 
@@ -426,6 +500,11 @@ README와 `docs/DECISIONS.md`에 한계를 기록한다.
 
 Evaluator Loop의 초기 추출을 1회차로 센다. 필요한 필드만 한 번 재추출할 수 있으며 모델
 추출 시도는 총 2회를 넘기지 않는다.
+
+분석 시작은 같은 계약에 속하고 `type=CONTRACT`인 `document_id`만 받는다.
+`AnalysisTask`가 `QUEUED` 또는 `PROCESSING`이면 `result`와 `error_code`는 `null`,
+`COMPLETED`이면 `result`만 존재하고, `FAILED`이면 `result=null`과
+`DOCUMENT_PARSE_FAILED` 또는 `ANALYSIS_SCHEMA_INVALID` 오류를 보존한다.
 
 1. 1차 추출 결과와 계약 원문 근거를 확인한다.
 2. 필수 필드 누락, 모순, 근거 부족을 찾는다.
@@ -467,39 +546,73 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
 
 - 템플릿 조회, 서명자 2명 지정, 최대 4개 조정 슬롯 매핑, 서명 요청, 상태 조회,
   웹훅 수신을 Adapter로 구현한다.
-- API와 웹훅 인증 방식, 실제 상태값은 구현 시 모두싸인 공식 문서를 다시 확인한다.
+- 서명 요청에는 현재 계약에서 확정된 `agreement_id`, `agreement_version`과
+  `confirmed=true`가 필요하다. 서버가 계약·합의서·버전의 일치를 검증한다.
+- 서명자는 `OWNER` 한 명과 `AGENCY` 한 명으로 정확히 두 명이다. 이름은 2~30자이며
+  `EMAIL`은 이메일 형식, `KAKAO`는 하이픈 없는 국내 휴대전화 번호 형식이어야 한다.
+  역할과 연락처 중복을 거부한다.
+- 서명자 연락처 원문은 모두싸인 Adapter 전달에만 사용하고 DB, API 응답, 로그,
+  감사 이벤트에 저장하지 않는다. 추적이 필요하면 비가역 fingerprint나 마스킹값만
+  최소한으로 저장한다.
+- API와 실제 상태값은 구현 시 모두싸인 공식 문서를 다시 확인한다. 웹훅 등록에는
+  `X-Modusign-Webhook-Secret` custom header를 쓰고 서버의
+  `MODUSIGN_WEBHOOK_SECRET` 환경변수와 같은 secret 값을 설정한다.
 - 합의서의 원계약 대비 법적 우선순위를 단정하는 문구는 승인된 템플릿이나 법률 검토 없이
   생성하지 않는다.
 - 합의서 버전과 서명자 집합을 기준으로 멱등 키 또는 유일성 제약을 두어 더블클릭과 동시
   요청이 여러 서명 문서를 만들지 않게 한다.
-- 웹훅 서명·인증 검증이 성공하기 전에는 어떤 상태도 변경하지 않는다.
-- 문서 ID와 이벤트 ID의 유일성으로 중복 웹훅을 멱등 처리한다.
-- 중복 이벤트는 상태를 다시 적용하지 않되 외부 서비스가 불필요하게 재시도하지 않도록
-  공식 명세에 맞는 2xx로 acknowledgment한다. `WEBHOOK_DUPLICATED`는 내부 관측과
-  테스트용 분류로 사용한다.
+- 웹훅 secret 검증이 성공하기 전에는 어떤 이벤트도 저장하거나 상태를 변경하지 않는다.
+  `requester.email`은 전달 메타데이터일 뿐 인증에 사용하거나 로그에 남기지 않는다.
+- P0에서는 `document_started`, `document_signed`, `document_all_signed`,
+  `document_rejected`, `document_request_canceled`, `document_signing_canceled`만
+  구독한다.
+- 공식 payload에 별도 이벤트 ID나 문서 상태가 있다고 가정하지 않는다.
+  `event.type + document.id + canonical payload hash`를 중복 fingerprint로 사용한다.
+- 인증된 이벤트를 멱등 저장한 뒤 중복을 포함해 즉시 `204 No Content`를 반환한다.
+  모두싸인 문서 상태 조회와 내부 계약 상태 전이는 응답 이후 비동기로 수행한다.
+  `WEBHOOK_DUPLICATED`는 내부 관측과 테스트용 분류로만 사용한다.
 - 웹훅 순서 역전과 종료 상태 이후의 오래된 이벤트를 테스트한다.
-- 문서 ID, 상태, 마지막 처리 이벤트 ID, 요청·완료 시각을 저장한다.
+- 외부 문서 ID, 원본·내부 상태, 웹훅 fingerprint, 수신·처리 시각, 요청·완료 시각을
+  저장한다.
 
 ### Storage and public links
 
 - 파일은 계약 소유자 또는 해당 행동에 유효한 공개 토큰만 접근할 수 있다.
-- 공개 토큰은 CSPRNG로 최소 128-bit 엔트로피를 갖게 생성한다. 원문은 생성 응답에서 한
-  번만 반환하고 DB에는 hash, scope, resource ID, expires_at, revoked_at을 저장한다.
-- 조정 응답 토큰을 산출물 제출에 재사용하지 않는다.
+- 공개 토큰은 CSPRNG로 최소 128-bit 엔트로피와 32자 이상의 문자열 길이를 갖게
+  생성한다. 원문은 생성 응답에서 한 번만 반환하고 DB에는 hash, scope, resource ID,
+  expires_at, revoked_at을 저장한다.
+- 조정 응답은 `ADJUSTMENT_RESPONSE`, 산출물 제출은 `OBLIGATION_EVIDENCE` scope를
+  사용하며 서로 교차 사용하지 못한다.
 - 토큰을 로그, 분석 이벤트, referrer, 오류 메시지에 남기지 않는다.
 - 공개 API는 토큰 만료, 대상 리소스 일치, 현재 상태, 허용 행동을 모두 검사한다.
-- 공개 응답에는 `Cache-Control: no-store`를 적용하고 공개 화면은 토큰을 referrer로
-  전송하지 않도록 구성한다.
+- `public_url`은 조정 `/send`와 산출물 `/evidence-link` 생성 응답에서만 반환하고
+  일반 상세·목록 응답에서 다시 노출하지 않는다. 같은 멱등 요청의 최초 응답을 재생하는
+  경우만 예외다.
+- 공개 API의 성공·오류 응답과 토큰 생성 응답에는 `Cache-Control: no-store`를 적용하고
+  공개 화면은 토큰을 referrer로 전송하지 않도록 구성한다.
 - 대행사 조정 응답은 한 번만 확정한다. DB 유일성 제약과 트랜잭션/lock으로 동시 중복
   제출이 새 응답을 만들지 않게 한다.
-- 산출물 URL은 P0에서 증빙 문자열로 저장할 뿐 서버가 가져오거나 진위를 판정하지 않는다.
+- 애플리케이션뿐 아니라 Uvicorn과 프록시 access log에서도 URL path의 토큰을 마스킹한다.
+
+### Obligations and evidence
+
+- P0에서는 계약당 대표 산출물 한 건만 생성한다.
+- 계약서에 due date 근거가 있으면 그 날짜를 사용하고, 없으면 사용자가 확인해 입력한다.
+  서버가 근거 없는 날짜를 자동 생성하지 않는다.
+- 대표 산출물 생성과 증빙 링크 생성을 분리하고, 증빙 링크에는
+  `OBLIGATION_EVIDENCE` scope만 부여한다.
+- 증빙 URL은 최대 2,048자의 `http://` 또는 `https://` URL만 허용한다. 서버가 URL을
+  가져오거나 실제 존재 여부와 진위를 판정하지 않는다.
+- 산출물 증빙 제출은 한 번만 확정하고 DB 유일성 제약과 트랜잭션으로 동시 제출을 막는다.
+- `APPROVED`일 때만 `payment_condition_met=true`다. 이는 실제 지급 승인이나 법적 이행
+  판정이 아니다.
 
 ## Data and migrations
 
 - Supabase PostgreSQL과 Storage 접근은 서버에서만 수행하고 service-role 키를
   클라이언트 코드나 공개 응답에 노출하지 않는다.
 - DB 제약조건으로 가능한 규칙은 애플리케이션 검증에만 의존하지 않는다.
-- 외부 문서 ID, 웹훅 이벤트 ID와 필요한 멱등 키에는 유일성 제약을 둔다.
+- 외부 문서 ID, 웹훅 fingerprint와 필요한 멱등 키에는 유일성 제약을 둔다.
 - 상태·결정 값은 자유 문자열 대신 명시적 enum 또는 검증된 값으로 저장한다.
 - 적용된 마이그레이션은 수정하지 않는다. 스키마 변경, backfill, 인덱스 변경은 새
   마이그레이션으로 추가한다.
@@ -549,13 +662,20 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
 
 - 금액·기간·D-30·D-14·D-7 계산과 경계 날짜
 - 모든 허용·거부 상태 전이
-- 소유자 권한, 유효·만료·잘못된 공개 토큰
-- 조정 응답의 1회 제출과 동시 중복 요청
+- `AnalysisTask` 상태별 result·error 불변식, 최대 2회 시도와 최신 작업 조회
+- 소유자 권한, 유효·만료·잘못된 공개 토큰, scope 교차 사용 거부
+- 공개 API와 토큰 생성 응답의 `no-store`, 토큰·`public_url` 재노출 방지
+- 7개 작업의 같은 멱등 키·같은 요청 재생과 다른 요청의 `IDEMPOTENCY_CONFLICT`
+- 조정 초안의 실제 문구 미리보기·링크 부재, 응답의 1회 제출과 동시 중복 요청
+- 최종 조정 선택 검증과 클라이언트 임의 최종 문구 거부
 - Pydantic AI 스키마와 근거 누락 시 `확인 필요` 처리
 - 기간·총액·해지·환불 불일치와 빈칸 확인 신호
 - 외부 Adapter의 timeout·실패 매핑
-- 모두싸인 웹훅 인증, 중복, 순서 역전, 종료 상태 보호
+- 모두싸인 서명자 역할·연락처 형식·중복과 합의서 버전 검증
+- 모두싸인 웹훅 secret, fingerprint 중복, 즉시 204·비동기 처리, 순서 역전,
+  종료 상태 보호
 - 산출물 `PENDING → SUBMITTED → APPROVED / DISPUTED`
+- 증빙 URL의 HTTP(S) scheme·2,048자 제한과 1회 제출
 - API envelope, 오류 코드, request ID
 - 대표 계약의 P0 수직 흐름
 

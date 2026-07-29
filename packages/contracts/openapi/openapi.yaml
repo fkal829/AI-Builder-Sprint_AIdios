@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 안심홍보계약 API
-  version: 0.1.0
+  version: 0.2.0
   description: P0 프런트엔드와 FastAPI가 공유하는 HTTP 계약
 servers:
   - url: /api/v1
@@ -10,6 +10,7 @@ security:
 paths:
   /health:
     get:
+      summary: API 상태 확인
       operationId: healthCheck
       tags: [health]
       security: []
@@ -22,8 +23,10 @@ paths:
                 $ref: "#/components/schemas/HealthResponse"
   /contracts:
     get:
+      summary: 계약 목록 조회
       operationId: listContracts
       tags: [contracts]
+      description: 만료일이 가까운 계약부터 정렬하며, 만료일이 없으면 마지막에 둔다. 같은 만료일은 id 오름차순으로 정렬한다.
       parameters:
         - name: renewal_due_within_days
           in: query
@@ -41,6 +44,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
+      summary: 계약 생성
       operationId: createContract
       tags: [contracts]
       requestBody:
@@ -64,6 +68,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     get:
+      summary: 계약 상세 조회
       operationId: getContract
       tags: [contracts]
       responses:
@@ -81,8 +86,10 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     get:
+      summary: 계약 감사 타임라인 조회
       operationId: getContractTimeline
       tags: [contracts]
+      description: created_at 오름차순, id 오름차순으로 정렬한 append-only 감사 타임라인을 반환한다.
       responses:
         "200":
           description: 민감정보를 제외한 계약 감사 타임라인
@@ -98,6 +105,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
+      summary: 계약 문서 업로드
       operationId: uploadContractDocument
       tags: [documents]
       requestBody:
@@ -128,6 +136,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     put:
+      summary: 사용자가 이해한 계약 조건 저장
       operationId: saveUnderstoodTerms
       tags: [contracts]
       requestBody:
@@ -150,30 +159,42 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
+      summary: 계약 분석 시작
       operationId: startAnalysis
       tags: [analysis]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisStartRequest"
       responses:
         "202":
-          description: 분석 시작
+          description: 분석 작업 접수
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ContractResponse"
+                $ref: "#/components/schemas/AnalysisTaskResponse"
         "409":
           $ref: "#/components/responses/InvalidTransition"
+        "503":
+          $ref: "#/components/responses/ExternalServiceUnavailable"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
         "422": {$ref: "#/components/responses/ValidationError"}
     get:
+      summary: 계약 분석 상태와 결과 조회
       operationId: getAnalysis
       tags: [analysis]
       responses:
         "200":
-          description: 근거가 연결된 분석 결과
+          description: 처리 중·완료·실패를 포함한 분석 작업 상태
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AnalysisResponse"
+                $ref: "#/components/schemas/AnalysisTaskResponse"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
   /contracts/{contract_id}/review-items/{item_id}:
@@ -184,6 +205,7 @@ paths:
         required: true
         schema: {type: string, format: uuid}
     patch:
+      summary: 검토 항목 선택 수정
       operationId: updateReviewItem
       tags: [review]
       requestBody:
@@ -206,8 +228,11 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
+      summary: 조정 요청 초안 생성
       operationId: createAdjustmentRequest
       tags: [adjustments]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -225,11 +250,13 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/InvalidTransition"}
   /contracts/{contract_id}/adjustment-requests/{adjustment_request_id}:
     parameters:
       - $ref: "#/components/parameters/ContractId"
       - $ref: "#/components/parameters/AdjustmentRequestId"
     get:
+      summary: 소유자용 조정 요청 상세 조회
       operationId: getOwnerAdjustmentRequest
       tags: [adjustments]
       responses:
@@ -247,6 +274,7 @@ paths:
       - $ref: "#/components/parameters/ContractId"
       - $ref: "#/components/parameters/AdjustmentRequestId"
     post:
+      summary: 조정 요청 공개 링크 활성화
       operationId: sendAdjustmentRequest
       tags: [adjustments]
       description: 사용자 미리보기 확인 후 공개 링크를 활성화하고 DRAFT에서 SENT로 전환한다.
@@ -261,6 +289,9 @@ paths:
       responses:
         "200":
           description: 공개 링크 활성화 완료
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
@@ -274,6 +305,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AdjustmentToken"
     get:
+      summary: 공개 조정 요청 조회
       operationId: getPublicAdjustmentRequest
       tags: [public]
       security: []
@@ -288,12 +320,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublicAdjustmentResponse"
         "410":
-          $ref: "#/components/responses/ExpiredLink"
-        "404": {$ref: "#/components/responses/NotFound"}
+          $ref: "#/components/responses/PublicExpiredLink"
+        "404": {$ref: "#/components/responses/PublicNotFound"}
   /public/adjustment-requests/{token}/responses:
     parameters:
       - $ref: "#/components/parameters/AdjustmentToken"
     post:
+      summary: 대행사 조정 응답 제출
       operationId: submitAdjustmentResponses
       tags: [public]
       security: []
@@ -314,14 +347,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublicSubmissionResponse"
         "409":
-          $ref: "#/components/responses/InvalidTransition"
-        "404": {$ref: "#/components/responses/NotFound"}
-        "410": {$ref: "#/components/responses/ExpiredLink"}
-        "422": {$ref: "#/components/responses/ValidationError"}
+          $ref: "#/components/responses/PublicInvalidTransition"
+        "404": {$ref: "#/components/responses/PublicNotFound"}
+        "410": {$ref: "#/components/responses/PublicExpiredLink"}
+        "422": {$ref: "#/components/responses/PublicValidationError"}
   /contracts/{contract_id}/adjustment-confirmation:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
+      summary: 최종 조정 결과 확정
       operationId: confirmAdjustment
       tags: [adjustments]
       requestBody:
@@ -345,8 +379,11 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
+      summary: 변경·확인 합의서 생성
       operationId: createAgreement
       tags: [agreements]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "201":
           description: 최대 네 조항의 변경·확인 합의서 생성
@@ -357,10 +394,24 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/InvalidTransition"}
+    get:
+      summary: 변경·확인 합의서 조회
+      operationId: getAgreement
+      tags: [agreements]
+      responses:
+        "200":
+          description: 현재 확정된 변경·확인 합의서
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgreementResponse"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /contracts/{contract_id}/signature-requests:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
+      summary: 모두싸인 서명 요청 생성
       operationId: createSignatureRequest
       tags: [signatures]
       description: 사용자의 명시적 확인 후에만 호출한다.
@@ -384,10 +435,12 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
         "422": {$ref: "#/components/responses/ValidationError"}
+        "502": {$ref: "#/components/responses/ModusignRequestFailed"}
   /contracts/{contract_id}/signature:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     get:
+      summary: 전자서명 상태 조회
       operationId: getSignature
       tags: [signatures]
       responses:
@@ -403,8 +456,10 @@ paths:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     get:
+      summary: 이행 항목 목록 조회
       operationId: listObligations
       tags: [obligations]
+      description: due_date 오름차순, id 오름차순으로 정렬한다.
       responses:
         "200":
           description: 이행 항목 목록
@@ -415,34 +470,65 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
     post:
-      operationId: createObligationEvidenceLink
+      summary: 대표 산출물 이행 항목 생성
+      operationId: createObligation
       tags: [obligations]
-      description: 산출물 제출에만 사용할 수 있는 별도 scope의 만료형 공개 링크를 생성한다.
+      description: P0 대표 산출물 한 건을 생성한다. 이미 대표 산출물이 있으면 409를 반환한다.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [obligation_id, expires_in_hours]
-              properties:
-                obligation_id: {type: string, format: uuid}
-                expires_in_hours: {type: integer, minimum: 1, maximum: 168}
+              $ref: "#/components/schemas/ObligationCreate"
+      responses:
+        "201":
+          description: 대표 산출물 생성
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObligationResponse"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/InvalidTransition"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+  /contracts/{contract_id}/obligations/{obligation_id}/evidence-link:
+    parameters:
+      - $ref: "#/components/parameters/ContractId"
+      - $ref: "#/components/parameters/ObligationId"
+    post:
+      summary: 산출물 증빙 제출 링크 생성
+      operationId: createObligationEvidenceLink
+      tags: [obligations]
+      description: 산출물 제출에만 사용할 수 있는 별도 scope의 만료형 공개 링크를 생성한다.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicLinkCreate"
       responses:
         "201":
           description: 증빙 제출 링크 생성
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PublicLinkResponse"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/InvalidTransition"}
         "422": {$ref: "#/components/responses/ValidationError"}
   /public/obligations/{token}/evidence:
     parameters:
       - $ref: "#/components/parameters/ObligationToken"
     post:
+      summary: 산출물 증빙 제출
       operationId: submitObligationEvidence
       tags: [public, obligations]
       security: []
@@ -455,7 +541,11 @@ paths:
               additionalProperties: false
               required: [evidence_url]
               properties:
-                evidence_url: {type: string, format: uri}
+                evidence_url:
+                  type: string
+                  format: uri
+                  pattern: "^https?://"
+                  maxLength: 2048
       responses:
         "200":
           description: 증빙 제출 완료
@@ -466,18 +556,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PublicSubmissionResponse"
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/InvalidTransition"}
-        "410": {$ref: "#/components/responses/ExpiredLink"}
-        "422": {$ref: "#/components/responses/ValidationError"}
+        "404": {$ref: "#/components/responses/PublicNotFound"}
+        "409": {$ref: "#/components/responses/PublicInvalidTransition"}
+        "410": {$ref: "#/components/responses/PublicExpiredLink"}
+        "422": {$ref: "#/components/responses/PublicValidationError"}
   /contracts/{contract_id}/obligations/{obligation_id}:
     parameters:
       - $ref: "#/components/parameters/ContractId"
-      - name: obligation_id
-        in: path
-        required: true
-        schema: {type: string, format: uuid}
+      - $ref: "#/components/parameters/ObligationId"
     patch:
+      summary: 산출물 증빙 검토
       operationId: reviewObligation
       tags: [obligations]
       requestBody:
@@ -505,6 +593,7 @@ paths:
         "422": {$ref: "#/components/responses/ValidationError"}
   /dashboard:
     get:
+      summary: 대시보드 조회
       operationId: getDashboard
       tags: [dashboard]
       responses:
@@ -517,13 +606,14 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
   /webhooks/modusign:
     post:
+      summary: 모두싸인 웹훅 수신
       operationId: receiveModusignWebhook
       tags: [webhooks]
       description: |
-        모두싸인 웹훅 등록 시 설정한 X-Modusign-Webhook-Secret을 검증한다.
-        공식 payload에 이벤트 ID가 없으므로 event.type, document.id 및 수신 payload
-        해시로 중복 안전하게 처리한다. payload에 문서 상태도 없으므로 Adapter가 문서
-        조회 API로 원본 상태를 재확인하며, 10초 이내 2xx를 반환한다.
+        모두싸인 웹훅 등록의 custom headers에 설정한 X-Modusign-Webhook-Secret을 검증한다.
+        인증 성공 후 이벤트를 멱등하게 저장하고 즉시 204를 반환한다. 문서 상태 조회와
+        계약 상태 전이는 응답 이후 비동기로 수행한다. 공식 payload에 이벤트 ID와 문서
+        상태가 없으므로 event.type, document.id, payload hash를 중복 판단에 사용한다.
       security:
         - ModusignWebhookSecret: []
       requestBody:
@@ -568,6 +658,11 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    ObligationId:
+      name: obligation_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     AdjustmentToken:
       name: token
       in: path
@@ -584,7 +679,10 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: 동일 사용자 동작의 외부 발송·서명 요청 중복 실행을 방지하는 UUID
+      description: |
+        소유자·operation·resource 범위에서 중복 실행을 방지하는 UUID다. 같은 키와 같은
+        요청은 최초 상태 코드와 응답을 재생하고, 같은 키에 다른 요청 본문을 보내면
+        IDEMPOTENCY_CONFLICT를 반환한다.
       schema: {type: string, format: uuid}
   responses:
     Unauthorized:
@@ -607,8 +705,45 @@ components:
       content:
         application/json:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
-    ExpiredLink:
+    ExternalServiceUnavailable:
+      description: 분석 작업을 시작할 수 없음
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    ModusignRequestFailed:
+      description: 모두싸인 서명 요청 실패
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    PublicNotFound:
+      description: 공개 리소스를 찾을 수 없거나 토큰 scope가 일치하지 않음
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    PublicValidationError:
+      description: 공개 요청 입력 검증 실패
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    PublicInvalidTransition:
+      description: 허용되지 않은 상태 전환 또는 중복 제출
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    PublicExpiredLink:
       description: 공개 링크 만료
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
       content:
         application/json:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -623,6 +758,7 @@ components:
           enum:
             - DOCUMENT_PARSE_FAILED
             - ANALYSIS_SCHEMA_INVALID
+            - ANALYSIS_START_FAILED
             - ADJUSTMENT_LINK_EXPIRED
             - INVALID_STATUS_TRANSITION
             - MODUSIGN_REQUEST_FAILED
@@ -635,7 +771,6 @@ components:
             - NOT_FOUND
             - VALIDATION_ERROR
         message: {type: string}
-        details: {type: [object, "null"]}
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -662,6 +797,9 @@ components:
     VerificationStatus:
       type: string
       enum: [VERIFIED, NOT_FOUND, MISSING_EVIDENCE, NEEDS_CHECK]
+    AnalysisStatus:
+      type: string
+      enum: [QUEUED, PROCESSING, COMPLETED, FAILED]
     ContractCreate:
       type: object
       additionalProperties: false
@@ -816,6 +954,62 @@ components:
       allOf:
         - if:
             properties:
+              field:
+                enum:
+                  - contract_party_owner
+                  - contract_party_agency
+                  - payment_method
+                  - refund_condition
+                  - advertising_channel
+                  - content_type
+                  - posting_frequency
+                  - reporting_frequency
+                  - performance_guarantee
+                  - content_ownership
+                  - portrait_rights
+                  - facility_damage_liability
+                  - false_advertising_liability
+          then:
+            properties:
+              value_type: {const: TEXT}
+        - if:
+            properties:
+              field: {enum: [contract_start_date, contract_end_date, termination_notice_date]}
+          then:
+            properties:
+              value_type: {const: DATE}
+        - if:
+            properties:
+              field: {enum: [monthly_amount, contract_total_amount]}
+          then:
+            properties:
+              value_type: {const: MONEY_KRW}
+        - if:
+            properties:
+              field: {const: content_quantity}
+          then:
+            properties:
+              value_type: {const: INTEGER}
+        - if:
+            properties:
+              field: {const: termination_penalty_rate}
+          then:
+            properties:
+              value_type: {const: PERCENT}
+        - if:
+            properties:
+              field: {enum: [auto_renewal, early_termination_allowed]}
+          then:
+            properties:
+              value_type: {const: BOOLEAN}
+        - if:
+            properties:
+              value_type: {const: TEXT}
+          then:
+            properties:
+              value: {type: [string, "null"]}
+        - if:
+            properties:
               value_type: {const: DATE}
           then:
             properties:
@@ -851,6 +1045,8 @@ components:
             properties:
               source_page: {type: integer, minimum: 1}
               source_text: {type: string, minLength: 1}
+              value:
+                not: {type: "null"}
         - if:
             properties:
               verification_status: {const: NOT_FOUND}
@@ -893,6 +1089,7 @@ components:
               model_confidence: {type: "null"}
     Analysis:
       type: object
+      additionalProperties: false
       required: [contract_id, extracted_terms, review_items]
       properties:
         contract_id: {type: string, format: uuid}
@@ -902,12 +1099,68 @@ components:
         review_items:
           type: array
           items: {$ref: "#/components/schemas/ReviewItem"}
-    AnalysisResponse:
+    AnalysisStartRequest:
+      type: object
+      additionalProperties: false
+      required: [document_id]
+      properties:
+        document_id:
+          type: string
+          format: uuid
+          description: 같은 계약에 속하며 type이 CONTRACT인 분석 대상 문서
+    AnalysisTask:
+      type: object
+      additionalProperties: false
+      required: [id, contract_id, document_id, status, attempt_count, error_code, result, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        contract_id: {type: string, format: uuid}
+        document_id: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/AnalysisStatus"}
+        attempt_count:
+          type: integer
+          minimum: 0
+          maximum: 2
+          description: 초기 추출을 1회차로 계산하며, 아직 시작하지 않았으면 0
+        error_code:
+          type: [string, "null"]
+          enum: [DOCUMENT_PARSE_FAILED, ANALYSIS_SCHEMA_INVALID, null]
+        result:
+          oneOf:
+            - {$ref: "#/components/schemas/Analysis"}
+            - {type: "null"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      allOf:
+        - if:
+            properties:
+              status: {enum: [QUEUED, PROCESSING]}
+          then:
+            properties:
+              error_code: {type: "null"}
+              result: {type: "null"}
+        - if:
+            properties:
+              status: {const: COMPLETED}
+          then:
+            properties:
+              error_code: {type: "null"}
+              result: {$ref: "#/components/schemas/Analysis"}
+        - if:
+            properties:
+              status: {const: FAILED}
+          then:
+            properties:
+              error_code:
+                type: string
+                enum: [DOCUMENT_PARSE_FAILED, ANALYSIS_SCHEMA_INVALID]
+              result: {type: "null"}
+    AnalysisTaskResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
         - type: object
           properties:
-            data: {$ref: "#/components/schemas/Analysis"}
+            data: {$ref: "#/components/schemas/AnalysisTask"}
     ReviewItemUpdate:
       type: object
       additionalProperties: false
@@ -920,17 +1173,30 @@ components:
         - type: object
           properties:
             data: {$ref: "#/components/schemas/ReviewItem"}
+    AdjustmentRequestItem:
+      type: object
+      additionalProperties: false
+      required: [review_item_id, user_choice, request_text]
+      properties:
+        review_item_id: {type: string, format: uuid}
+        user_choice: {type: string, enum: [ACCEPT, COMPROMISE, REQUEST]}
+        request_text:
+          type: string
+          minLength: 1
+          description: 사용자가 외부 발송 전에 확인할 실제 요청 문구
     AdjustmentRequest:
       type: object
-      required: [id, contract_id, status, expires_at]
+      additionalProperties: false
+      required: [id, contract_id, status, items, expires_at]
       properties:
         id: {type: string, format: uuid}
         contract_id: {type: string, format: uuid}
         status: {$ref: "#/components/schemas/AdjustmentRequestStatus"}
-        public_url:
-          type: [string, "null"]
-          format: uri
-          description: 생성 응답에만 포함하며 로그나 목록 응답에 남기지 않음
+        items:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items: {$ref: "#/components/schemas/AdjustmentRequestItem"}
         expires_at: {type: string, format: date-time}
         opened_at: {type: [string, "null"], format: date-time}
         responded_at: {type: [string, "null"], format: date-time}
@@ -985,6 +1251,7 @@ components:
         expires_at: {type: string, format: date-time}
         items:
           type: array
+          minItems: 1
           maxItems: 4
           items:
             type: object
@@ -1010,6 +1277,8 @@ components:
           type: array
           minItems: 1
           maxItems: 4
+          uniqueItems: true
+          description: 공개 요청의 모든 item_id를 빠짐없이 정확히 한 번씩 포함해야 하며 서버가 이를 검증한다.
           items:
             type: object
             additionalProperties: false
@@ -1085,14 +1354,21 @@ components:
           type: array
           minItems: 1
           maxItems: 4
+          uniqueItems: true
+          description: 조정 요청의 모든 항목을 빠짐없이 정확히 한 번씩 포함해야 하며 서버가 응답 이력과 대조한다.
           items:
             type: object
             additionalProperties: false
-            required: [review_item_id, outcome, final_text]
+            required: [review_item_id, resolution]
             properties:
               review_item_id: {type: string, format: uuid}
-              outcome: {type: string, enum: [AGREED, KEPT_ORIGINAL]}
-              final_text: {type: string, minLength: 1}
+              resolution:
+                type: string
+                enum: [ACCEPT_REQUEST, ACCEPT_COUNTERPROPOSAL, KEEP_ORIGINAL]
+                description: |
+                  ACCEPT_REQUEST는 대행사가 수락한 요청 문구, ACCEPT_COUNTERPROPOSAL은
+                  대행사가 제시한 역제안 문구만 선택할 수 있다. 최종 문구는 서버가
+                  저장된 응답에서 결정하며 클라이언트가 임의로 작성하지 않는다.
         confirmed: {type: boolean, const: true}
     PublicSubmission:
       type: object
@@ -1121,22 +1397,41 @@ components:
         requested_at: {type: [string, "null"], format: date-time}
         completed_at: {type: [string, "null"], format: date-time}
     SignatureMethod:
+      oneOf:
+        - $ref: "#/components/schemas/EmailSignatureMethod"
+        - $ref: "#/components/schemas/KakaoSignatureMethod"
+      discriminator:
+        propertyName: type
+        mapping:
+          EMAIL: "#/components/schemas/EmailSignatureMethod"
+          KAKAO: "#/components/schemas/KakaoSignatureMethod"
+    EmailSignatureMethod:
       type: object
       additionalProperties: false
       required: [type, value]
       properties:
-        type: {type: string, enum: [EMAIL, KAKAO]}
+        type: {type: string, const: EMAIL}
         value:
           type: string
-          minLength: 3
-          description: 응답과 로그에 다시 노출하지 않는 이메일 또는 휴대전화 번호
+          format: email
+          description: 응답과 로그에 다시 노출하지 않는 이메일 주소
+    KakaoSignatureMethod:
+      type: object
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type: {type: string, const: KAKAO}
+        value:
+          type: string
+          pattern: "^01[016789][0-9]{7,8}$"
+          description: 하이픈을 제외한 국내 휴대전화 번호이며 응답과 로그에 다시 노출하지 않는다.
     Signer:
       type: object
       additionalProperties: false
       required: [role, name, signing_method]
       properties:
         role: {type: string, enum: [OWNER, AGENCY]}
-        name: {type: string, minLength: 1, maxLength: 100}
+        name: {type: string, minLength: 2, maxLength: 30}
         signing_method: {$ref: "#/components/schemas/SignatureMethod"}
     SignatureRequestCreate:
       type: object
@@ -1149,7 +1444,23 @@ components:
           type: array
           minItems: 2
           maxItems: 2
+          description: OWNER와 AGENCY를 각각 한 명씩 포함하며 연락처가 중복되면 안 된다.
           items: {$ref: "#/components/schemas/Signer"}
+          allOf:
+            - contains:
+                type: object
+                required: [role]
+                properties:
+                  role: {const: OWNER}
+              minContains: 1
+              maxContains: 1
+            - contains:
+                type: object
+                required: [role]
+                properties:
+                  role: {const: AGENCY}
+              minContains: 1
+              maxContains: 1
         confirmed:
           type: boolean
           const: true
@@ -1200,6 +1511,7 @@ components:
           properties:
             type:
               type: string
+              description: 이 endpoint는 아래 P0 이벤트만 구독한다.
               enum:
                 - document_started
                 - document_signed
@@ -1220,10 +1532,10 @@ components:
                 email:
                   type: string
                   format: email
-                  description: 인증 확인에 사용하되 로그에 남기지 않는다.
+                  description: 모두싸인이 전달한 요청자 메타데이터이며 인증에 사용하거나 로그에 남기지 않는다.
     Obligation:
       type: object
-      required: [id, contract_id, title, due_date, assignee, evidence_type, status]
+      required: [id, contract_id, title, due_date, assignee, evidence_type, status, payment_condition_met]
       properties:
         id: {type: string, format: uuid}
         contract_id: {type: string, format: uuid}
@@ -1231,13 +1543,31 @@ components:
         due_date: {type: string, format: date}
         assignee: {type: string, enum: [AGENCY, OWNER]}
         evidence_type: {type: string, enum: [URL]}
-        evidence_url: {type: [string, "null"], format: uri}
+        evidence_url:
+          type: [string, "null"]
+          format: uri
+          pattern: "^https?://"
+          maxLength: 2048
         status: {$ref: "#/components/schemas/ObligationStatus"}
         submitted_at: {type: [string, "null"], format: date-time}
         reviewed_at: {type: [string, "null"], format: date-time}
         payment_condition_met:
           type: boolean
           description: APPROVED일 때만 true이며 실제 지급 승인이 아님
+    ObligationCreate:
+      type: object
+      additionalProperties: false
+      required: [title, due_date]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: 사용자가 선택한 첫 번째 대표 산출물
+        due_date:
+          type: string
+          format: date
+          description: 계약서에 근거가 있으면 그 날짜를 사용하고, 없으면 사용자가 확인해 입력한다.
     ObligationResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
@@ -1263,6 +1593,12 @@ components:
           description: 생성 응답에서만 반환하고 로그나 이후 조회 응답에 남기지 않는다.
         scope: {type: string, const: OBLIGATION_EVIDENCE}
         expires_at: {type: string, format: date-time}
+    PublicLinkCreate:
+      type: object
+      additionalProperties: false
+      required: [expires_in_hours]
+      properties:
+        expires_in_hours: {type: integer, minimum: 1, maximum: 168}
     PublicLinkResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
@@ -1271,7 +1607,7 @@ components:
             data: {$ref: "#/components/schemas/PublicLink"}
     Dashboard:
       type: object
-      required: [total, signing, in_progress, completed, expiring_soon, unresolved_signals, obligation_pending, obligation_submitted, obligation_approved, total_committed, payment_condition_met]
+      required: [total, signing, in_progress, completed, expiring_soon, unresolved_signals, obligation_pending, obligation_submitted, obligation_approved, total_committed]
       properties:
         total: {type: integer, minimum: 0}
         signing: {type: integer, minimum: 0}
@@ -1283,7 +1619,6 @@ components:
         obligation_submitted: {type: integer, minimum: 0}
         obligation_approved: {type: integer, minimum: 0}
         total_committed: {type: integer, format: int64, minimum: 0}
-        payment_condition_met: {type: integer, format: int64, minimum: 0}
         most_common_signal: {type: [string, "null"]}
     DashboardResponse:
       allOf:

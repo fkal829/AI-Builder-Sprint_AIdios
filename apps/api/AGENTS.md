@@ -26,7 +26,7 @@ P0 데모 경로는 다음과 같다.
 
 - 제품 범위와 사용자 흐름: `docs/PRD.md`, `docs/USER_FLOW.md`
 - 백엔드 런타임·의존성: `apps/api/pyproject.toml`, `backend-dev-environment.md`
-- 공개 API의 path·field·enum·응답 스키마: `openapi.yaml`
+- 공개 API의 path·field·enum·응답 스키마: `packages/contracts/openapi/openapi.yaml`
 - API 설명, B·C 담당과 개발 순서: `api-명세서.md`
 - 영속성·보안·멱등성·상태 불변식: `api-data-contract.md`
 - 데이터 모델과 상태: `docs/DATA_MODEL.md`
@@ -42,7 +42,7 @@ P0 데모 경로는 다음과 같다.
 확인한다.
 
 API 응답, 영속 상태, AI 스키마를 변경할 때는 관련 명세를 구현과 같은 변경에 포함한다.
-공개 HTTP 계약은 `openapi.yaml`, 영속·보안 규칙은 `api-data-contract.md`를 우선한다.
+공개 HTTP 계약은 `packages/contracts/openapi/openapi.yaml`, 영속·보안 규칙은 `api-data-contract.md`를 우선한다.
 `api-명세서.md`는 두 계약을 사람이 읽을 수 있게 설명한다. 문서와 코드가 충돌하면
 조용히 한쪽에 맞추지 말고 충돌을 알린 뒤 확정된 기준으로 관련 문서와 구현을 모두
 수정한다.
@@ -50,7 +50,7 @@ API 응답, 영속 상태, AI 스키마를 변경할 때는 관련 명세를 구
 ## Backend scope and boundaries
 
 - `apps/api`: FastAPI 백엔드. 검증, 유스케이스, 상태 전이, 권한 확인, 외부 연동을 담당한다.
-- `packages/contracts`: 루트 `openapi.yaml`에서 생성한 공유 타입과 JSON Schema만 둔다.
+- `packages/contracts`: `packages/contracts/openapi/openapi.yaml`에서 생성한 공유 타입과 JSON Schema만 둔다.
   별도의 OpenAPI 원본, 런타임 비즈니스 로직이나 비밀정보를 두지 않는다.
 - `supabase/migrations`: PostgreSQL 마이그레이션을 둔다. 이미 병합되었거나 적용된
   마이그레이션은 수정하지 않고 새 마이그레이션을 추가한다.
@@ -180,7 +180,7 @@ uvicorn app.main:app --reload
 | `apps/api/app/adapters/supabase.py` | C | DB·Storage Adapter |
 | `apps/api/app/core/config.py` | 공통 | 설정 스키마 |
 | `apps/api/app/schemas/common.py` | 공통 | 공통 응답·오류 스키마 |
-| `packages/contracts/` | 공통 | `openapi.yaml`에서 생성한 API·JSON 타입 |
+| `packages/contracts/` | 공통 | `packages/contracts/openapi/openapi.yaml`에서 생성한 API·JSON 타입 |
 
 - 담당 경계는 코드 소유권을 나누기 위한 것이며 다른 담당자의 파일을 절대 수정할 수
   없다는 뜻은 아니다. 다른 담당 영역을 바꿀 때는 이유와 영향을 먼저 공유한다.
@@ -374,7 +374,7 @@ P0 공개 API는 재계약·조건 변경·종료의 선택 저장을 제공하�
 ## API contract
 
 Base path는 `/api/v1`이다. 아래 목록은 담당 경계를 빠르게 확인하기 위한 요약이며
-path·method·schema의 최종 기준은 `openapi.yaml`, 상세 동작과 개발 순서는
+path·method·schema의 최종 기준은 `packages/contracts/openapi/openapi.yaml`, 상세 동작과 개발 순서는
 `api-명세서.md`다. 한 문서만 따로 변경하지 않는다.
 
 ```text

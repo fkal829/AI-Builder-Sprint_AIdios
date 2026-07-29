@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from app.core.enums import (
     AdjustmentRequestStatus,
+    AnalysisStatus,
     ContractStatus,
     InternalSignatureStatus,
     ModusignStatus,
@@ -94,6 +95,13 @@ ALLOWED_OBLIGATION_TRANSITIONS: dict[ObligationStatus, set[ObligationStatus]] = 
     },
     ObligationStatus.APPROVED: set(),
     ObligationStatus.DISPUTED: set(),
+}
+
+ALLOWED_ANALYSIS_TASK_TRANSITIONS: dict[AnalysisStatus, set[AnalysisStatus]] = {
+    AnalysisStatus.QUEUED: {AnalysisStatus.PROCESSING},
+    AnalysisStatus.PROCESSING: {AnalysisStatus.COMPLETED, AnalysisStatus.FAILED},
+    AnalysisStatus.COMPLETED: set(),
+    AnalysisStatus.FAILED: set(),
 }
 
 

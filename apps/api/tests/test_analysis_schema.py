@@ -1,7 +1,10 @@
+from uuid import uuid4
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.enums import (
+    AnalysisStatus,
     DetectionMethod,
     ExtractedField,
     ExtractedValueType,
@@ -9,7 +12,8 @@ from app.core.enums import (
     ReviewSignalType,
     VerificationStatus,
 )
-from app.schemas.analysis import ExtractedTerm, ReviewItem
+from app.core.errors import ErrorCode
+from app.schemas.analysis import AnalysisTask, ExtractedTerm, ReviewItem
 
 
 def test_accepts_verified_term_with_evidence() -> None:
@@ -117,3 +121,32 @@ def test_deterministic_review_does_not_fake_model_confidence() -> None:
     )
 
     assert item.model_confidence is None
+
+
+def test_performance_guarantee_is_extracted_as_text() -> None:
+    term = ExtractedTerm(
+        field=ExtractedField.PERFORMANCE_GUARANTEE,
+        value_type=ExtractedValueType.TEXT,
+        value="월 방문자 수를 보장하지 않는다.",
+        source_page=3,
+        source_text="성과는 보장하지 않는다.",
+        confidence=0.88,
+        verification_status=VerificationStatus.VERIFIED,
+    )
+
+    assert term.value_type == ExtractedValueType.TEXT
+
+
+def test_analysis_task_rejects_inconsistent_status_payload() -> None:
+    with pytest.raises(ValidationError):
+        AnalysisTask(
+            id=uuid4(),
+            contract_id=uuid4(),
+            document_id=uuid4(),
+            status=AnalysisStatus.FAILED,
+            attempt_count=1,
+            error_code=ErrorCode.ANALYSIS_START_FAILED,
+            result=None,
+            created_at="2026-07-29T00:00:00Z",
+            updated_at="2026-07-29T00:00:00Z",
+        )

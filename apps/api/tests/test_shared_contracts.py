@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.core.enums import (
     AdjustmentRequestStatus,
+    AnalysisStatus,
     ContractStatus,
     InternalSignatureStatus,
     ModusignStatus,
@@ -10,6 +11,7 @@ from app.core.enums import (
 )
 from app.services.state_machine import (
     ALLOWED_ADJUSTMENT_REQUEST_TRANSITIONS,
+    ALLOWED_ANALYSIS_TASK_TRANSITIONS,
     ALLOWED_CONTRACT_TRANSITIONS,
     ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS,
     ALLOWED_MODUSIGN_TRANSITIONS,
@@ -51,6 +53,9 @@ def test_shared_state_machines_match_backend() -> None:
     assert _normalize_shared_transitions(shared["obligation"]) == _as_string_transitions(
         ALLOWED_OBLIGATION_TRANSITIONS
     )
+    assert _normalize_shared_transitions(
+        shared["analysis_task"]
+    ) == _as_string_transitions(ALLOWED_ANALYSIS_TASK_TRANSITIONS)
 
 
 def test_shared_state_machines_include_every_enum_member() -> None:
@@ -65,6 +70,7 @@ def test_shared_state_machines_include_every_enum_member() -> None:
     }
     assert set(shared["modusign"]) == {status.value for status in ModusignStatus}
     assert set(shared["obligation"]) == {status.value for status in ObligationStatus}
+    assert set(shared["analysis_task"]) == {status.value for status in AnalysisStatus}
 
 
 def test_evidence_schemas_use_api_snake_case() -> None:

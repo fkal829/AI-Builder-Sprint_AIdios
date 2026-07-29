@@ -49,6 +49,13 @@ class ObligationStatus(StrEnum):
     DISPUTED = "DISPUTED"
 
 
+class AnalysisStatus(StrEnum):
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
 class VerificationStatus(StrEnum):
     VERIFIED = "VERIFIED"
     NOT_FOUND = "NOT_FOUND"

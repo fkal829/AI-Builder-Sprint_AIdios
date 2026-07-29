@@ -4,8 +4,8 @@
 
 이 문서는 백엔드 담당 B와 C가 하나의 FastAPI 프로젝트에서 공유하는 데이터 경계와
 불변 규칙을 정리한다. HTTP endpoint와 요청·응답 스키마의 최종 기준은 저장소 루트의
-`openapi.yaml`이다. 이번에 확정한 `openapi-final.yaml`을 저장소에 반영할 때는
-`openapi.yaml`로 사용한다. 모든 endpoint의 Base path는 `/api/v1`이다.
+`packages/contracts/openapi/openapi.yaml`이다. 이번에 확정한 `openapi-final.yaml`을
+저장소에 반영할 때는 이 파일을 사용한다. 모든 endpoint의 Base path는 `/api/v1`이다.
 
 문서와 코드가 충돌하면 임의로 한쪽에 맞추지 않는다. OpenAPI, Pydantic 스키마,
 DB 마이그레이션과 테스트를 같은 변경 단위에서 함께 수정한다.
@@ -283,14 +283,14 @@ minimum: 0
 - C가 조정 상세 endpoint를 담당하지만 역제안 쉬운 설명이 AI를 사용하면 B의 내부
   비교 서비스를 호출한다.
 - `app/core/config.py`, `app/schemas/common.py`, `packages/contracts`,
-  `openapi.yaml`, 공통 마이그레이션은 변경 전에 B·C가 합의한다.
+  `packages/contracts/openapi/openapi.yaml`, 공통 마이그레이션은 변경 전에 B·C가 합의한다.
 - 두 담당자는 별도 백엔드를 만들지 않고 `apps/api` 하나를 함께 사용한다.
 
 ## 12. 계약 변경 체크리스트
 
 공개 API, 영속 상태 또는 AI 출력이 바뀌면 다음을 한 변경 단위에서 확인한다.
 
-- [ ] `openapi.yaml`
+- [ ] `packages/contracts/openapi/openapi.yaml`
 - [ ] Pydantic 요청·응답 스키마
 - [ ] service/domain 상태 전이
 - [ ] repository와 새 마이그레이션

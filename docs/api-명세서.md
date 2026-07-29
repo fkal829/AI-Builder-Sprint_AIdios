@@ -4,11 +4,11 @@
 
 > 버전: `0.2.0`  
 > Base URL: `/api/v1`  
-> 상세 기계 판독 명세: `openapi.yaml`  
+> 상세 기계 판독 명세: `packages/contracts/openapi/openapi.yaml`
 > 적용 범위: 해커톤 P0
 
 이 문서는 `openapi-final.yaml`을 사람이 읽고 개발 순서를 정할 수 있도록 정리한
-백엔드 API 명세다. 필드·enum·응답이 이 문서와 YAML에서 다르면 `openapi.yaml`을
+백엔드 API 명세다. 필드·enum·응답이 이 문서와 YAML에서 다르면 `packages/contracts/openapi/openapi.yaml`을
 우선하고 두 문서를 같은 변경에서 다시 맞춘다.
 
 ## 1. 담당 구분

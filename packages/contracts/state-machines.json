@@ -19,7 +19,15 @@
     "CONFIRMED": [],
     "EXPIRED": []
   },
-  "signature": {
+  "internal_signature": {
+    "REQUEST_READY": ["REQUESTING"],
+    "REQUESTING": ["SIGNING", "FAILED"],
+    "SIGNING": ["COMPLETED", "ABORTED", "FAILED"],
+    "COMPLETED": [],
+    "ABORTED": [],
+    "FAILED": []
+  },
+  "modusign": {
     "DRAFT": ["SCHEDULED", "ON_PROCESSING"],
     "SCHEDULED": ["ON_PROCESSING", "ABORTED", "PROCESSING_FAILED"],
     "ON_PROCESSING": ["ON_GOING", "ABORTED", "PROCESSING_FAILED"],

@@ -12,7 +12,8 @@ Python이나 TypeScript 런타임 비즈니스 로직은 두지 않습니다. �
 
 - HTTP JSON과 JSON Schema의 필드명은 `snake_case`를 사용합니다.
 - 프런트엔드는 `apps/frontend/src/lib/adapter.ts` 경계에서 `camelCase`로 변환합니다.
-- 저장되는 추출·검토 결과에는 `source_page`, `source_text`, `confidence`를 함께 둡니다.
+- 저장되는 추출 결과에는 `source_page`, `source_text`, `confidence`를 함께 둡니다.
+- 검토 결과는 `detection_method`가 모델을 사용할 때만 `model_confidence`를 둡니다.
 - 근거를 찾지 못한 결과는 근거 필드를 `null`로 두고 `verification_status`를
   `NOT_FOUND`로 표시합니다. 근거 누락 상태인 `MISSING_EVIDENCE`는 확정값으로
   표시할 수 없습니다.

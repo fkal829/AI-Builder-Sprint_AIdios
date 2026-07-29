@@ -3,11 +3,13 @@ import pytest
 from app.core.enums import (
     AdjustmentRequestStatus,
     ContractStatus,
+    InternalSignatureStatus,
     ModusignStatus,
     ObligationStatus,
 )
 from app.services.state_machine import (
     ALLOWED_ADJUSTMENT_REQUEST_TRANSITIONS,
+    ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS,
     ALLOWED_MODUSIGN_TRANSITIONS,
     ALLOWED_OBLIGATION_TRANSITIONS,
     InvalidStatusTransition,
@@ -34,6 +36,11 @@ def test_rejects_skipped_contract_transition() -> None:
             ALLOWED_ADJUSTMENT_REQUEST_TRANSITIONS,
         ),
         (
+            InternalSignatureStatus.REQUESTING,
+            InternalSignatureStatus.SIGNING,
+            ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS,
+        ),
+        (
             ModusignStatus.ON_GOING,
             ModusignStatus.COMPLETED,
             ALLOWED_MODUSIGN_TRANSITIONS,
@@ -56,6 +63,11 @@ def test_allows_domain_state_transitions(current, target, transitions) -> None:
             AdjustmentRequestStatus.RESPONDED,
             AdjustmentRequestStatus.OPENED,
             ALLOWED_ADJUSTMENT_REQUEST_TRANSITIONS,
+        ),
+        (
+            InternalSignatureStatus.COMPLETED,
+            InternalSignatureStatus.SIGNING,
+            ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS,
         ),
         (
             ModusignStatus.COMPLETED,

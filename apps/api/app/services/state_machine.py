@@ -4,6 +4,7 @@ from enum import StrEnum
 from app.core.enums import (
     AdjustmentRequestStatus,
     ContractStatus,
+    InternalSignatureStatus,
     ModusignStatus,
     ObligationStatus,
 )
@@ -67,6 +68,24 @@ ALLOWED_MODUSIGN_TRANSITIONS: dict[ModusignStatus, set[ModusignStatus]] = {
     ModusignStatus.PROCESSING_FAILED: set(),
 }
 
+ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS: dict[
+    InternalSignatureStatus, set[InternalSignatureStatus]
+] = {
+    InternalSignatureStatus.REQUEST_READY: {InternalSignatureStatus.REQUESTING},
+    InternalSignatureStatus.REQUESTING: {
+        InternalSignatureStatus.SIGNING,
+        InternalSignatureStatus.FAILED,
+    },
+    InternalSignatureStatus.SIGNING: {
+        InternalSignatureStatus.COMPLETED,
+        InternalSignatureStatus.ABORTED,
+        InternalSignatureStatus.FAILED,
+    },
+    InternalSignatureStatus.COMPLETED: set(),
+    InternalSignatureStatus.ABORTED: set(),
+    InternalSignatureStatus.FAILED: set(),
+}
+
 ALLOWED_OBLIGATION_TRANSITIONS: dict[ObligationStatus, set[ObligationStatus]] = {
     ObligationStatus.PENDING: {ObligationStatus.SUBMITTED},
     ObligationStatus.SUBMITTED: {
@@ -87,7 +106,8 @@ def ensure_contract_transition(
     target: ContractStatus,
 ) -> None:
     if target not in ALLOWED_CONTRACT_TRANSITIONS[current]:
-        raise InvalidStatusTransition(f"{current}에서 {target}(으)로 변경할 수 없습니다.")
+        message = f"{current}에서 {target}(으)로 변경할 수 없습니다."
+        raise InvalidStatusTransition(message)
 
 
 def ensure_transition[StatusT: StrEnum](
@@ -96,4 +116,5 @@ def ensure_transition[StatusT: StrEnum](
     transitions: Mapping[StatusT, set[StatusT]],
 ) -> None:
     if target not in transitions[current]:
-        raise InvalidStatusTransition(f"{current}에서 {target}(으)로 변경할 수 없습니다.")
+        message = f"{current}에서 {target}(으)로 변경할 수 없습니다."
+        raise InvalidStatusTransition(message)

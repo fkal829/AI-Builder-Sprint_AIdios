@@ -1,18 +1,50 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ProgressDots } from "@/components/Bits";
 import { DEMO_CONTRACT_ID, UNDERSTOOD_QUESTIONS } from "@/lib/mock";
 
+/** 바이트를 사람이 읽기 쉬운 크기로 변환 */
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /* ① 계약서 PDF 업로드 + ② 내가 안내받고 이해한 조건 5문항 (타이핑 없이 버튼 선택) */
 export default function NewContractPage() {
   const router = useRouter();
   const [phase, setPhase] = useState<"upload" | "questions">("upload");
-  const [uploaded, setUploaded] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [qIndex, setQIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  const uploaded = !!file;
+
+  /** 파일 검증 후 상태 반영 — 파일 선택/드롭 공통 진입점 */
+  const acceptFile = (f: File | undefined | null) => {
+    if (!f) return;
+    const isPdf =
+      f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setError("PDF 파일만 올릴 수 있어요.");
+      setFile(null);
+      return;
+    }
+    setError(null);
+    setFile(f);
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+    acceptFile(e.dataTransfer.files?.[0]);
+  };
 
   if (phase === "upload") {
     return (
@@ -35,27 +67,63 @@ export default function NewContractPage() {
             계약서 PDF를 올려주세요
           </h2>
 
+          {/* 숨겨진 실제 파일 입력 — 드롭존 클릭 시 열림 */}
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              acceptFile(e.target.files?.[0]);
+              // 같은 파일 재선택도 감지되도록 초기화
+              e.target.value = "";
+            }}
+          />
+
           <button
-            onClick={() => setUploaded(true)}
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragActive(false);
+            }}
+            onDrop={onDrop}
             className={`flex h-32 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm transition ${
-              uploaded
-                ? "border-amber400 bg-amber50 text-amber700"
-                : "border-gray300 text-gray500 hover:bg-paper"
+              dragActive
+                ? "border-amber700 bg-amber100 text-amber800"
+                : uploaded
+                  ? "border-amber400 bg-amber50 text-amber700"
+                  : "border-gray300 text-gray500 hover:bg-paper"
             }`}
           >
-            {uploaded ? (
+            {dragActive ? (
+              <>
+                <span className="text-2xl">⤓</span>
+                <span className="font-bold">여기에 놓으면 업로드돼요</span>
+              </>
+            ) : uploaded ? (
               <>
                 <span className="text-2xl">✓</span>
-                <span className="font-bold">광고대행_계약서.pdf</span>
-                <span className="text-[11px]">업로드됨 · 다시 선택하려면 탭</span>
+                <span className="font-bold">{file!.name}</span>
+                <span className="text-[11px]">
+                  {formatBytes(file!.size)} · 다시 선택하려면 클릭
+                </span>
               </>
             ) : (
               <>
                 <span className="text-2xl">＋</span>
-                <span>PDF 업로드</span>
+                <span>PDF를 클릭해서 선택하거나 여기로 끌어다 놓으세요</span>
               </>
             )}
           </button>
+
+          {error && (
+            <p className="text-[12px] font-bold text-amber800">⚠ {error}</p>
+          )}
 
           <a
             href="/sample-contract.pdf"

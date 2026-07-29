@@ -6,7 +6,7 @@
 
 ## Boundaries
 
-- `apps/web`: Next.js/TypeScript UI. Keep external secrets out of this app.
+- `apps/frontend`: Next.js/TypeScript UI. Keep external secrets out of this app.
 - `apps/api`: FastAPI orchestration, validation, state transitions, and external adapters.
 - `packages/contracts`: shared JSON/OpenAPI contracts only; do not put runtime business logic here.
 - `supabase/migrations`: append-only database migrations.

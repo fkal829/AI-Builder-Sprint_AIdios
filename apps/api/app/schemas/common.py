@@ -14,4 +14,4 @@ class ApiError(BaseModel):
 class ApiResponse(BaseModel, Generic[DataT]):
     data: DataT | None
     error: ApiError | None
-    requestId: str = Field(pattern=r"^req_[a-f0-9]+$")
+    request_id: str = Field(pattern=r"^req_[a-f0-9]+$")

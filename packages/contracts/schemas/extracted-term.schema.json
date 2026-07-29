@@ -7,9 +7,10 @@
   "required": [
     "field",
     "value",
-    "sourcePage",
-    "sourceText",
-    "confidence"
+    "source_page",
+    "source_text",
+    "confidence",
+    "verification_status"
   ],
   "properties": {
     "field": {
@@ -17,18 +18,50 @@
       "minLength": 1
     },
     "value": {},
-    "sourcePage": {
-      "type": "integer",
+    "source_page": {
+      "type": ["integer", "null"],
       "minimum": 1
     },
-    "sourceText": {
-      "type": "string",
+    "source_text": {
+      "type": ["string", "null"],
       "minLength": 1
     },
     "confidence": {
       "type": "number",
       "minimum": 0,
       "maximum": 1
+    },
+    "verification_status": {
+      "type": "string",
+      "enum": ["VERIFIED", "NOT_FOUND", "MISSING_EVIDENCE", "NEEDS_CHECK"]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verification_status": {"const": "VERIFIED"}
+        }
+      },
+      "then": {
+        "properties": {
+          "source_page": {"type": "integer", "minimum": 1},
+          "source_text": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verification_status": {"const": "NOT_FOUND"}
+        }
+      },
+      "then": {
+        "properties": {
+          "source_page": {"type": "null"},
+          "source_text": {"type": "null"}
+        }
+      }
+    }
+  ]
 }

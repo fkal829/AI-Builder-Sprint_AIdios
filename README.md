@@ -13,7 +13,7 @@
 ```text
 .
 ├── apps/
-│   ├── web/                 # 소상공인·대행사 반응형 웹
+│   ├── frontend/            # 소상공인·대행사 반응형 웹
 │   └── api/                 # 계약·AI·전자서명 FastAPI
 ├── packages/
 │   └── contracts/           # 프런트/백엔드가 공유할 API·JSON 스키마
@@ -25,7 +25,8 @@
 └── docs/                    # 제품 범위·아키텍처·대회 안내
 ```
 
-세부 경계와 파일 배치 원칙은 [docs/architecture.md](docs/architecture.md)를 참고하세요.
+세부 경계와 파일 배치 원칙은 [docs/architecture.md](docs/architecture.md), 공통 HTTP·데이터
+규칙은 [docs/api-data-contract.md](docs/api-data-contract.md)를 참고하세요.
 
 ## 로컬 실행
 
@@ -37,7 +38,7 @@
 웹:
 
 ```bash
-cd apps/web
+cd apps/frontend
 cp .env.example .env.local
 npm install
 npm run dev

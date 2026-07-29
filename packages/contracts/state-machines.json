@@ -11,13 +11,27 @@
     "COMPLETED": [],
     "RENEWAL_DUE": []
   },
-  "adjustmentRequest": [
-    "DRAFT",
-    "SENT",
-    "OPENED",
-    "RESPONDED",
-    "CONFIRMED",
-    "EXPIRED"
-  ],
-  "obligation": ["PENDING", "SUBMITTED", "APPROVED", "DISPUTED"]
+  "adjustment_request": {
+    "DRAFT": ["SENT"],
+    "SENT": ["OPENED", "EXPIRED"],
+    "OPENED": ["RESPONDED", "EXPIRED"],
+    "RESPONDED": ["CONFIRMED"],
+    "CONFIRMED": [],
+    "EXPIRED": []
+  },
+  "signature": {
+    "DRAFT": ["SCHEDULED", "ON_PROCESSING"],
+    "SCHEDULED": ["ON_PROCESSING", "ABORTED", "PROCESSING_FAILED"],
+    "ON_PROCESSING": ["ON_GOING", "ABORTED", "PROCESSING_FAILED"],
+    "ON_GOING": ["COMPLETED", "ABORTED", "PROCESSING_FAILED"],
+    "COMPLETED": [],
+    "ABORTED": [],
+    "PROCESSING_FAILED": []
+  },
+  "obligation": {
+    "PENDING": ["SUBMITTED"],
+    "SUBMITTED": ["APPROVED", "DISPUTED"],
+    "APPROVED": [],
+    "DISPUTED": []
+  }
 }

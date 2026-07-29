@@ -1,9 +1,11 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.enums import (
+    AnalysisStatus,
     DetectionMethod,
     ExtractedField,
     ExtractedValueType,
@@ -12,6 +14,7 @@ from app.core.enums import (
     SuggestionChoice,
     VerificationStatus,
 )
+from app.core.errors import ErrorCode
 
 EXPECTED_VALUE_TYPES: dict[ExtractedField, ExtractedValueType] = {
     ExtractedField.CONTRACT_START_DATE: ExtractedValueType.DATE,
@@ -23,7 +26,6 @@ EXPECTED_VALUE_TYPES: dict[ExtractedField, ExtractedValueType] = {
     ExtractedField.TERMINATION_PENALTY_RATE: ExtractedValueType.PERCENT,
     ExtractedField.AUTO_RENEWAL: ExtractedValueType.BOOLEAN,
     ExtractedField.EARLY_TERMINATION_ALLOWED: ExtractedValueType.BOOLEAN,
-    ExtractedField.PERFORMANCE_GUARANTEE: ExtractedValueType.BOOLEAN,
 }
 
 
@@ -126,4 +128,45 @@ class ReviewItem(BaseModel):
             raise ValueError(
                 "규칙 기반 검토 항목에는 model_confidence를 넣지 않습니다."
             )
+        return self
+
+
+class Analysis(BaseModel):
+    contract_id: UUID
+    extracted_terms: list[ExtractedTerm]
+    review_items: list[ReviewItem]
+
+
+class AnalysisStartRequest(BaseModel):
+    document_id: UUID
+
+
+class AnalysisTask(BaseModel):
+    id: UUID
+    contract_id: UUID
+    document_id: UUID
+    status: AnalysisStatus
+    attempt_count: int = Field(ge=0, le=2)
+    error_code: ErrorCode | None
+    result: Analysis | None
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_status_payload(self) -> "AnalysisTask":
+        if self.status in {AnalysisStatus.QUEUED, AnalysisStatus.PROCESSING}:
+            if self.error_code is not None or self.result is not None:
+                raise ValueError(
+                    "대기 또는 처리 중인 분석 작업에는 결과와 오류를 넣을 수 없습니다."
+                )
+        elif self.status == AnalysisStatus.COMPLETED:
+            if self.error_code is not None or self.result is None:
+                raise ValueError("완료된 분석 작업에는 결과만 필요합니다.")
+        elif self.status == AnalysisStatus.FAILED:
+            allowed_errors = {
+                ErrorCode.DOCUMENT_PARSE_FAILED,
+                ErrorCode.ANALYSIS_SCHEMA_INVALID,
+            }
+            if self.result is not None or self.error_code not in allowed_errors:
+                raise ValueError("실패한 분석 작업에는 허용된 분석 오류만 필요합니다.")
         return self

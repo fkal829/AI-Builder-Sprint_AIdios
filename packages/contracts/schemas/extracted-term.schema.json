@@ -79,7 +79,7 @@
       "if": {
         "properties": {
           "field": {
-            "enum": ["auto_renewal", "early_termination_allowed", "performance_guarantee"]
+            "enum": ["auto_renewal", "early_termination_allowed"]
           }
         }
       },

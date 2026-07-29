@@ -1,17 +1,12 @@
-from typing import Generic, TypeVar
-
 from pydantic import BaseModel, ConfigDict, Field
-
-DataT = TypeVar("DataT")
 
 
 class ApiError(BaseModel):
     code: str
     message: str
-    details: dict[str, object] | None = None
 
 
-class ApiResponse(BaseModel, Generic[DataT]):
+class ApiResponse[DataT](BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     data: DataT | None

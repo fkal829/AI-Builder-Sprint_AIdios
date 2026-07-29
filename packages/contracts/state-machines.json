@@ -41,5 +41,11 @@
     "SUBMITTED": ["APPROVED", "DISPUTED"],
     "APPROVED": [],
     "DISPUTED": []
+  },
+  "analysis_task": {
+    "QUEUED": ["PROCESSING"],
+    "PROCESSING": ["COMPLETED", "FAILED"],
+    "COMPLETED": [],
+    "FAILED": []
   }
 }

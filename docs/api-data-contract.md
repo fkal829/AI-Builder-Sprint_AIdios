@@ -8,13 +8,21 @@
 
 | 경계 | 규칙 | 예시 |
 | --- | --- | --- |
-| HTTP JSON | `snake_case` | `counterparty_name`, `request_id` |
+| HTTP JSON | 기본 `snake_case`, envelope 식별자는 `requestId` | `counterparty_name`, `requestId` |
 | FastAPI/Pydantic | `snake_case` | `source_page`, `source_text` |
 | PostgreSQL | `snake_case` | `termination_notice_date` |
 | 프런트 도메인 모델 | `camelCase` 허용 | `counterpartyName` |
 
 프런트의 `camelCase` 변환은 `apps/frontend/src/lib/adapter.ts` 한 곳에서 수행한다.
 페이지와 컴포넌트가 HTTP DTO를 직접 변환하지 않는다.
+
+원화 금액은 소수점이 없는 정수 원 단위로 주고받는다.
+
+```yaml
+type: integer
+format: int64
+minimum: 0
+```
 
 ## 공통 응답
 
@@ -24,7 +32,7 @@
 {
   "data": {},
   "error": null,
-  "request_id": "req_123abc"
+  "requestId": "req_123abc"
 }
 ```
 
@@ -38,7 +46,7 @@
     "message": "현재 상태에서는 요청을 처리할 수 없습니다.",
     "details": null
   },
-  "request_id": "req_123abc"
+  "requestId": "req_123abc"
 }
 ```
 
@@ -46,11 +54,12 @@
 
 ## 원문 근거
 
-추출 결과와 검토 항목은 다음 네 필드를 항상 포함한다.
+추출 결과는 원문 근거와 `confidence`를 포함한다. 검토 항목은
+`detection_method`가 `MODEL` 또는 `HYBRID`일 때만 `model_confidence`를 갖는다.
 
 - `source_page`
 - `source_text`
-- `confidence`
+- `confidence` (추출 결과)
 - `verification_status`
 
 `verification_status`의 의미:
@@ -65,11 +74,47 @@
 `VERIFIED`에는 페이지와 문장이 반드시 있어야 한다. `NOT_FOUND`에는 페이지와 문장을
 임의로 채우지 않는다.
 
+추출 필드는 enum으로 제한하고 `value_type`으로 값 타입을 구분한다.
+
+- `MONEY_KRW`: 0 이상의 원화 정수
+- `DATE`: ISO 8601 date
+- `BOOLEAN`: `YES`, `NO`, `UNKNOWN`
+- `PERCENT`: 0~100 정수
+- `INTEGER`: 0 이상의 정수
+- `TEXT`: 문자열
+
+## 인증과 공개 토큰
+
+- `/contracts`, `/dashboard` 등 소유자 API에는 Bearer 인증이 필요하다.
+- `/public/adjustment-requests/*`는 `ADJUSTMENT_RESPONSE` scope 토큰만 허용한다.
+- `/public/obligations/*`는 `OBLIGATION_EVIDENCE` scope 토큰만 허용한다.
+- 두 공개 토큰은 서로 교환해서 사용할 수 없으며 원문을 로그에 남기지 않는다.
+- 소유자가 존재하지 않거나 다른 소유자의 리소스에 접근하면 리소스 존재 여부를
+  노출하지 않도록 `404`를 반환할 수 있다.
+
+## 외부 실행과 멱등성
+
+조정 링크 활성화와 모두싸인 서명 요청에는 `Idempotency-Key` 헤더가 필요하다.
+동일 키와 동일 요청은 최초 결과를 반환하고, 동일 키에 다른 요청 body가 오면
+`IDEMPOTENCY_CONFLICT`로 거부한다.
+
+모두싸인 외부 API 호출은 서버 Adapter가 HTTP Basic 인증으로 수행한다. 웹훅 수신은
+웹훅 등록 시 설정한 `X-Modusign-Webhook-Secret` 사용자 지정 헤더를 검증한다.
+공식 웹훅 payload에는 별도 이벤트 ID가 없으므로 `event.type`, `document.id`, payload
+해시를 이용해 중복 안전하게 처리한다.
+
+서명자 연락처 원문은 서명 요청 시 Adapter 전달에만 사용하고 DB·로그·응답에는 남기지
+않는다. 역할, 이름, 서명 수단, 마스킹 값과 단방향 fingerprint만 저장한다.
+
+- [모두싸인 API QuickStart](https://developers.modusign.co.kr/docs/quick-start)
+- [모두싸인 Webhook event](https://developers.modusign.co.kr/docs/webhook-event)
+
 ## 상태 변경 책임
 
 - 프런트는 원하는 다음 상태를 임의 저장하지 않는다.
 - FastAPI service가 `packages/contracts/state-machines.json`에 정의된 전이를 검증한다.
-- 외부 모두싸인 상태는 `SignatureStatus`로 저장한 뒤 계약 상태에 매핑한다.
+- 모두싸인 원본 상태는 `modusign_status`, 서비스 내부 서명 상태는 `status`로 분리해
+  저장한 뒤 계약 상태에 매핑한다.
 - 발송, 최종 합의, 서명 시작, 증빙 승인은 사용자의 명시적 요청으로만 수행한다.
 - 상태 변경마다 `AuditEvent`를 추가하되 민감한 payload는 남기지 않는다.
 

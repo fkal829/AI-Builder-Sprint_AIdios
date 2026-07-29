@@ -9,4 +9,4 @@ def test_health_check() -> None:
     assert response.status_code == 200
     assert response.json()["data"] == {"status": "ok"}
     assert response.json()["error"] is None
-    assert response.json()["request_id"].startswith("req_")
+    assert response.json()["requestId"].startswith("req_")

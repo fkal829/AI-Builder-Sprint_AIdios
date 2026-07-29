@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "field",
+    "value_type",
     "value",
     "source_page",
     "source_text",
@@ -15,22 +16,39 @@
   "properties": {
     "field": {
       "type": "string",
-      "minLength": 1
+      "enum": [
+        "contract_party_owner",
+        "contract_party_agency",
+        "contract_start_date",
+        "contract_end_date",
+        "monthly_amount",
+        "contract_total_amount",
+        "payment_method",
+        "auto_renewal",
+        "termination_notice_date",
+        "early_termination_allowed",
+        "termination_penalty_rate",
+        "refund_condition",
+        "advertising_channel",
+        "content_type",
+        "content_quantity",
+        "posting_frequency",
+        "reporting_frequency",
+        "performance_guarantee",
+        "content_ownership",
+        "portrait_rights",
+        "facility_damage_liability",
+        "false_advertising_liability"
+      ]
+    },
+    "value_type": {
+      "type": "string",
+      "enum": ["TEXT", "DATE", "MONEY_KRW", "INTEGER", "PERCENT", "BOOLEAN"]
     },
     "value": {},
-    "source_page": {
-      "type": ["integer", "null"],
-      "minimum": 1
-    },
-    "source_text": {
-      "type": ["string", "null"],
-      "minLength": 1
-    },
-    "confidence": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
-    },
+    "source_page": {"type": ["integer", "null"], "minimum": 1},
+    "source_text": {"type": ["string", "null"], "minLength": 1},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "verification_status": {
       "type": "string",
       "enum": ["VERIFIED", "NOT_FOUND", "MISSING_EVIDENCE", "NEEDS_CHECK"]
@@ -40,9 +58,82 @@
     {
       "if": {
         "properties": {
-          "verification_status": {"const": "VERIFIED"}
+          "field": {
+            "enum": ["monthly_amount", "contract_total_amount"]
+          }
         }
       },
+      "then": {"properties": {"value_type": {"const": "MONEY_KRW"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "field": {
+            "enum": ["contract_start_date", "contract_end_date", "termination_notice_date"]
+          }
+        }
+      },
+      "then": {"properties": {"value_type": {"const": "DATE"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "field": {
+            "enum": ["auto_renewal", "early_termination_allowed", "performance_guarantee"]
+          }
+        }
+      },
+      "then": {"properties": {"value_type": {"const": "BOOLEAN"}}}
+    },
+    {
+      "if": {"properties": {"field": {"const": "content_quantity"}}},
+      "then": {"properties": {"value_type": {"const": "INTEGER"}}}
+    },
+    {
+      "if": {"properties": {"field": {"const": "termination_penalty_rate"}}},
+      "then": {"properties": {"value_type": {"const": "PERCENT"}}}
+    },
+    {
+      "if": {"properties": {"value_type": {"const": "TEXT"}}},
+      "then": {"properties": {"value": {"type": ["string", "null"]}}}
+    },
+    {
+      "if": {"properties": {"value_type": {"const": "DATE"}}},
+      "then": {"properties": {"value": {"type": ["string", "null"], "format": "date"}}}
+    },
+    {
+      "if": {"properties": {"value_type": {"const": "MONEY_KRW"}}},
+      "then": {
+        "properties": {
+          "value": {"type": ["integer", "null"], "format": "int64", "minimum": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"value_type": {"const": "INTEGER"}}},
+      "then": {"properties": {"value": {"type": ["integer", "null"], "minimum": 0}}}
+    },
+    {
+      "if": {"properties": {"value_type": {"const": "PERCENT"}}},
+      "then": {
+        "properties": {
+          "value": {"type": ["integer", "null"], "minimum": 0, "maximum": 100}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"value_type": {"const": "BOOLEAN"}}},
+      "then": {
+        "properties": {
+          "value": {
+            "type": ["string", "null"],
+            "enum": ["YES", "NO", "UNKNOWN", null]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verification_status": {"const": "VERIFIED"}}},
       "then": {
         "properties": {
           "source_page": {"type": "integer", "minimum": 1},
@@ -51,15 +142,12 @@
       }
     },
     {
-      "if": {
-        "properties": {
-          "verification_status": {"const": "NOT_FOUND"}
-        }
-      },
+      "if": {"properties": {"verification_status": {"const": "NOT_FOUND"}}},
       "then": {
         "properties": {
           "source_page": {"type": "null"},
-          "source_text": {"type": "null"}
+          "source_text": {"type": "null"},
+          "value": {"type": "null"}
         }
       }
     }

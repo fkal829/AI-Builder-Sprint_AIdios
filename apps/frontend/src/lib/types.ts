@@ -101,6 +101,30 @@ export interface ExtractedField {
   confidence: number; // 0~1
 }
 
+/* ---------------------------------- 계약서 원문 뷰어 (분석 결과 화면 좌측) ---------------------------------- */
+
+/** 조항 주의 수준 — 이미지 레퍼런스의 고/중/저위험 3단계 */
+export type ClauseRisk = "high" | "mid" | "low";
+
+/** 원문 뷰어용 조항 하나 (제N조 단위) */
+export interface DocClause {
+  id: string; // "c1" … 페이지 내 앵커
+  no: string; // "제1조"
+  title: string; // "계약의 목적"
+  body: string; // 조항 원문
+  risk: ClauseRisk;
+  note?: string; // 설문·계약 대조 기반 쉬운 코멘트 (고/중위험에만)
+}
+
+/** 계약서 원문 문서 전체 */
+export interface ContractDocument {
+  title: string; // "광고/마케팅 계약서"
+  parties: string; // "파도담 카페 × 주식회사 브릿지웨이브"
+  pageCount: number;
+  pdfUrl: string; // 다운로드·미리보기 경로
+  clauses: DocClause[];
+}
+
 export interface ClauseSuggestion {
   choice: SuggestionChoice;
   label: string;
@@ -227,6 +251,8 @@ export interface AdjustmentRequestPublic {
 export interface ContractDetail {
   summary: ContractSummary;
   understood: UnderstoodTerm;
+  /** 원문 뷰어용 문서 (분석 결과 화면 좌측) */
+  document: ContractDocument;
   extracted: ExtractedField[];
   clauses: ClauseCard[];
   signalCounts: { mismatch: number; noBasis: number; unclear: number };

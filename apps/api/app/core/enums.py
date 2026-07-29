@@ -38,3 +38,30 @@ class ObligationStatus(StrEnum):
     SUBMITTED = "SUBMITTED"
     APPROVED = "APPROVED"
     DISPUTED = "DISPUTED"
+
+
+class VerificationStatus(StrEnum):
+    VERIFIED = "VERIFIED"
+    NOT_FOUND = "NOT_FOUND"
+    MISSING_EVIDENCE = "MISSING_EVIDENCE"
+    NEEDS_CHECK = "NEEDS_CHECK"
+
+
+class ReviewSignalType(StrEnum):
+    MISMATCH = "MISMATCH"
+    NO_BASIS = "NO_BASIS"
+    UNCLEAR = "UNCLEAR"
+    MISSING = "MISSING"
+    NEEDS_CHECK = "NEEDS_CHECK"
+
+
+class ReviewSeverity(StrEnum):
+    INFO = "INFO"
+    CHECK = "CHECK"
+    IMPORTANT = "IMPORTANT"
+
+
+class SuggestionChoice(StrEnum):
+    ACCEPT = "ACCEPT"
+    COMPROMISE = "COMPROMISE"
+    REQUEST = "REQUEST"

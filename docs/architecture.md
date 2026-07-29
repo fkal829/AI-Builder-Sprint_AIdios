@@ -5,7 +5,7 @@
 ```text
 사용자 브라우저
     ↓
-apps/web (Next.js)
+apps/frontend (Next.js)
     ↓ HTTP / JSON
 apps/api (FastAPI)
     ├─ Upstage Adapter
@@ -19,7 +19,7 @@ apps/api (FastAPI)
 ## 웹
 
 ```text
-apps/web/
+apps/frontend/
 ├── app/
 │   ├── (owner)/             # 소상공인 전용 화면
 │   ├── public/              # 토큰 기반 대행사 무가입 화면

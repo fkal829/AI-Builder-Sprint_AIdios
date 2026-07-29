@@ -13,5 +13,5 @@ async def health_check() -> ApiResponse[HealthData]:
     return ApiResponse(
         data=HealthData(status="ok"),
         error=None,
-        requestId=f"req_{uuid4().hex}",
+        request_id=f"req_{uuid4().hex}",
     )

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ansim-contract.local/schemas/review-item.schema.json",
+  "title": "ReviewItem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "contract_id",
+    "type",
+    "severity",
+    "plain_explanation",
+    "source_page",
+    "source_text",
+    "confidence",
+    "verification_status",
+    "suggestion_accept",
+    "suggestion_compromise",
+    "suggestion_request",
+    "status"
+  ],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "contract_id": {"type": "string", "format": "uuid"},
+    "type": {
+      "type": "string",
+      "enum": ["MISMATCH", "NO_BASIS", "UNCLEAR", "MISSING", "NEEDS_CHECK"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["INFO", "CHECK", "IMPORTANT"]
+    },
+    "plain_explanation": {"type": "string", "minLength": 1},
+    "source_page": {"type": ["integer", "null"], "minimum": 1},
+    "source_text": {"type": ["string", "null"], "minLength": 1},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "verification_status": {
+      "type": "string",
+      "enum": ["VERIFIED", "NOT_FOUND", "MISSING_EVIDENCE", "NEEDS_CHECK"]
+    },
+    "suggestion_accept": {"type": "string", "minLength": 1},
+    "suggestion_compromise": {"type": "string", "minLength": 1},
+    "suggestion_request": {"type": "string", "minLength": 1},
+    "user_choice": {
+      "type": ["string", "null"],
+      "enum": ["ACCEPT", "COMPROMISE", "REQUEST", null]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["UNREVIEWED", "SELECTED", "SENT", "RESOLVED", "KEPT_ORIGINAL"]
+    }
+  }
+}

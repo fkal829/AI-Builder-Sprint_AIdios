@@ -73,6 +73,7 @@ def test_review_item_keeps_evidence() -> None:
         plain_explanation="이해한 기간과 계약서의 기간이 다릅니다.",
         source_page=1,
         source_text="계약 기간은 5년으로 한다.",
+        source_confidence=0.96,
         model_confidence=0.92,
         verification_status=VerificationStatus.VERIFIED,
         suggestion_accept="원안을 유지합니다.",
@@ -81,6 +82,7 @@ def test_review_item_keeps_evidence() -> None:
     )
 
     assert item.source_text == "계약 기간은 5년으로 한다."
+    assert item.source_confidence == 0.96
 
 
 @pytest.mark.parametrize(
@@ -114,6 +116,7 @@ def test_deterministic_review_does_not_fake_model_confidence() -> None:
         plain_explanation="계산한 총액이 입력한 총액과 다릅니다.",
         source_page=1,
         source_text="월 10만원을 12개월 납부한다.",
+        source_confidence=0.88,
         verification_status=VerificationStatus.VERIFIED,
         suggestion_accept="원안을 유지합니다.",
         suggestion_compromise="금액 확인을 요청합니다.",
@@ -121,6 +124,34 @@ def test_deterministic_review_does_not_fake_model_confidence() -> None:
     )
 
     assert item.model_confidence is None
+
+
+@pytest.mark.parametrize(
+    ("source_page", "source_text", "source_confidence", "status"),
+    [
+        (1, "계약 조건", None, VerificationStatus.VERIFIED),
+        (None, None, 0.8, VerificationStatus.NOT_FOUND),
+        (None, None, None, VerificationStatus.NEEDS_CHECK),
+    ],
+)
+def test_review_item_rejects_inconsistent_source_confidence(
+    source_page, source_text, source_confidence, status
+) -> None:
+    with pytest.raises(ValidationError):
+        ReviewItem(
+            type=ReviewSignalType.MISMATCH,
+            severity=ReviewSeverity.CHECK,
+            detection_method=DetectionMethod.DETERMINISTIC,
+            model_confidence=None,
+            plain_explanation="추가 확인이 필요합니다.",
+            source_page=source_page,
+            source_text=source_text,
+            source_confidence=source_confidence,
+            verification_status=status,
+            suggestion_accept="원안을 유지합니다.",
+            suggestion_compromise="조건 확인을 제안합니다.",
+            suggestion_request="조건을 명시해 주시길 요청드립니다.",
+        )
 
 
 def test_performance_guarantee_is_extracted_as_text() -> None:

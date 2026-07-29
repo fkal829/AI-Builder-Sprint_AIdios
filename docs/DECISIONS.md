@@ -12,6 +12,8 @@
 - 상태: 확정
 - 결정: `source_page`는 사용자에게 표시하는 1-based 페이지 번호다.
 - 추출 결과는 `confidence`를 저장한다.
+- 검토 결과의 `source_confidence`는 기본 원문 근거로 연결한
+  `ExtractedTerm.confidence`를 저장한다. 이는 검토 판단 자체의 확신도가 아니다.
 - 검토 결과는 `detection_method`가 `MODEL` 또는 `HYBRID`일 때만
   `model_confidence`를 저장한다. 결정적 규칙 결과에는 가짜 모델 확신도를 넣지 않는다.
 

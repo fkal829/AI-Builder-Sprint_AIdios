@@ -94,6 +94,7 @@ class ReviewItem(BaseModel):
     plain_explanation: str = Field(min_length=1)
     source_page: int | None = Field(default=None, ge=1)
     source_text: str | None = Field(default=None, min_length=1)
+    source_confidence: float | None = Field(ge=0, le=1)
     detection_method: DetectionMethod
     model_confidence: float | None = Field(default=None, ge=0, le=1)
     verification_status: VerificationStatus
@@ -106,13 +107,24 @@ class ReviewItem(BaseModel):
     def validate_evidence(self) -> "ReviewItem":
         has_page = self.source_page is not None
         has_text = self.source_text is not None
-        if has_page != has_text:
-            raise ValueError("source_page와 source_text는 함께 제공해야 합니다.")
-        if self.verification_status == VerificationStatus.VERIFIED and not has_page:
-            raise ValueError("VERIFIED 검토 항목에는 원문 근거가 필요합니다.")
-        if self.verification_status == VerificationStatus.NOT_FOUND and has_page:
+        has_confidence = self.source_confidence is not None
+        if len({has_page, has_text, has_confidence}) != 1:
             raise ValueError(
-                "NOT_FOUND 검토 항목에는 원문 근거를 넣을 수 없습니다."
+                "source_page, source_text, source_confidence는 함께 제공해야 합니다."
+            )
+        if (
+            self.verification_status
+            in {VerificationStatus.VERIFIED, VerificationStatus.NEEDS_CHECK}
+            and not has_page
+        ):
+            raise ValueError("VERIFIED 또는 NEEDS_CHECK 검토 항목에는 원문 근거가 필요합니다.")
+        if (
+            self.verification_status
+            in {VerificationStatus.NOT_FOUND, VerificationStatus.MISSING_EVIDENCE}
+            and has_page
+        ):
+            raise ValueError(
+                "NOT_FOUND 또는 MISSING_EVIDENCE 검토 항목에는 원문 근거를 넣을 수 없습니다."
             )
         if (
             self.detection_method in {DetectionMethod.MODEL, DetectionMethod.HYBRID}

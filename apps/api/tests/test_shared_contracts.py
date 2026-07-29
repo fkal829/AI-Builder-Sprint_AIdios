@@ -102,7 +102,7 @@ def test_extracted_term_schema_has_structured_fields_and_values() -> None:
     assert "confidence" in schema["properties"]
 
 
-def test_review_schema_distinguishes_rule_and_model_confidence() -> None:
+def test_review_schema_distinguishes_source_and_model_confidence() -> None:
     schema = json.loads(
         (SHARED_CONTRACTS / "schemas" / "review-item.schema.json").read_text()
     )
@@ -112,6 +112,8 @@ def test_review_schema_distinguishes_rule_and_model_confidence() -> None:
         "MODEL",
         "HYBRID",
     ]
+    assert "source_confidence" in schema["required"]
+    assert "source_confidence" in schema["properties"]
     assert "model_confidence" in schema["properties"]
 
 

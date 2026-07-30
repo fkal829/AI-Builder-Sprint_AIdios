@@ -35,6 +35,14 @@ class DocumentRepository(Protocol):
         record: DocumentRecord,
     ) -> DocumentRecord | None: ...
 
+    async def get_owned_document(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        document_id: UUID,
+    ) -> DocumentRecord | None: ...
+
 
 class PrivateStorage(Protocol):
     async def upload_private_object(
@@ -46,3 +54,10 @@ class PrivateStorage(Protocol):
     ) -> None: ...
 
     async def delete_private_object(self, *, path: str) -> None: ...
+
+    async def create_signed_access_url(
+        self,
+        *,
+        path: str,
+        expires_in_seconds: int,
+    ) -> str: ...

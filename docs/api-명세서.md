@@ -391,7 +391,13 @@ text 파일을 선택 자료로 받는다. 확장자만 신뢰하지 않고 MIME
 계약과 문서의 소유권을 확인한 뒤 최대 5분 유효한 private Storage `access_url`,
 `expires_at`, 요청한 `source_page`를 반환한다. 프런트는 근거 카드에서 이 endpoint를
 호출해 해당 문서 또는 가상 페이지를 연다. URL·Storage 경로를 일반 응답이나 로그에
-남기지 않는다.
+남기지 않는다. `source_page`는 1-based이며 저장된 `Document.page_count`를 초과하면
+`422 VALIDATION_ERROR`로 거부하고 접근 URL을 발급하지 않는다.
+
+`SUPABASE_MODE=mock`에서는 같은 API 프로세스의 메모리 원문을 300초 동안 실제로 읽는
+로컬 전용 URL을 발급한다. `live`에서는 Supabase private bucket의 signed URL을
+발급한다. mock URL은 프로세스를 재시작하면 유효하지 않으며 실제 Supabase 연동 성공을
+뜻하지 않는다.
 
 ### 4.3 사용자 이해조건 저장
 
@@ -418,7 +424,14 @@ text 파일을 선택 자료로 받는다. 확장자만 신뢰하지 않고 MIME
 사용자 답변은 계약서 근거가 아니라 사용자가 기억하고 이해한 설명으로 저장한다.
 요청에는 `contract_id`를 보내지 않으며 서버가 경로와 권한 컨텍스트에서 정한다.
 `UnderstoodTermResponse.data`에는 서버가 정한 `contract_id`를 포함한다.
-다섯 조건과 `UNDERSTOOD_TERMS_SAVED` 감사 이벤트를 하나의 트랜잭션으로 기록한다.
+`source_type`은 `USER_MEMORY`만 허용하고 DB에도 같은 값으로 고정한다.
+
+한 계약에는 `UnderstoodTerm` 한 행만 두며 PUT은 다섯 조건 전체를 교체한다.
+`monthly_amount`, `total_amount`는 필수 필드지만 사용자가 기억하지 못하면 `null`을
+허용한다. 두 금액은 사용자 답변이므로 서버가 서로 계산하거나 보정하지 않는다.
+최초 저장 또는 값 변경 시 다섯 조건과 `UNDERSTOOD_TERMS_SAVED` 감사 이벤트를 하나의
+트랜잭션으로 기록한다. 완전히 같은 PUT 재시도는 기존 값을 반환하고 감사 이벤트를
+중복 생성하지 않는다.
 
 ### 4.4 분석 작업 시작
 

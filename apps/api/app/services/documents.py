@@ -1,6 +1,7 @@
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from uuid import UUID, uuid4
 
@@ -14,12 +15,18 @@ from app.repositories.documents import (
     DocumentRepository,
     PrivateStorage,
 )
-from app.schemas.documents import Document, DocumentParseStatus, DocumentType
+from app.schemas.documents import (
+    Document,
+    DocumentAccess,
+    DocumentParseStatus,
+    DocumentType,
+)
 
 PDF_CONTENT_TYPE = "application/pdf"
 PNG_CONTENT_TYPE = "image/png"
 JPEG_CONTENT_TYPE = "image/jpeg"
 TEXT_CONTENT_TYPE = "text/plain"
+DOCUMENT_ACCESS_TTL_SECONDS = 5 * 60
 
 
 @dataclass(frozen=True)
@@ -199,4 +206,51 @@ class DocumentUploadService:
             type=saved.type,
             parse_status=saved.parse_status,
             created_at=saved.created_at,
+        )
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+class DocumentAccessService:
+    def __init__(
+        self,
+        *,
+        documents: DocumentRepository,
+        storage: PrivateStorage,
+        clock: Callable[[], datetime] = utc_now,
+    ) -> None:
+        self.documents = documents
+        self.storage = storage
+        self.clock = clock
+
+    async def get_access(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        document_id: UUID,
+        source_page: int | None,
+    ) -> DocumentAccess:
+        document = await self.documents.get_owned_document(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            document_id=document_id,
+        )
+        if document is None:
+            raise ResourceNotFound()
+        if source_page is not None and not 1 <= source_page <= document.page_count:
+            raise InvalidDocument("요청한 페이지가 문서 페이지 범위를 벗어났습니다.")
+
+        issued_at = self.clock()
+        access_url = await self.storage.create_signed_access_url(
+            path=document.storage_path,
+            expires_in_seconds=DOCUMENT_ACCESS_TTL_SECONDS,
+        )
+        return DocumentAccess(
+            document_id=document.id,
+            access_url=access_url,
+            expires_at=issued_at + timedelta(seconds=DOCUMENT_ACCESS_TTL_SECONDS),
+            source_page=source_page,
         )

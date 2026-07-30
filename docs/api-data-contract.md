@@ -91,7 +91,8 @@ minimum: 0
 - `Document.file_url`과 Storage 경로는 private 영속 데이터이며 일반 `Document`
   응답에 노출하지 않는다. 원문 근거 클릭은 계약·문서 소유권 확인 후 최대 5분 유효한
   `access_url`과 요청한 `source_page`를 반환하는 전용 endpoint를 사용하고
-  `Cache-Control: no-store`를 적용한다.
+  `Cache-Control: no-store`를 적용한다. `source_page`는 1-based이며 해당 문서의
+  `page_count`를 초과하면 접근 URL을 발급하지 않고 `422 VALIDATION_ERROR`로 거부한다.
 - `/public/adjustment-requests/*`는 `ADJUSTMENT_RESPONSE` scope 토큰만 허용한다.
 - `/public/obligations/*`는 `OBLIGATION_EVIDENCE` scope 토큰만 허용한다.
 - 두 공개 토큰은 서로 교환해 사용할 수 없다.
@@ -272,6 +273,11 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
   `UnderstoodTerm.source_type`은 항상 `USER_MEMORY`다.
 - 이해조건 요청에는 `contract_id`를 받지 않고 경로와 소유권 컨텍스트에서 정한다.
   저장된 `UnderstoodTerm` 응답에는 서버가 정한 `contract_id`를 포함한다.
+- `UnderstoodTerm`은 계약당 한 행이며 PUT은 다섯 조건 전체를 교체한다.
+  `monthly_amount`, `total_amount`는 필수 nullable 필드로서 기억하지 못하면 `null`이며
+  사용자 답변끼리 계산하거나 보정하지 않는다. 값이 실제로 바뀐 저장만
+  `UNDERSTOOD_TERMS_SAVED` 감사 이벤트를 같은 트랜잭션에 기록하고 동일 PUT 재시도는
+  이벤트를 중복 생성하지 않는다.
 - 계약 상세의 필수 nullable `understood_term`은 5문항 저장 전에는 `null`, 저장 후에는
   같은 `UnderstoodTerm`을 반환한다. 조항 카드는 이를 재조회해 `내가 이해한 조건`을
   별도로 표시한다.

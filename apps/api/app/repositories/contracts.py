@@ -6,6 +6,7 @@ from uuid import UUID
 
 from app.core.enums import ContractStatus
 from app.schemas.contracts import ContractCreate
+from app.schemas.understood_terms import UnderstoodTerm
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class ContractRecord:
     termination_notice_date: date | None
     renewal_type: str | None
     total_amount: int | None
-    understood_term: dict[str, Any] | None
+    understood_term: UnderstoodTerm | None
     renewal_decision: dict[str, Any] | None
     modusign_document_id: str | None
     created_at: datetime

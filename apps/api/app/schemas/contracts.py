@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.core.enums import AuditActorType, AuditEventType, ContractStatus
+from app.schemas.understood_terms import UnderstoodTerm
 
 
 class ContractCreate(BaseModel):
@@ -41,7 +42,7 @@ class Contract(BaseModel):
     termination_notice_date: date | None = None
     renewal_type: str | None = None
     total_amount: int | None = None
-    understood_term: dict[str, Any] | None = None
+    understood_term: UnderstoodTerm | None = None
     renewal_decision: dict[str, Any] | None = None
     modusign_document_id: str | None = None
     created_at: datetime

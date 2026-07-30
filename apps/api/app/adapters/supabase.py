@@ -555,6 +555,13 @@ class SupabaseAdapter:
 
         if not await self.is_contract_owned(owner_id=owner_id, contract_id=contract_id):
             return None
+        return await self._get_understood_term_for_owned_contract(contract_id=contract_id)
+
+    async def _get_understood_term_for_owned_contract(
+        self,
+        *,
+        contract_id: UUID,
+    ) -> UnderstoodTerm | None:
         client = self._require_live_client()
         try:
             response = await asyncio.to_thread(
@@ -639,7 +646,13 @@ class SupabaseAdapter:
             async with self._mock_lock:
                 if (owner_id, contract_id) not in self._mock_owned_contracts:
                     return None
-                return self._mock_contracts.get(contract_id)
+                record = self._mock_contracts.get(contract_id)
+                if record is None:
+                    return None
+                return replace(
+                    record,
+                    understood_term=self._mock_understood_terms.get(contract_id),
+                )
 
         client = self._require_live_client()
         try:
@@ -657,7 +670,11 @@ class SupabaseAdapter:
             raise ExternalStorageFailure("계약 조회에 실패했습니다.") from error
         if not response.data:
             return None
-        return _contract_record_from_row(response.data[0], owner_id=owner_id)
+        record = _contract_record_from_row(response.data[0], owner_id=owner_id)
+        understood_term = await self._get_understood_term_for_owned_contract(
+            contract_id=contract_id,
+        )
+        return replace(record, understood_term=understood_term)
 
     async def list(self, *, owner_id: UUID) -> Sequence[ContractRecord]:
         if self.mode == "mock":
@@ -1893,6 +1910,7 @@ def _representative_obligation(
 
 
 def _contract_record_from_row(row: dict, *, owner_id: UUID) -> ContractRecord:
+    understood_term = row.get("understood_term")
     return ContractRecord(
         id=UUID(str(row["id"])),
         owner_id=UUID(str(row.get("owner_id", owner_id))),
@@ -1905,7 +1923,11 @@ def _contract_record_from_row(row: dict, *, owner_id: UUID) -> ContractRecord:
         termination_notice_date=_parse_date(row.get("termination_notice_date")),
         renewal_type=row.get("renewal_type"),
         total_amount=int(row["total_amount"]) if row.get("total_amount") is not None else None,
-        understood_term=row.get("understood_term"),
+        understood_term=(
+            UnderstoodTerm.model_validate(understood_term)
+            if understood_term is not None
+            else None
+        ),
         renewal_decision=row.get("renewal_decision"),
         modusign_document_id=row.get("modusign_document_id"),
         created_at=_parse_datetime(row["created_at"]),

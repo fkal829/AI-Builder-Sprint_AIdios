@@ -33,6 +33,7 @@ from app.schemas.adjustments import (
     PublicAdjustmentOpen,
     PublicSubmission,
 )
+from app.schemas.agreements import AdjustmentConfirmation
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
 from app.services.public_tokens import PublicTokenService
 from app.services.state_machine import InvalidStatusTransition
@@ -264,6 +265,26 @@ class AdjustmentService:
             raise InvalidStatusTransition("조정 응답을 제출할 수 없는 상태입니다.")
         return PublicSubmission(submitted=True)
 
+    async def confirm(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        payload: AdjustmentConfirmation,
+    ) -> AdjustmentRequest:
+        confirmed = await self._repository.confirm_adjustment_with_audit(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            adjustment_request_id=payload.adjustment_request_id,
+            resolutions=tuple(
+                (item.review_item_id, item.resolution) for item in payload.confirmed_items
+            ),
+            confirmed_at=self._utc_now(),
+        )
+        if confirmed is None:
+            raise InvalidStatusTransition("조정 결과를 확정할 수 없는 상태입니다.")
+        return _adjustment_from_record(confirmed)
+
     async def _validated_draft_items(
         self,
         *,
@@ -361,6 +382,8 @@ def _request_item_from_review(review_item: ReviewItemForAdjustment) -> Adjustmen
         review_item_id=review_item.id,
         user_choice=review_item.user_choice,
         request_text=request_text,
+        category=review_item.category,
+        before_text=review_item.original_text,
     )
 
 

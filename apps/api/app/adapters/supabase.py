@@ -12,7 +12,11 @@ from supabase import Client, create_client
 
 from app.core.enums import (
     AdjustmentRequestStatus,
+    AdjustmentResolution,
     AdjustmentResponseDecision,
+    AgreementClauseCategory,
+    AgreementClauseDisposition,
+    AgreementClauseOutcome,
     ContractStatus,
     IdempotencyOperation,
     PublicTokenScope,
@@ -25,13 +29,16 @@ from app.repositories.adjustments import (
     AdjustmentRequestItemRecord,
     AdjustmentRequestRecord,
     AdjustmentResponseRecord,
+    FinalClauseRecord,
     PublicAdjustmentRecord,
     ReviewItemForAdjustment,
 )
+from app.repositories.agreements import AgreementCreationContext, AgreementRecord
 from app.repositories.contracts import AuditEventRecord, ContractRecord
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
 from app.repositories.public_tokens import PublicTokenRecord
+from app.schemas.agreements import Agreement
 from app.schemas.contracts import ContractCreate
 from app.schemas.documents import DocumentParseStatus, DocumentType
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
@@ -109,6 +116,8 @@ class SupabaseAdapter:
         self._mock_adjustment_responses: dict[
             UUID, tuple[AdjustmentResponseRecord, ...]
         ] = {}
+        self._mock_final_clauses: dict[UUID, tuple[FinalClauseRecord, ...]] = {}
+        self._mock_agreements: dict[UUID, AgreementRecord] = {}
         if mode == "live":
             self._client = create_client(url, service_role_key)
 
@@ -157,6 +166,10 @@ class SupabaseAdapter:
         self,
     ) -> dict[UUID, tuple[AdjustmentResponseRecord, ...]]:
         return dict(self._mock_adjustment_responses)
+
+    @property
+    def mock_agreements(self) -> dict[UUID, AgreementRecord]:
+        return dict(self._mock_agreements)
 
     async def authenticate_owner(self, token: str) -> UUID | None:
         if self.mode == "mock":
@@ -826,7 +839,7 @@ class SupabaseAdapter:
                     client.table("review_items")
                     .select(
                         "id,contract_id,status,user_choice,"
-                        "suggestion_compromise,suggestion_request"
+                        "suggestion_compromise,suggestion_request,category,original_text"
                     )
                     .eq("contract_id", str(contract_id))
                     .in_("id", [str(item_id) for item_id in review_item_ids])
@@ -1099,6 +1112,282 @@ class SupabaseAdapter:
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _adjustment_request_record_from_row(row)
 
+    async def confirm_adjustment_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        adjustment_request_id: UUID,
+        resolutions: tuple[tuple[UUID, AdjustmentResolution], ...],
+        confirmed_at: datetime,
+    ) -> AdjustmentRequestRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                request = self._mock_adjustment_requests.get(adjustment_request_id)
+                contract = self._mock_contracts.get(contract_id)
+                responses = self._mock_adjustment_responses.get(adjustment_request_id, ())
+                if (
+                    request is None
+                    or request.contract_id != contract_id
+                    or request.status != AdjustmentRequestStatus.RESPONDED
+                    or contract is None
+                    or contract.status != ContractStatus.NEGOTIATING
+                ):
+                    return None
+                expected_ids = {item.review_item_id for item in request.items}
+                if {item_id for item_id, _resolution in resolutions} != expected_ids:
+                    return None
+                response_by_id = {response.review_item_id: response for response in responses}
+                if set(response_by_id) != expected_ids:
+                    return None
+                item_by_id = {item.review_item_id: item for item in request.items}
+                final_clauses: list[FinalClauseRecord] = []
+                for item_id, resolution in resolutions:
+                    response = response_by_id[item_id]
+                    item = item_by_id[item_id]
+                    if resolution == AdjustmentResolution.ACCEPT_REQUEST:
+                        if response.decision != AdjustmentResponseDecision.ACCEPT:
+                            return None
+                        final_clauses.append(
+                            FinalClauseRecord(
+                                review_item_id=item_id,
+                                category=item.category,
+                                resolution=resolution,
+                                outcome=AgreementClauseOutcome.AGREED.value,
+                                disposition=AgreementClauseDisposition.AGREED.value,
+                                before_text=item.before_text,
+                                after_text=item.request_text,
+                                reason=None,
+                            )
+                        )
+                    elif resolution == AdjustmentResolution.ACCEPT_COUNTERPROPOSAL:
+                        if (
+                            response.decision != AdjustmentResponseDecision.COUNTER
+                            or response.counter_text is None
+                        ):
+                            return None
+                        final_clauses.append(
+                            FinalClauseRecord(
+                                review_item_id=item_id,
+                                category=item.category,
+                                resolution=resolution,
+                                outcome=AgreementClauseOutcome.AGREED.value,
+                                disposition=AgreementClauseDisposition.AGREED.value,
+                                before_text=item.before_text,
+                                after_text=response.counter_text,
+                                reason=None,
+                            )
+                        )
+                    else:
+                        final_clauses.append(
+                            FinalClauseRecord(
+                                review_item_id=item_id,
+                                category=item.category,
+                                resolution=resolution,
+                                outcome=AgreementClauseOutcome.KEPT_ORIGINAL.value,
+                                disposition=(
+                                    AgreementClauseDisposition.REJECTED.value
+                                    if response.decision == AdjustmentResponseDecision.REJECT
+                                    else AgreementClauseDisposition.WITHDRAWN.value
+                                ),
+                                before_text=item.before_text,
+                                after_text=item.before_text,
+                                reason=(
+                                    response.reason
+                                    if response.decision == AdjustmentResponseDecision.REJECT
+                                    else "소상공인이 원계약 유지를 선택했습니다."
+                                ),
+                            )
+                        )
+                review_items = [self._mock_review_items.get(item_id) for item_id in expected_ids]
+                if any(
+                    item is None or item.status != ReviewItemStatus.SENT
+                    for item in review_items
+                ):
+                    return None
+                self._mock_adjustment_requests[request.id] = replace(
+                    request,
+                    status=AdjustmentRequestStatus.CONFIRMED,
+                    updated_at=confirmed_at,
+                )
+                for clause in final_clauses:
+                    review_item = self._mock_review_items[clause.review_item_id]
+                    self._mock_review_items[clause.review_item_id] = replace(
+                        review_item,
+                        status=(
+                            ReviewItemStatus.RESOLVED
+                            if clause.outcome == AgreementClauseOutcome.AGREED.value
+                            else ReviewItemStatus.KEPT_ORIGINAL
+                        ),
+                    )
+                self._mock_contracts[contract_id] = replace(
+                    contract,
+                    status=ContractStatus.READY_TO_SIGN,
+                    updated_at=confirmed_at,
+                )
+                self._mock_final_clauses[request.id] = tuple(final_clauses)
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="ADJUSTMENT_CONFIRMED",
+                        actor_type="OWNER",
+                        summary="조정 결과를 확정했습니다.",
+                        created_at=confirmed_at,
+                    )
+                )
+                return self._mock_adjustment_requests[request.id]
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_adjustment_request_id": str(adjustment_request_id),
+            "p_confirmed_at": confirmed_at.isoformat(),
+            "p_confirmed_items": [
+                {"review_item_id": str(item_id), "resolution": resolution.value}
+                for item_id, resolution in resolutions
+            ],
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("confirm_adjustment_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("조정 결과 확정 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _adjustment_request_record_from_row(row)
+
+    async def get_agreement_creation_context(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> AgreementCreationContext | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                contract = self._mock_contracts.get(contract_id)
+                if contract is None:
+                    return None
+                requests = [
+                    request
+                    for request in self._mock_adjustment_requests.values()
+                    if request.contract_id == contract_id
+                    and request.status == AdjustmentRequestStatus.CONFIRMED
+                ]
+                if len(requests) != 1:
+                    return None
+                request = requests[0]
+                documents = sorted(
+                    (
+                        document
+                        for document in self._mock_documents.values()
+                        if document.contract_id == contract_id
+                        and document.type == DocumentType.CONTRACT
+                    ),
+                    key=lambda document: (document.created_at, str(document.id)),
+                    reverse=True,
+                )
+                return AgreementCreationContext(
+                    contract=contract,
+                    original_document_id=documents[0].id if documents else None,
+                    adjustment_request_id=request.id,
+                    final_clauses=self._mock_final_clauses.get(request.id, ()),
+                )
+
+        client = self._require_live_client()
+        params = {"p_owner_id": str(owner_id), "p_contract_id": str(contract_id)}
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("get_agreement_creation_context", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("합의서 생성 정보를 조회하지 못했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _agreement_creation_context_from_row(row, owner_id=owner_id)
+
+    async def create_agreement_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        record: AgreementRecord,
+    ) -> AgreementRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(record.agreement.contract_id)
+                if (
+                    contract is None
+                    or contract.owner_id != owner_id
+                    or contract.status != ContractStatus.READY_TO_SIGN
+                    or record.agreement.contract_id in self._mock_agreements
+                ):
+                    return None
+                self._mock_agreements[record.agreement.contract_id] = record
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=record.agreement.contract_id,
+                        event_type="AGREEMENT_CREATED",
+                        actor_type="OWNER",
+                        summary="변경·확인 합의서를 생성했습니다.",
+                        created_at=record.created_at,
+                    )
+                )
+                return record
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(record.agreement.contract_id),
+            "p_agreement_id": str(record.agreement.id),
+            "p_adjustment_request_id": str(record.adjustment_request_id),
+            "p_agreement": record.agreement.model_dump(mode="json"),
+            "p_created_at": record.created_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("create_agreement_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("합의서 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _agreement_record_from_row(row)
+
+    async def get_owned_agreement(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> AgreementRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                return self._mock_agreements.get(contract_id)
+
+        client = self._require_live_client()
+        params = {"p_owner_id": str(owner_id), "p_contract_id": str(contract_id)}
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("get_owned_agreement", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("합의서 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _agreement_record_from_row(row)
+
     async def send_adjustment_with_audit(
         self,
         *,
@@ -1298,6 +1587,8 @@ def _review_item_for_adjustment_from_row(row: dict) -> ReviewItemForAdjustment:
         user_choice=SuggestionChoice(row["user_choice"]) if row.get("user_choice") else None,
         suggestion_compromise=row["suggestion_compromise"],
         suggestion_request=row["suggestion_request"],
+        category=AgreementClauseCategory(row.get("category", "OTHER")),
+        original_text=row.get("original_text", "원계약에서 확인되지 않아 추가 확인 필요"),
     )
 
 
@@ -1307,6 +1598,10 @@ def _adjustment_request_record_from_row(row: dict) -> AdjustmentRequestRecord:
             review_item_id=UUID(str(item["review_item_id"])),
             user_choice=SuggestionChoice(item["user_choice"]),
             request_text=item["request_text"],
+            category=AgreementClauseCategory(item.get("category", "OTHER")),
+            before_text=item.get(
+                "before_text", "원계약에서 확인되지 않아 추가 확인 필요"
+            ),
         )
         for item in row["items"]
     )
@@ -1348,4 +1643,49 @@ def _public_adjustment_record_from_row(row: dict) -> PublicAdjustmentRecord:
     return PublicAdjustmentRecord(
         contract_title=row["contract_title"],
         request=_adjustment_request_record_from_row(row["request"]),
+    )
+
+
+def _final_clause_record_from_row(row: dict) -> FinalClauseRecord:
+    return FinalClauseRecord(
+        review_item_id=UUID(str(row["review_item_id"])),
+        category=AgreementClauseCategory(row["category"]),
+        resolution=AdjustmentResolution(row["resolution"]),
+        outcome=row["outcome"],
+        disposition=row["disposition"],
+        before_text=row["before_text"],
+        after_text=row["after_text"],
+        reason=row.get("reason"),
+    )
+
+
+def _agreement_creation_context_from_row(
+    row: dict,
+    *,
+    owner_id: UUID,
+) -> AgreementCreationContext:
+    contract = _contract_record_from_row(row["contract"], owner_id=owner_id)
+    return AgreementCreationContext(
+        contract=contract,
+        original_document_id=(
+            UUID(str(row["original_document_id"]))
+            if row.get("original_document_id")
+            else None
+        ),
+        adjustment_request_id=(
+            UUID(str(row["adjustment_request_id"]))
+            if row.get("adjustment_request_id")
+            else None
+        ),
+        final_clauses=tuple(
+            _final_clause_record_from_row(clause) for clause in row.get("final_clauses", [])
+        ),
+    )
+
+
+def _agreement_record_from_row(row: dict) -> AgreementRecord:
+    return AgreementRecord(
+        agreement=Agreement.model_validate(row["agreement"]),
+        adjustment_request_id=UUID(str(row["adjustment_request_id"])),
+        created_at=_parse_datetime(row["created_at"]),
     )

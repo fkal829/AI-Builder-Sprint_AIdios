@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Resp
 
 from app.api.dependencies import (
     get_adjustment_service,
+    get_agreement_service,
     get_contract_service,
     get_current_owner_id,
     get_document_access_service,
@@ -21,11 +22,13 @@ from app.schemas.adjustments import (
     ExplicitConfirmation,
     OwnerAdjustmentDetail,
 )
+from app.schemas.agreements import AdjustmentConfirmation, Agreement
 from app.schemas.common import ApiResponse
 from app.schemas.contracts import AuditEvent, Contract, ContractCreate, ContractListItem
 from app.schemas.documents import Document, DocumentAccess, DocumentType
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
 from app.services.adjustments import AdjustmentService
+from app.services.agreements import AgreementService
 from app.services.contracts import ContractService
 from app.services.documents import (
     DocumentAccessService,
@@ -35,6 +38,56 @@ from app.services.documents import (
 from app.services.understood_terms import UnderstoodTermService
 
 router = APIRouter()
+
+
+@router.post(
+    "/{contract_id}/adjustment-confirmation",
+    response_model=ApiResponse[AdjustmentRequest],
+)
+async def confirm_adjustment(
+    request: Request,
+    contract_id: UUID,
+    payload: AdjustmentConfirmation,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[AdjustmentService, Depends(get_adjustment_service)],
+) -> ApiResponse[AdjustmentRequest]:
+    adjustment = await service.confirm(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        payload=payload,
+    )
+    return ApiResponse(data=adjustment, error=None, request_id=request_id(request))
+
+
+@router.post(
+    "/{contract_id}/agreement",
+    response_model=ApiResponse[Agreement],
+    status_code=201,
+)
+async def create_agreement(
+    request: Request,
+    contract_id: UUID,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[AgreementService, Depends(get_agreement_service)],
+) -> ApiResponse[Agreement]:
+    agreement = await service.create(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        idempotency_key=idempotency_key,
+    )
+    return ApiResponse(data=agreement, error=None, request_id=request_id(request))
+
+
+@router.get("/{contract_id}/agreement", response_model=ApiResponse[Agreement])
+async def get_agreement(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[AgreementService, Depends(get_agreement_service)],
+) -> ApiResponse[Agreement]:
+    agreement = await service.get(owner_id=owner_id, contract_id=contract_id)
+    return ApiResponse(data=agreement, error=None, request_id=request_id(request))
 
 
 @router.post(

@@ -9,6 +9,7 @@ from app.adapters.supabase import SupabaseAdapter
 from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedAccess
 from app.services.adjustments import AdjustmentService
+from app.services.agreements import AgreementService
 from app.services.contracts import ContractService
 from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
@@ -98,6 +99,15 @@ async def get_adjustment_service(
             signing_secret=settings.public_token_secret,
         ),
         public_app_base_url=settings.public_app_base_url,
+    )
+
+
+async def get_agreement_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> AgreementService:
+    return AgreementService(
+        repository=supabase,
+        idempotency=IdempotencyService(supabase),
     )
 
 

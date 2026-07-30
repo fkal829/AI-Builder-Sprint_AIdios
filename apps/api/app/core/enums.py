@@ -157,6 +157,31 @@ class AdjustmentResponseDecision(StrEnum):
     COUNTER = "COUNTER"
 
 
+class AdjustmentResolution(StrEnum):
+    ACCEPT_REQUEST = "ACCEPT_REQUEST"
+    ACCEPT_COUNTERPROPOSAL = "ACCEPT_COUNTERPROPOSAL"
+    KEEP_ORIGINAL = "KEEP_ORIGINAL"
+
+
+class AgreementClauseCategory(StrEnum):
+    TERM_AND_PAYMENT = "TERM_AND_PAYMENT"
+    DELIVERABLES = "DELIVERABLES"
+    TERMINATION_AND_RENEWAL = "TERMINATION_AND_RENEWAL"
+    RIGHTS_AND_SAFETY = "RIGHTS_AND_SAFETY"
+    OTHER = "OTHER"
+
+
+class AgreementClauseOutcome(StrEnum):
+    AGREED = "AGREED"
+    KEPT_ORIGINAL = "KEPT_ORIGINAL"
+
+
+class AgreementClauseDisposition(StrEnum):
+    AGREED = "AGREED"
+    REJECTED = "REJECTED"
+    WITHDRAWN = "WITHDRAWN"
+
+
 class ExtractedField(StrEnum):
     CONTRACT_PARTY_OWNER = "contract_party_owner"
     CONTRACT_PARTY_AGENCY = "contract_party_agency"

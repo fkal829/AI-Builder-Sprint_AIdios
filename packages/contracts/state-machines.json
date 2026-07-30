@@ -5,7 +5,7 @@
     "REVIEW_REQUIRED": ["NEGOTIATING", "READY_TO_SIGN"],
     "NEGOTIATING": ["READY_TO_SIGN"],
     "READY_TO_SIGN": ["SIGNING"],
-    "SIGNING": ["SIGNED"],
+    "SIGNING": ["SIGNED", "READY_TO_SIGN"],
     "SIGNED": ["IN_PROGRESS"],
     "IN_PROGRESS": ["COMPLETED", "RENEWAL_DUE"],
     "COMPLETED": [],
@@ -13,7 +13,7 @@
   },
   "adjustment_request": {
     "DRAFT": ["SENT"],
-    "SENT": ["OPENED", "EXPIRED"],
+    "SENT": ["OPENED", "RESPONDED", "EXPIRED"],
     "OPENED": ["RESPONDED", "EXPIRED"],
     "RESPONDED": ["CONFIRMED"],
     "CONFIRMED": [],
@@ -21,7 +21,7 @@
   },
   "internal_signature": {
     "REQUEST_READY": ["REQUESTING"],
-    "REQUESTING": ["SIGNING", "FAILED"],
+    "REQUESTING": ["SIGNING", "COMPLETED", "ABORTED", "FAILED"],
     "SIGNING": ["COMPLETED", "ABORTED", "FAILED"],
     "COMPLETED": [],
     "ABORTED": [],

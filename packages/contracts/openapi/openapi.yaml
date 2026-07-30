@@ -1103,6 +1103,9 @@ components:
       type: string
       enum:
         - CONTRACT_CREATED
+        - CONTRACT_STARTED
+        - CONTRACT_COMPLETED
+        - CONTRACT_RENEWAL_DUE
         - DOCUMENT_UPLOADED
         - UNDERSTOOD_TERMS_SAVED
         - ANALYSIS_STARTED

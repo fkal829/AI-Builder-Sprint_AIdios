@@ -110,6 +110,11 @@ minimum: 0
   노출해서는 안 된다.
 - 공개 API의 성공·오류 응답과 토큰 생성 응답에는 `Cache-Control: no-store`를 적용한다.
 
+문서 업로드는 기본적으로 파일당 20 MiB, PDF 100페이지로 제한한다. 선언 MIME과 magic
+bytes를 함께 검증하고 빈 파일·손상된 PDF·암호화 PDF는 저장하지 않는다. 원본 파일명은
+Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서버가 경로를 만든다.
+`SUPABASE_MODE=mock`의 고정 데모 인증은 로컬 전용이며 production에서는 사용할 수 없다.
+
 ## 4. 멱등성
 
 다음 작업은 `Idempotency-Key: <UUID>` 헤더가 필수다.

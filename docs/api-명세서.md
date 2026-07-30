@@ -357,7 +357,9 @@ Form:
 
 `CONTRACT`, `PROPOSAL`, `ESTIMATE`는 PDF를 받고 `MESSAGE`는 PDF·PNG·JPEG·UTF-8
 text 파일을 선택 자료로 받는다. 확장자만 신뢰하지 않고 MIME, magic bytes, 빈 파일,
-암호화 여부와 설정된 크기·페이지 제한을 검사한다. 이미지·text 메시지는
+암호화 여부를 검사한다. P0 기본 제한은 파일당 20 MiB, PDF 100페이지이며
+`DOCUMENT_MAX_SIZE_MIB`, `DOCUMENT_MAX_PDF_PAGES`로 더 낮게 조정할 수 있다.
+이미지·text 메시지는
 `source_page=1`인 단일 가상 페이지로 정규화한다.
 
 응답 `Document`:

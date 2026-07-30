@@ -141,9 +141,10 @@ paths:
       description: |
         CONTRACT, PROPOSAL, ESTIMATE는 PDF를 받고 MESSAGE는 PDF, PNG, JPEG 또는 UTF-8
         text 파일을 선택 자료로 받을 수 있다. 확장자만 믿지 않고 선언 MIME과 magic
-        bytes를 함께 검증한다. 페이지가 없는 이미지·text MESSAGE는 source_page=1인
-        단일 가상 페이지로 정규화한다. 문서 메타데이터 저장과 DOCUMENT_UPLOADED 감사
-        이벤트는 하나의 트랜잭션으로 기록한다.
+        bytes를 함께 검증한다. 빈 파일, 손상·암호화 PDF를 거부하며 P0 기본 제한은
+        파일당 20 MiB, PDF 100페이지다. 페이지가 없는 이미지·text MESSAGE는
+        source_page=1인 단일 가상 페이지로 정규화한다. 문서 메타데이터 저장과
+        DOCUMENT_UPLOADED 감사 이벤트는 하나의 트랜잭션으로 기록한다.
       requestBody:
         required: true
         content:

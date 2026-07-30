@@ -63,3 +63,17 @@
 - 서비스에는 역할, 이름, 서명 수단 종류, 마스킹된 연락처와 멱등성 확인용 단방향
   fingerprint만 저장한다.
 - 외부 요청 전에 실패하면 사용자가 연락처를 다시 확인해 재요청한다.
+
+## ADR-008 P0 문서 업로드 제한과 mock 인증
+
+- 상태: P0 확정
+- 결정: 계약서·제안서·견적서 PDF와 메시지 선택 자료는 파일당 최대 20 MiB로 제한한다.
+  PDF는 최대 100페이지이며 암호화되었거나 손상된 파일은 저장하지 않는다.
+- 선언 MIME과 실제 magic bytes가 일치해야 한다. `CONTRACT`, `PROPOSAL`, `ESTIMATE`는
+  PDF만 허용하고 `MESSAGE`는 PDF·PNG·JPEG·UTF-8 text를 허용한다.
+- 원본 파일명은 Storage 경로에 사용하지 않는다. 서버가 생성한 owner·contract·document
+  UUID 기반 경로에 저장하고 일반 `Document` 응답에는 경로를 포함하지 않는다.
+- 인증 공급자가 확정되기 전 로컬 `SUPABASE_MODE=mock`에서는 고정된 데모 Bearer 토큰과
+  데모 owner·contract UUID만 사용한다. production에서는 mock 모드로 기동할 수 없다.
+- 제한값은 `DOCUMENT_MAX_SIZE_MIB`, `DOCUMENT_MAX_PDF_PAGES`로 더 낮게 조정할 수 있다.
+  운영에서 상향할 때는 API 문서, Storage bucket 제한과 배포 설정을 함께 변경한다.

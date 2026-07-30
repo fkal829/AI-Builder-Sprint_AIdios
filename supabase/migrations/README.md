@@ -4,6 +4,11 @@
 
 첫 스키마에는 기획안의 `Contract`, `Document`, `UnderstoodTerm`, `ExtractedTerm`, `ReviewItem`, `AdjustmentRequest`, `AdjustmentResponse`, `Signature`, `Obligation`, `AuditEvent`를 포함합니다.
 
+`202607300001_p0_document_upload.sql`은 4.1 업로드 수직 흐름에 필요한 `Contract`,
+`Document`, `AuditEvent`, private `contracts` bucket과 원자적
+`create_document_with_audit` RPC를 먼저 만든다. 이후 모델은 기존 마이그레이션을
+수정하지 않고 후속 append-only SQL로 추가한다.
+
 규칙:
 
 - 원본 계약 파일 bucket은 private으로 유지합니다.

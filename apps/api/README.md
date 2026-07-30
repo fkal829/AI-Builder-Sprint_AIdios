@@ -66,6 +66,12 @@ curl -X PUT \
   초기화됨
 - live 모드에서는 `save_understood_term_with_audit` RPC로 소유권 확인·upsert·감사
   이벤트를 원자적으로 처리
+- 3.6 재계약 의사는 D-30 만료, D-14 해지 통보기한, D-7 자동갱신 검토 구간에서만
+  저장할 수 있으며 동일 선택 재시도는 기존 `decided_at`을 유지함
+- live 모드에서는 `save_renewal_decision_with_audit` RPC가 선택 변경과
+  `RENEWAL_DECISION_SAVED` 감사 이벤트를 원자적으로 저장함
+- `RENEW_WITH_CHANGES`는 이전 거절·원안 유지 검토 항목 ID만 반환하며 선택만으로 계약
+  상태, 새 계약·문서·조정·서명을 자동 변경하거나 생성하지 않음
 - 4.2 응답에는 `Cache-Control: no-store`, 300초 유효 `access_url`,
   `expires_at`, 요청한 `source_page`가 포함됨
 - mock `access_url`은 같은 API 프로세스의 메모리 원문을 실제로 반환하며 프로세스

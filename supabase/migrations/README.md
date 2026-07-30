@@ -29,6 +29,11 @@
 `CONTRACT_STARTED`, `CONTRACT_COMPLETED`, `CONTRACT_RENEWAL_DUE`를
 `audit_events.event_type` 체크 제약에 추가해 API·Python enum·DB 허용값을 일치시킨다.
 
+`20260730260000_add_renewal_decisions.sql`은 3.6의 계약당 최신 재계약 의사와 재검토
+항목 ID를 저장한다. `save_renewal_decision_with_audit` RPC가 소유권과
+D-30·D-14·D-7 검토 구간을 다시 확인하고, 실제 선택 변경과
+`RENEWAL_DECISION_SAVED` 감사 이벤트를 한 트랜잭션으로 처리한다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

@@ -143,6 +143,12 @@ class SuggestionChoice(StrEnum):
     REQUEST = "REQUEST"
 
 
+class RenewalDecisionType(StrEnum):
+    RENEW_SAME_TERMS = "RENEW_SAME_TERMS"
+    RENEW_WITH_CHANGES = "RENEW_WITH_CHANGES"
+    TERMINATE = "TERMINATE"
+
+
 class AdjustmentResponseDecision(StrEnum):
     ACCEPT = "ACCEPT"
     REJECT = "REJECT"

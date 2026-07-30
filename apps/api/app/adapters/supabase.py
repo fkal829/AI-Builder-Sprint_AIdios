@@ -20,6 +20,7 @@ from app.core.enums import (
     IdempotencyOperation,
     ObligationStatus,
     PublicTokenScope,
+    RenewalDecisionType,
     ReviewItemStatus,
     SuggestionChoice,
     VerificationStatus,
@@ -35,7 +36,12 @@ from app.repositories.adjustments import (
     ReviewItemForAdjustment,
 )
 from app.repositories.analysis import AnalysisTaskRecord
-from app.repositories.contracts import AuditEventRecord, ContractRecord
+from app.repositories.contracts import (
+    AuditEventRecord,
+    ContractRecord,
+    RenewalDecisionSaveOutcome,
+    RenewalDecisionSaveResult,
+)
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
 from app.repositories.public_tokens import PublicTokenRecord
@@ -44,7 +50,7 @@ from app.repositories.review_items import (
     ReviewItemSelectionResult,
 )
 from app.schemas.analysis import Analysis, ReviewItem
-from app.schemas.contracts import ContractCreate
+from app.schemas.contracts import ContractCreate, RenewalDecision
 from app.schemas.documents import DocumentParseStatus, DocumentType
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
 
@@ -127,6 +133,7 @@ class SupabaseAdapter:
         self._mock_object_content_types: dict[str, str] = {}
         self._mock_documents: dict[UUID, DocumentRecord] = {}
         self._mock_understood_terms: dict[UUID, UnderstoodTerm] = {}
+        self._mock_renewal_decisions: dict[UUID, RenewalDecision] = {}
         self._mock_audit_events: list[MockAuditEvent] = []
         self._mock_signed_accesses: dict[str, MockSignedAccess] = {}
         self._mock_public_tokens: dict[str, PublicTokenRecord] = {}
@@ -155,6 +162,10 @@ class SupabaseAdapter:
     @property
     def mock_understood_terms(self) -> dict[UUID, UnderstoodTerm]:
         return dict(self._mock_understood_terms)
+
+    @property
+    def mock_renewal_decisions(self) -> dict[UUID, RenewalDecision]:
+        return dict(self._mock_renewal_decisions)
 
     @property
     def mock_audit_events(self) -> tuple[MockAuditEvent, ...]:
@@ -582,6 +593,30 @@ class SupabaseAdapter:
             return None
         return UnderstoodTerm.model_validate(response.data[0])
 
+    async def _get_renewal_decision_for_owned_contract(
+        self,
+        *,
+        contract_id: UUID,
+    ) -> RenewalDecision | None:
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("renewal_decisions")
+                    .select(
+                        "contract_id,decision,decided_at,revisit_review_item_ids"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("재계약 의사 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        return RenewalDecision.model_validate(response.data[0])
+
     @staticmethod
     def _document_record_from_row(row) -> DocumentRecord:
         return DocumentRecord(
@@ -652,6 +687,7 @@ class SupabaseAdapter:
                 return replace(
                     record,
                     understood_term=self._mock_understood_terms.get(contract_id),
+                    renewal_decision=self._mock_renewal_decisions.get(contract_id),
                 )
 
         client = self._require_live_client()
@@ -674,7 +710,14 @@ class SupabaseAdapter:
         understood_term = await self._get_understood_term_for_owned_contract(
             contract_id=contract_id,
         )
-        return replace(record, understood_term=understood_term)
+        renewal_decision = await self._get_renewal_decision_for_owned_contract(
+            contract_id=contract_id,
+        )
+        return replace(
+            record,
+            understood_term=understood_term,
+            renewal_decision=renewal_decision,
+        )
 
     async def list(self, *, owner_id: UUID) -> Sequence[ContractRecord]:
         if self.mode == "mock":
@@ -737,6 +780,111 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("계약 감사 타임라인 조회에 실패했습니다.") from error
         return [_audit_event_record_from_row(row) for row in response.data or []]
+
+    async def save_renewal_decision_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        decision: RenewalDecisionType,
+        today: date,
+        decided_at: datetime,
+    ) -> RenewalDecisionSaveResult:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if (
+                    contract is None
+                    or (owner_id, contract_id) not in self._mock_owned_contracts
+                ):
+                    return RenewalDecisionSaveResult(
+                        outcome=RenewalDecisionSaveOutcome.NOT_FOUND,
+                        decision=None,
+                    )
+                if not _is_contract_in_renewal_review_window(contract, today=today):
+                    return RenewalDecisionSaveResult(
+                        outcome=RenewalDecisionSaveOutcome.OUTSIDE_REVIEW_WINDOW,
+                        decision=None,
+                    )
+
+                existing = self._mock_renewal_decisions.get(contract_id)
+                if existing is not None and existing.decision == decision:
+                    return RenewalDecisionSaveResult(
+                        outcome=RenewalDecisionSaveOutcome.UNCHANGED,
+                        decision=existing,
+                    )
+
+                revisit_review_item_ids: list[UUID] = []
+                if decision == RenewalDecisionType.RENEW_WITH_CHANGES:
+                    revisit_ids = {
+                        item.id
+                        for item in self._mock_review_items.values()
+                        if item.contract_id == contract_id
+                        and item.status == ReviewItemStatus.KEPT_ORIGINAL
+                    }
+                    for request_id, responses in self._mock_adjustment_responses.items():
+                        request = self._mock_adjustment_requests.get(request_id)
+                        if request is None or request.contract_id != contract_id:
+                            continue
+                        revisit_ids.update(
+                            response.review_item_id
+                            for response in responses
+                            if response.decision == AdjustmentResponseDecision.REJECT
+                        )
+                    revisit_review_item_ids = sorted(revisit_ids, key=str)
+
+                saved = RenewalDecision(
+                    contract_id=contract_id,
+                    decision=decision,
+                    decided_at=decided_at,
+                    revisit_review_item_ids=revisit_review_item_ids,
+                )
+                self._mock_renewal_decisions[contract_id] = saved
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="RENEWAL_DECISION_SAVED",
+                        actor_type="OWNER",
+                        summary="만료·재계약 의사를 저장했습니다.",
+                        created_at=decided_at,
+                    )
+                )
+                return RenewalDecisionSaveResult(
+                    outcome=RenewalDecisionSaveOutcome.SAVED,
+                    decision=saved,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_decision": decision.value,
+            "p_today": today.isoformat(),
+            "p_decided_at": decided_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "save_renewal_decision_with_audit",
+                    params,
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("재계약 의사 저장에 실패했습니다.") from error
+        payload = response.data[0] if isinstance(response.data, list) else response.data
+        if not isinstance(payload, dict):
+            raise ExternalStorageFailure("재계약 의사 저장 결과를 확인할 수 없습니다.")
+        outcome = RenewalDecisionSaveOutcome(payload["outcome"])
+        decision_payload = payload.get("decision")
+        return RenewalDecisionSaveResult(
+            outcome=outcome,
+            decision=(
+                RenewalDecision.model_validate(decision_payload)
+                if isinstance(decision_payload, dict)
+                else None
+            ),
+        )
 
     async def create_public_token(self, *, record: PublicTokenRecord) -> PublicTokenRecord:
         if self.mode == "mock":
@@ -1911,6 +2059,7 @@ def _representative_obligation(
 
 def _contract_record_from_row(row: dict, *, owner_id: UUID) -> ContractRecord:
     understood_term = row.get("understood_term")
+    renewal_decision = row.get("renewal_decision")
     return ContractRecord(
         id=UUID(str(row["id"])),
         owner_id=UUID(str(row.get("owner_id", owner_id))),
@@ -1928,10 +2077,40 @@ def _contract_record_from_row(row: dict, *, owner_id: UUID) -> ContractRecord:
             if understood_term is not None
             else None
         ),
-        renewal_decision=row.get("renewal_decision"),
+        renewal_decision=(
+            RenewalDecision.model_validate(renewal_decision)
+            if renewal_decision is not None
+            else None
+        ),
         modusign_document_id=row.get("modusign_document_id"),
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
+    )
+
+
+def _is_contract_in_renewal_review_window(
+    contract: ContractRecord,
+    *,
+    today: date,
+) -> bool:
+    expiry_d_day = (contract.end_date - today).days if contract.end_date else None
+    termination_notice_d_day = (
+        (contract.termination_notice_date - today).days
+        if contract.termination_notice_date
+        else None
+    )
+    auto_renewal_d_day = (
+        expiry_d_day
+        if contract.renewal_type == "AUTO" and contract.end_date
+        else None
+    )
+    return any(
+        d_day is not None and 0 <= d_day <= upper_bound
+        for d_day, upper_bound in (
+            (expiry_d_day, 30),
+            (termination_notice_d_day, 14),
+            (auto_renewal_d_day, 7),
+        )
     )
 
 

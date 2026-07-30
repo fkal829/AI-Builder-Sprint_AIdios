@@ -302,6 +302,8 @@ async def test_live_contract_detail_loads_understood_term(monkeypatch) -> None:
                 return FakeResponse([contract_row])
             if self.table_name == "understood_terms":
                 return FakeResponse([understood_term_row])
+            if self.table_name == "renewal_decisions":
+                return FakeResponse([])
             raise AssertionError(f"예상하지 못한 테이블 조회: {self.table_name}")
 
     class FakeClient:
@@ -334,7 +336,11 @@ async def test_live_contract_detail_loads_understood_term(monkeypatch) -> None:
     assert detail.understood_term is not None
     assert detail.understood_term.contract_id == contract_id
     assert detail.understood_term.duration_text == "1년"
-    assert fake_client.tables == ["contracts", "understood_terms"]
+    assert fake_client.tables == [
+        "contracts",
+        "understood_terms",
+        "renewal_decisions",
+    ]
 
 
 def test_contract_detail_openapi_uses_understood_term_schema() -> None:

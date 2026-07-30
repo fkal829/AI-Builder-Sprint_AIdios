@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     app_name: str = "안심홍보계약 API"
     api_v1_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:3000"
+    public_app_base_url: str = "http://localhost:3000"
 
     supabase_url: str = ""
     supabase_service_role_key: str = ""

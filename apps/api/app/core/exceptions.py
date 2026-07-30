@@ -36,6 +36,15 @@ class InvalidDocument(ApiException):
         )
 
 
+class InvalidAdjustmentRequest(ApiException):
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            status_code=422,
+            code=ErrorCode.VALIDATION_ERROR,
+            message=message,
+        )
+
+
 class IdempotencyConflict(ApiException):
     def __init__(self) -> None:
         super().__init__(

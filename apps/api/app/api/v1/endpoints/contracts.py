@@ -3,36 +3,103 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile
 
 from app.api.dependencies import (
+    get_adjustment_service,
+    get_contract_service,
     get_current_owner_id,
     get_document_access_service,
     get_document_upload_service,
     get_understood_term_service,
 )
 from app.core.http import request_id
+from app.schemas.adjustments import (
+    AdjustmentRequest,
+    AdjustmentRequestCreate,
+    AdjustmentRequestSent,
+    ExplicitConfirmation,
+    OwnerAdjustmentDetail,
+)
 from app.schemas.common import ApiResponse
+from app.schemas.contracts import AuditEvent, Contract, ContractCreate, ContractListItem
 from app.schemas.documents import Document, DocumentAccess, DocumentType
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
+from app.services.adjustments import AdjustmentService
+from app.services.contracts import ContractService
 from app.services.documents import (
     DocumentAccessService,
     DocumentUploadService,
     read_upload_content,
 )
 from app.services.understood_terms import UnderstoodTermService
-    get_contract_service,
-    get_current_owner_id,
-    get_document_upload_service,
-)
-from app.core.http import request_id
-from app.schemas.common import ApiResponse
-from app.schemas.contracts import AuditEvent, Contract, ContractCreate, ContractListItem
-from app.schemas.documents import Document, DocumentType
-from app.services.contracts import ContractService
-from app.services.documents import DocumentUploadService, read_upload_content
 
 router = APIRouter()
+
+
+@router.post(
+    "/{contract_id}/adjustment-requests",
+    response_model=ApiResponse[AdjustmentRequest],
+    status_code=201,
+)
+async def create_adjustment_request_draft(
+    request: Request,
+    contract_id: UUID,
+    payload: AdjustmentRequestCreate,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[AdjustmentService, Depends(get_adjustment_service)],
+) -> ApiResponse[AdjustmentRequest]:
+    adjustment = await service.create_draft(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        idempotency_key=idempotency_key,
+        payload=payload,
+    )
+    return ApiResponse(data=adjustment, error=None, request_id=request_id(request))
+
+
+@router.get(
+    "/{contract_id}/adjustment-requests/{adjustment_request_id}",
+    response_model=ApiResponse[OwnerAdjustmentDetail],
+)
+async def get_owner_adjustment_request(
+    request: Request,
+    contract_id: UUID,
+    adjustment_request_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[AdjustmentService, Depends(get_adjustment_service)],
+) -> ApiResponse[OwnerAdjustmentDetail]:
+    detail = await service.get_detail(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        adjustment_request_id=adjustment_request_id,
+    )
+    return ApiResponse(data=detail, error=None, request_id=request_id(request))
+
+
+@router.post(
+    "/{contract_id}/adjustment-requests/{adjustment_request_id}/send",
+    response_model=ApiResponse[AdjustmentRequestSent],
+)
+async def send_adjustment_request(
+    request: Request,
+    response: Response,
+    contract_id: UUID,
+    adjustment_request_id: UUID,
+    payload: ExplicitConfirmation,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[AdjustmentService, Depends(get_adjustment_service)],
+) -> ApiResponse[AdjustmentRequestSent]:
+    sent = await service.send(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        adjustment_request_id=adjustment_request_id,
+        idempotency_key=idempotency_key,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return ApiResponse(data=sent, error=None, request_id=request_id(request))
 
 
 @router.post("", response_model=ApiResponse[Contract], status_code=201)

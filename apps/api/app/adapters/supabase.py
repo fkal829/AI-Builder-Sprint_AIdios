@@ -1,20 +1,29 @@
 import asyncio
 import hmac
 import secrets
-from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from collections.abc import Sequence
-from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import Literal
 from uuid import UUID, uuid4
 
 from supabase import Client, create_client
 
-from app.core.enums import ContractStatus, IdempotencyOperation, PublicTokenScope
+from app.core.enums import (
+    AdjustmentRequestStatus,
+    ContractStatus,
+    IdempotencyOperation,
+    PublicTokenScope,
+    ReviewItemStatus,
+    SuggestionChoice,
+)
 from app.core.exceptions import ExternalStorageFailure
+from app.repositories.adjustments import (
+    AdjustmentRequestItemRecord,
+    AdjustmentRequestRecord,
+    ReviewItemForAdjustment,
+)
 from app.repositories.contracts import AuditEventRecord, ContractRecord
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
@@ -91,6 +100,8 @@ class SupabaseAdapter:
         self._mock_idempotency: dict[
             tuple[UUID, IdempotencyOperation, UUID, UUID], IdempotencyRecord
         ] = {}
+        self._mock_review_items: dict[UUID, ReviewItemForAdjustment] = {}
+        self._mock_adjustment_requests: dict[UUID, AdjustmentRequestRecord] = {}
         if mode == "live":
             self._client = create_client(url, service_role_key)
 
@@ -113,6 +124,8 @@ class SupabaseAdapter:
     @property
     def mock_signed_accesses(self) -> tuple[MockSignedAccess, ...]:
         return tuple(self._mock_signed_accesses.values())
+
+    @property
     def mock_contracts(self) -> dict[UUID, ContractRecord]:
         return dict(self._mock_contracts)
 
@@ -123,6 +136,14 @@ class SupabaseAdapter:
     @property
     def mock_idempotency_records(self) -> tuple[IdempotencyRecord, ...]:
         return tuple(self._mock_idempotency.values())
+
+    @property
+    def mock_review_items(self) -> dict[UUID, ReviewItemForAdjustment]:
+        return dict(self._mock_review_items)
+
+    @property
+    def mock_adjustment_requests(self) -> dict[UUID, AdjustmentRequestRecord]:
+        return dict(self._mock_adjustment_requests)
 
     async def authenticate_owner(self, token: str) -> UUID | None:
         if self.mode == "mock":
@@ -368,9 +389,11 @@ class SupabaseAdapter:
                 self._mock_understood_terms[contract_id] = understood_term
                 self._mock_audit_events.append(
                     MockAuditEvent(
+                        id=uuid4(),
                         contract_id=contract_id,
                         event_type="UNDERSTOOD_TERMS_SAVED",
                         actor_type="OWNER",
+                        summary="사용자 이해조건을 저장했습니다.",
                         created_at=self._clock(),
                     )
                 )
@@ -763,6 +786,212 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("멱등성 예약 정리에 실패했습니다.") from error
 
+    async def list_review_items_for_adjustment(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        review_item_ids: Sequence[UUID],
+    ) -> Sequence[ReviewItemForAdjustment] | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                return [
+                    item
+                    for item_id in review_item_ids
+                    if (item := self._mock_review_items.get(item_id)) is not None
+                    and item.contract_id == contract_id
+                ]
+
+        client = self._require_live_client()
+        if not await self.is_contract_owned(owner_id=owner_id, contract_id=contract_id):
+            return None
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("review_items")
+                    .select(
+                        "id,contract_id,status,user_choice,"
+                        "suggestion_compromise,suggestion_request"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .in_("id", [str(item_id) for item_id in review_item_ids])
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("검토 항목 조회에 실패했습니다.") from error
+        return [_review_item_for_adjustment_from_row(row) for row in response.data or []]
+
+    async def create_adjustment_draft_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        record: AdjustmentRequestRecord,
+    ) -> AdjustmentRequestRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, record.contract_id) not in self._mock_owned_contracts:
+                    return None
+                self._mock_adjustment_requests[record.id] = record
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=record.contract_id,
+                        event_type="ADJUSTMENT_DRAFT_CREATED",
+                        actor_type="OWNER",
+                        summary="조정 요청 초안을 생성했습니다.",
+                        created_at=record.created_at,
+                    )
+                )
+                return record
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_adjustment_request_id": str(record.id),
+            "p_contract_id": str(record.contract_id),
+            "p_expires_in_hours": record.expires_in_hours,
+            "p_review_item_ids": [str(item.review_item_id) for item in record.items],
+            "p_created_at": record.created_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("create_adjustment_draft_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("조정 요청 초안 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _adjustment_request_record_from_row(row)
+
+    async def get_owned_adjustment_request(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        adjustment_request_id: UUID,
+    ) -> AdjustmentRequestRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                record = self._mock_adjustment_requests.get(adjustment_request_id)
+                return record if record and record.contract_id == contract_id else None
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_adjustment_request_id": str(adjustment_request_id),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("get_owned_adjustment_request", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("조정 요청 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _adjustment_request_record_from_row(row)
+
+    async def send_adjustment_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        adjustment_request_id: UUID,
+        sent_at: datetime,
+        public_token: PublicTokenRecord,
+    ) -> AdjustmentRequestRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                record = self._mock_adjustment_requests.get(adjustment_request_id)
+                contract = self._mock_contracts.get(contract_id)
+                if (
+                    record is None
+                    or record.contract_id != contract_id
+                    or record.status != AdjustmentRequestStatus.DRAFT
+                    or contract is None
+                    or contract.status != ContractStatus.REVIEW_REQUIRED
+                    or any(
+                        item.contract_id == contract_id and item.sent_at is not None
+                        for item in self._mock_adjustment_requests.values()
+                    )
+                ):
+                    return None
+                review_item_ids = {item.review_item_id for item in record.items}
+                review_items = [self._mock_review_items.get(item_id) for item_id in review_item_ids]
+                if any(
+                    item is None
+                    or item.status != ReviewItemStatus.SELECTED
+                    or item.user_choice
+                    not in {SuggestionChoice.COMPROMISE, SuggestionChoice.REQUEST}
+                    for item in review_items
+                ):
+                    return None
+                expires_at = sent_at + timedelta(hours=record.expires_in_hours)
+                sent = replace(
+                    record,
+                    status=AdjustmentRequestStatus.SENT,
+                    sent_at=sent_at,
+                    expires_at=expires_at,
+                    updated_at=sent_at,
+                )
+                self._mock_adjustment_requests[record.id] = sent
+                for review_item in review_items:
+                    assert review_item is not None
+                    self._mock_review_items[review_item.id] = replace(
+                        review_item,
+                        status=ReviewItemStatus.SENT,
+                    )
+                self._mock_contracts[contract_id] = replace(
+                    contract,
+                    status=ContractStatus.NEGOTIATING,
+                    updated_at=sent_at,
+                )
+                self._mock_public_tokens[public_token.token_hash] = public_token
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="ADJUSTMENT_SENT",
+                        actor_type="OWNER",
+                        summary="조정 요청을 발송했습니다.",
+                        created_at=sent_at,
+                    )
+                )
+                return sent
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_adjustment_request_id": str(adjustment_request_id),
+            "p_sent_at": sent_at.isoformat(),
+            "p_public_token_id": str(public_token.id),
+            "p_token_hash": public_token.token_hash,
+            "p_token_scope": public_token.scope.value,
+            "p_token_resource_id": str(public_token.resource_id),
+            "p_token_expires_at": public_token.expires_at.isoformat(),
+            "p_token_created_at": public_token.created_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("send_adjustment_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("조정 요청 발송 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _adjustment_request_record_from_row(row)
+
     def _require_live_client(self) -> Client:
         if self._client is None:
             raise RuntimeError("Supabase live client가 초기화되지 않았습니다.")
@@ -857,4 +1086,39 @@ def _idempotency_record_from_row(row: dict) -> IdempotencyRecord:
         response_status=row.get("response_status"),
         response_payload=row.get("response_payload"),
         created_at=_parse_datetime(row["created_at"]),
+    )
+
+
+def _review_item_for_adjustment_from_row(row: dict) -> ReviewItemForAdjustment:
+    return ReviewItemForAdjustment(
+        id=UUID(str(row["id"])),
+        contract_id=UUID(str(row["contract_id"])),
+        status=ReviewItemStatus(row["status"]),
+        user_choice=SuggestionChoice(row["user_choice"]) if row.get("user_choice") else None,
+        suggestion_compromise=row["suggestion_compromise"],
+        suggestion_request=row["suggestion_request"],
+    )
+
+
+def _adjustment_request_record_from_row(row: dict) -> AdjustmentRequestRecord:
+    items = tuple(
+        AdjustmentRequestItemRecord(
+            review_item_id=UUID(str(item["review_item_id"])),
+            user_choice=SuggestionChoice(item["user_choice"]),
+            request_text=item["request_text"],
+        )
+        for item in row["items"]
+    )
+    return AdjustmentRequestRecord(
+        id=UUID(str(row["id"])),
+        contract_id=UUID(str(row["contract_id"])),
+        status=AdjustmentRequestStatus(row["status"]),
+        items=items,
+        expires_in_hours=int(row["expires_in_hours"]),
+        sent_at=_parse_datetime(row["sent_at"]) if row.get("sent_at") else None,
+        expires_at=_parse_datetime(row["expires_at"]) if row.get("expires_at") else None,
+        opened_at=_parse_datetime(row["opened_at"]) if row.get("opened_at") else None,
+        responded_at=_parse_datetime(row["responded_at"]) if row.get("responded_at") else None,
+        created_at=_parse_datetime(row["created_at"]),
+        updated_at=_parse_datetime(row["updated_at"]),
     )

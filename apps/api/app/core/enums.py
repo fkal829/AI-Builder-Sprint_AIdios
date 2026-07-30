@@ -143,6 +143,14 @@ class SuggestionChoice(StrEnum):
     REQUEST = "REQUEST"
 
 
+class ReviewItemStatus(StrEnum):
+    UNREVIEWED = "UNREVIEWED"
+    SELECTED = "SELECTED"
+    SENT = "SENT"
+    RESOLVED = "RESOLVED"
+    KEPT_ORIGINAL = "KEPT_ORIGINAL"
+
+
 class ExtractedField(StrEnum):
     CONTRACT_PARTY_OWNER = "contract_party_owner"
     CONTRACT_PARTY_AGENCY = "contract_party_agency"

@@ -8,12 +8,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.adapters.supabase import SupabaseAdapter
 from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedAccess
-from app.services.documents import DocumentAccessService, DocumentUploadService
-from app.services.understood_terms import UnderstoodTermService
+from app.services.adjustments import AdjustmentService
 from app.services.contracts import ContractService
-from app.services.documents import DocumentUploadService
+from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.public_tokens import PublicTokenService
+from app.services.understood_terms import UnderstoodTermService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -63,6 +63,8 @@ async def get_understood_term_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> UnderstoodTermService:
     return UnderstoodTermService(repository=supabase)
+
+
 async def get_contract_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> ContractService:
@@ -82,6 +84,21 @@ async def get_idempotency_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> IdempotencyService:
     return IdempotencyService(supabase)
+
+
+async def get_adjustment_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> AdjustmentService:
+    settings = get_settings()
+    return AdjustmentService(
+        repository=supabase,
+        idempotency=IdempotencyService(supabase),
+        public_tokens=PublicTokenService(
+            supabase,
+            signing_secret=settings.public_token_secret,
+        ),
+        public_app_base_url=settings.public_app_base_url,
+    )
 
 
 async def get_current_owner_id(

@@ -12,6 +12,7 @@ from supabase import Client, create_client
 
 from app.core.enums import (
     AdjustmentRequestStatus,
+    AdjustmentResponseDecision,
     ContractStatus,
     IdempotencyOperation,
     PublicTokenScope,
@@ -20,8 +21,11 @@ from app.core.enums import (
 )
 from app.core.exceptions import ExternalStorageFailure
 from app.repositories.adjustments import (
+    AdjustmentDetailRecord,
     AdjustmentRequestItemRecord,
     AdjustmentRequestRecord,
+    AdjustmentResponseRecord,
+    PublicAdjustmentRecord,
     ReviewItemForAdjustment,
 )
 from app.repositories.contracts import AuditEventRecord, ContractRecord
@@ -102,6 +106,9 @@ class SupabaseAdapter:
         ] = {}
         self._mock_review_items: dict[UUID, ReviewItemForAdjustment] = {}
         self._mock_adjustment_requests: dict[UUID, AdjustmentRequestRecord] = {}
+        self._mock_adjustment_responses: dict[
+            UUID, tuple[AdjustmentResponseRecord, ...]
+        ] = {}
         if mode == "live":
             self._client = create_client(url, service_role_key)
 
@@ -144,6 +151,12 @@ class SupabaseAdapter:
     @property
     def mock_adjustment_requests(self) -> dict[UUID, AdjustmentRequestRecord]:
         return dict(self._mock_adjustment_requests)
+
+    @property
+    def mock_adjustment_responses(
+        self,
+    ) -> dict[UUID, tuple[AdjustmentResponseRecord, ...]]:
+        return dict(self._mock_adjustment_responses)
 
     async def authenticate_owner(self, token: str) -> UUID | None:
         if self.mode == "mock":
@@ -898,6 +911,194 @@ class SupabaseAdapter:
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _adjustment_request_record_from_row(row)
 
+    async def get_owned_adjustment_detail(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        adjustment_request_id: UUID,
+    ) -> AdjustmentDetailRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                request = self._mock_adjustment_requests.get(adjustment_request_id)
+                if request is None or request.contract_id != contract_id:
+                    return None
+                return AdjustmentDetailRecord(
+                    request=request,
+                    responses=self._mock_adjustment_responses.get(request.id, ()),
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_adjustment_request_id": str(adjustment_request_id),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("get_owned_adjustment_detail", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("조정 요청 상세 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _adjustment_detail_record_from_row(row)
+
+    async def get_public_adjustment_request(
+        self,
+        *,
+        adjustment_request_id: UUID,
+    ) -> PublicAdjustmentRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                request = self._mock_adjustment_requests.get(adjustment_request_id)
+                if request is None:
+                    return None
+                contract = self._mock_contracts.get(request.contract_id)
+                if contract is None:
+                    return None
+                return PublicAdjustmentRecord(
+                    contract_title=contract.title,
+                    request=request,
+                )
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "get_public_adjustment_request",
+                    {"p_adjustment_request_id": str(adjustment_request_id)},
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("공개 조정 요청 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _public_adjustment_record_from_row(row)
+
+    async def open_public_adjustment_request(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        opened_at: datetime,
+    ) -> AdjustmentRequestRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                request = self._mock_adjustment_requests.get(adjustment_request_id)
+                if request is None:
+                    return None
+                if request.status == AdjustmentRequestStatus.SENT:
+                    opened = replace(
+                        request,
+                        status=AdjustmentRequestStatus.OPENED,
+                        opened_at=opened_at,
+                        updated_at=opened_at,
+                    )
+                    self._mock_adjustment_requests[request.id] = opened
+                    self._mock_audit_events.append(
+                        MockAuditEvent(
+                            id=uuid4(),
+                            contract_id=request.contract_id,
+                            event_type="ADJUSTMENT_OPENED",
+                            actor_type="AGENCY",
+                            summary="대행사가 조정 요청을 열람했습니다.",
+                            created_at=opened_at,
+                        )
+                    )
+                    return opened
+                if request.status in {
+                    AdjustmentRequestStatus.OPENED,
+                    AdjustmentRequestStatus.RESPONDED,
+                    AdjustmentRequestStatus.CONFIRMED,
+                }:
+                    return request if request.opened_at is not None else None
+                return None
+
+        client = self._require_live_client()
+        params = {
+            "p_adjustment_request_id": str(adjustment_request_id),
+            "p_opened_at": opened_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("open_public_adjustment_request", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("공개 조정 요청 열람 기록에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _adjustment_request_record_from_row(row)
+
+    async def submit_public_adjustment_responses(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        responses: tuple[AdjustmentResponseRecord, ...],
+        responded_at: datetime,
+    ) -> AdjustmentRequestRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                request = self._mock_adjustment_requests.get(adjustment_request_id)
+                if request is None or request.status not in {
+                    AdjustmentRequestStatus.SENT,
+                    AdjustmentRequestStatus.OPENED,
+                }:
+                    return None
+                expected_ids = {item.review_item_id for item in request.items}
+                if {response.review_item_id for response in responses} != expected_ids:
+                    return None
+                opened_at = request.opened_at or responded_at
+                submitted = replace(
+                    request,
+                    status=AdjustmentRequestStatus.RESPONDED,
+                    opened_at=opened_at,
+                    responded_at=responded_at,
+                    updated_at=responded_at,
+                )
+                self._mock_adjustment_requests[request.id] = submitted
+                self._mock_adjustment_responses[request.id] = responses
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=request.contract_id,
+                        event_type="ADJUSTMENT_RESPONDED",
+                        actor_type="AGENCY",
+                        summary="대행사가 조정 요청에 응답했습니다.",
+                        created_at=responded_at,
+                    )
+                )
+                return submitted
+
+        client = self._require_live_client()
+        params = {
+            "p_adjustment_request_id": str(adjustment_request_id),
+            "p_responded_at": responded_at.isoformat(),
+            "p_responses": [
+                {
+                    "review_item_id": str(response.review_item_id),
+                    "decision": response.decision.value,
+                    "counter_text": response.counter_text,
+                    "reason": response.reason,
+                }
+                for response in responses
+            ],
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("submit_public_adjustment_responses", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("공개 조정 응답 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _adjustment_request_record_from_row(row)
+
     async def send_adjustment_with_audit(
         self,
         *,
@@ -1121,4 +1322,30 @@ def _adjustment_request_record_from_row(row: dict) -> AdjustmentRequestRecord:
         responded_at=_parse_datetime(row["responded_at"]) if row.get("responded_at") else None,
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
+    )
+
+
+def _adjustment_response_record_from_row(row: dict) -> AdjustmentResponseRecord:
+    return AdjustmentResponseRecord(
+        review_item_id=UUID(str(row["review_item_id"])),
+        decision=AdjustmentResponseDecision(row["decision"]),
+        counter_text=row.get("counter_text"),
+        reason=row.get("reason"),
+    )
+
+
+def _adjustment_detail_record_from_row(row: dict) -> AdjustmentDetailRecord:
+    return AdjustmentDetailRecord(
+        request=_adjustment_request_record_from_row(row["request"]),
+        responses=tuple(
+            _adjustment_response_record_from_row(response)
+            for response in row.get("responses", [])
+        ),
+    )
+
+
+def _public_adjustment_record_from_row(row: dict) -> PublicAdjustmentRecord:
+    return PublicAdjustmentRecord(
+        contract_title=row["contract_title"],
+        request=_adjustment_request_record_from_row(row["request"]),
     )

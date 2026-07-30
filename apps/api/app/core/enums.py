@@ -151,6 +151,12 @@ class ReviewItemStatus(StrEnum):
     KEPT_ORIGINAL = "KEPT_ORIGINAL"
 
 
+class AdjustmentResponseDecision(StrEnum):
+    ACCEPT = "ACCEPT"
+    REJECT = "REJECT"
+    COUNTER = "COUNTER"
+
+
 class ExtractedField(StrEnum):
     CONTRACT_PARTY_OWNER = "contract_party_owner"
     CONTRACT_PARTY_AGENCY = "contract_party_agency"

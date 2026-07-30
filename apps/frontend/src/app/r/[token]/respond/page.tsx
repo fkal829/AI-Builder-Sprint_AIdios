@@ -15,13 +15,28 @@ export default function AgencyRespondPage() {
   const router = useRouter();
   const state = useAsync(() => adapter.getAdjustmentRequest(token), [token]);
   const [answers, setAnswers] = useState<Record<string, ItemState>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const items = state.status === "ready" && state.data ? state.data.items : [];
+  const items = useMemo(
+    () => (state.status === "ready" && state.data ? state.data.items : []),
+    [state],
+  );
   const answeredCount = useMemo(
     () => items.filter((it) => answers[it.clauseId]?.decision).length,
     [items, answers],
   );
-  const allAnswered = items.length > 0 && answeredCount === items.length;
+  const allAnswered =
+    items.length > 0 &&
+    answeredCount === items.length &&
+    items.every((item) => {
+      const answer = answers[item.clauseId];
+      if (answer?.decision === "REJECT") return Boolean(answer.reason.trim());
+      if (answer?.decision === "COUNTER") {
+        return Boolean(answer.counter.trim() && answer.reason.trim());
+      }
+      return answer?.decision === "ACCEPT";
+    });
 
   const setItem = (id: string, patch: Partial<ItemState>) =>
     setAnswers((a) => ({
@@ -33,6 +48,30 @@ export default function AgencyRespondPage() {
         ...patch,
       },
     }));
+
+  const submit = async () => {
+    if (!allAnswered || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await adapter.submitAdjustmentResponses(
+        token,
+        items.map((item) => ({
+          itemId: item.clauseId,
+          decision: answers[item.clauseId].decision!,
+          counterText: answers[item.clauseId].counter,
+          reason: answers[item.clauseId].reason,
+        })),
+      );
+      router.push(`/r/${token}/done`);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : "응답을 제출하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <AgencyShell
@@ -125,13 +164,14 @@ export default function AgencyRespondPage() {
               {answeredCount} / {items.length}건 응답 완료
             </span>
             <button
-              disabled={!allAnswered}
-              onClick={() => router.push(`/r/${token}/done`)}
+              disabled={!allAnswered || submitting}
+              onClick={submit}
               className="h-11 rounded-lg bg-ink px-6 text-[13px] font-bold text-white disabled:opacity-40"
             >
-              응답 제출하기
+              {submitting ? "제출 중…" : "응답 제출하기"}
             </button>
           </div>
+          {submitError && <p className="text-[12px] text-amber800">{submitError}</p>}
         </div>
       )}
     </AgencyShell>

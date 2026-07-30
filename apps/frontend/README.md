@@ -87,6 +87,16 @@ src/
 // export const adapter = USE_MOCK ? new MockAdapter() : new RealAdapter();
 ```
 
+현재는 대행사 공개 조정 응답 화면(`/r/[token]`)만 실 API 연동을 지원합니다. `.env.local`에
+다음을 설정하면 나머지 화면은 목업으로 유지하면서 해당 화면만 API를 호출합니다.
+
+```dotenv
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_USE_MOCK=false
+```
+
+브라우저에 노출되는 값은 API 주소만 사용하며 API 키·서비스 키는 넣지 않습니다.
+
 ## 참고
 
 - 모든 데이터는 가상(목업)입니다.

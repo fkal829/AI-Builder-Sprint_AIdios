@@ -237,8 +237,9 @@ export interface DashboardStats {
 export interface AdjustmentRequestPublic {
   token: string;
   contractTitle: string;
-  ownerLabel: string; // "광안리 카페 사장님"
-  estimatedMinutes: number;
+  /** 목업에서만 제공되는 보조 표시 정보. 공개 API에는 포함하지 않는다. */
+  ownerLabel?: string;
+  estimatedMinutes?: number;
   status: AdjustmentRequestStatus;
   items: {
     clauseId: string;

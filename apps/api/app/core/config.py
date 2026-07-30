@@ -1,5 +1,8 @@
 from functools import lru_cache
+from typing import Literal
+from uuid import UUID
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +21,13 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_storage_bucket: str = "contracts"
+    supabase_mode: Literal["mock", "live"] = "mock"
+
+    document_max_size_mib: int = Field(default=20, ge=1, le=100)
+    document_max_pdf_pages: int = Field(default=100, ge=1, le=500)
+    demo_owner_id: UUID = UUID("00000000-0000-4000-8000-000000000013")
+    demo_contract_id: UUID = UUID("00000000-0000-4000-8000-000000000041")
+    demo_bearer_token: str = Field(default="local-demo-owner-token", min_length=16)
 
     upstage_mode: str = "mock"
     upstage_api_key: str = ""
@@ -31,6 +41,22 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def document_max_size_bytes(self) -> int:
+        return self.document_max_size_mib * 1024 * 1024
+
+    @model_validator(mode="after")
+    def validate_external_modes(self) -> "Settings":
+        if self.supabase_mode == "live" and (
+            not self.supabase_url or not self.supabase_service_role_key
+        ):
+            raise ValueError(
+                "SUPABASE_MODE=live에는 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY가 필요합니다."
+            )
+        if self.app_env == "production" and self.supabase_mode == "mock":
+            raise ValueError("production에서는 SUPABASE_MODE=mock을 사용할 수 없습니다.")
+        return self
 
 
 @lru_cache

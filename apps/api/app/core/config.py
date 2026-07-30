@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     supabase_storage_bucket: str = "contracts"
     supabase_mode: Literal["mock", "live"] = "mock"
+    supabase_mock_storage_access_base_url: str = (
+        "http://localhost:8000/api/v1/_mock/storage"
+    )
 
     document_max_size_mib: int = Field(default=20, ge=1, le=100)
     document_max_pdf_pages: int = Field(default=100, ge=1, le=500)

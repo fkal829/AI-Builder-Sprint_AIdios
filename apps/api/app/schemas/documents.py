@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 
 class DocumentType(StrEnum):
@@ -25,3 +25,10 @@ class Document(BaseModel):
     type: DocumentType
     parse_status: DocumentParseStatus
     created_at: datetime
+
+
+class DocumentAccess(BaseModel):
+    document_id: UUID
+    access_url: AnyHttpUrl
+    expires_at: datetime
+    source_page: int | None = Field(default=None, ge=1)

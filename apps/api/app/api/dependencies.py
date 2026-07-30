@@ -8,7 +8,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.adapters.supabase import SupabaseAdapter
 from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedAccess
-from app.services.documents import DocumentUploadService
+from app.services.documents import DocumentAccessService, DocumentUploadService
+from app.services.understood_terms import UnderstoodTermService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -24,6 +25,7 @@ def _get_supabase_adapter() -> SupabaseAdapter:
         demo_owner_id=settings.demo_owner_id,
         demo_contract_id=settings.demo_contract_id,
         demo_bearer_token=settings.demo_bearer_token,
+        mock_storage_access_base_url=settings.supabase_mock_storage_access_base_url,
     )
 
 
@@ -42,6 +44,21 @@ async def get_document_upload_service(
         max_size_bytes=settings.document_max_size_bytes,
         max_pdf_pages=settings.document_max_pdf_pages,
     )
+
+
+async def get_document_access_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> DocumentAccessService:
+    return DocumentAccessService(
+        documents=supabase,
+        storage=supabase,
+    )
+
+
+async def get_understood_term_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> UnderstoodTermService:
+    return UnderstoodTermService(repository=supabase)
 
 
 async def get_current_owner_id(

@@ -77,3 +77,30 @@
   데모 owner·contract UUID만 사용한다. production에서는 mock 모드로 기동할 수 없다.
 - 제한값은 `DOCUMENT_MAX_SIZE_MIB`, `DOCUMENT_MAX_PDF_PAGES`로 더 낮게 조정할 수 있다.
   운영에서 상향할 때는 API 문서, Storage bucket 제한과 배포 설정을 함께 변경한다.
+
+## ADR-009 비공개 원문 임시 접근
+
+- 상태: P0 확정
+- 결정: 원문 접근은 소유자·계약·문서 조합을 함께 확인한 뒤 발급하며, 대상이 없거나
+  소유하지 않은 경우를 모두 `404 NOT_FOUND`로 은닉한다.
+- 접근 URL의 TTL은 서버에서 300초로 고정하고 응답에 `Cache-Control: no-store`를
+  적용한다. URL과 영속 Storage 경로를 로그에 남기지 않는다.
+- `source_page`는 1-based이고 저장된 `Document.page_count` 이하여야 한다. 범위를
+  벗어나면 signed URL 발급 전에 `422 VALIDATION_ERROR`로 거부한다.
+- `SUPABASE_MODE=mock`은 같은 프로세스의 메모리 객체를 고엔트로피 임시 토큰으로
+  조회하며, `live`는 Supabase private Storage signed URL을 발급한다. mock 결과를
+  실제 Supabase 연동 성공으로 간주하지 않는다.
+
+## ADR-010 사용자 이해조건 저장
+
+- 상태: P0 확정
+- 결정: 기획안 6.1의 다섯 문항은 계약기간, 월 납부액, 총 계약금액, 환불조건,
+  중도해지 가능 여부다. `source_type`은 입력 출처 메타데이터로 `USER_MEMORY`에
+  고정한다.
+- `UnderstoodTerm`은 `contract_id`를 PK로 하는 계약당 한 행이며 PUT으로 전체 교체한다.
+  `contract_id`는 body가 아니라 경로와 인증된 소유자 컨텍스트에서 정한다.
+- 월 납부액과 총 계약금액은 필수 nullable 정수 KRW다. 사용자가 기억하지 못하면
+  `null`을 저장하며 두 값을 서버가 서로 계산하거나 보정하지 않는다.
+- 계약 소유권 확인, 이해조건 upsert, `UNDERSTOOD_TERMS_SAVED` 감사 이벤트는 한
+  트랜잭션에서 수행한다. 기존 값과 완전히 같은 PUT은 상태 변화가 없으므로 새 감사
+  이벤트를 만들지 않는다.

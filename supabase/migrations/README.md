@@ -9,6 +9,10 @@
 `create_document_with_audit` RPC를 먼저 만든다. 이후 모델은 기존 마이그레이션을
 수정하지 않고 후속 append-only SQL로 추가한다.
 
+`20260730180000_add_understood_terms.sql`은 4.3의 계약당 한 `UnderstoodTerm`,
+소유자 조회 RLS와 동일 PUT의 감사 이벤트 중복을 막는 원자적
+`save_understood_term_with_audit` RPC를 추가한다.
+
 규칙:
 
 - 원본 계약 파일 bucket은 private으로 유지합니다.

@@ -525,3 +525,196 @@ def test_fastapi_openapi_exposes_analysis_get_contract() -> None:
     assert operation["responses"]["404"]
     assert operation["responses"]["422"]
     assert "requestBody" not in operation
+
+
+async def complete_analysis_for_review(
+    client: AsyncClient,
+    repository: SupabaseAdapter,
+) -> tuple[UUID, UUID, UUID]:
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    await save_understood_terms(client, contract_id=contract_id)
+    started = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"document_id": str(document_id), "supporting_document_ids": []},
+    )
+    task_id = UUID(started.json()["data"]["id"])
+    result = repository.mock_analysis_tasks[task_id].result
+    assert result is not None
+    assert result.review_items
+    return contract_id, task_id, result.review_items[0].id
+
+
+async def test_updates_review_selection_and_mirrors_analysis_result(
+    analysis_context,
+) -> None:
+    client, repository, _service = analysis_context
+    contract_id, task_id, item_id = await complete_analysis_for_review(
+        client,
+        repository,
+    )
+
+    compromise = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "COMPROMISE"},
+    )
+    replay = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "COMPROMISE"},
+    )
+    request_choice = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "REQUEST"},
+    )
+    accept = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "ACCEPT"},
+    )
+    blocked = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "ACCEPT"},
+    )
+
+    assert compromise.status_code == 200
+    assert compromise.json()["data"]["status"] == "SELECTED"
+    assert compromise.json()["data"]["user_choice"] == "COMPROMISE"
+    assert replay.status_code == 200
+    assert request_choice.status_code == 200
+    assert request_choice.json()["data"]["status"] == "SELECTED"
+    assert request_choice.json()["data"]["user_choice"] == "REQUEST"
+    assert accept.status_code == 200
+    assert accept.json()["data"]["status"] == "RESOLVED"
+    assert accept.json()["data"]["user_choice"] == "ACCEPT"
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+
+    selection_events = [
+        event
+        for event in repository.mock_audit_events
+        if event.event_type == "REVIEW_ITEM_SELECTION_UPDATED"
+    ]
+    assert len(selection_events) == 3
+    assert repository.mock_review_item_details[item_id].status.value == "RESOLVED"
+    assert repository.mock_review_items[item_id].user_choice.value == "ACCEPT"
+    mirrored = repository.mock_analysis_tasks[task_id].result
+    assert mirrored is not None
+    mirrored_item = next(item for item in mirrored.review_items if item.id == item_id)
+    assert mirrored_item.status.value == "RESOLVED"
+    assert mirrored_item.user_choice.value == "ACCEPT"
+
+    latest = await client.get(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(),
+    )
+    latest_item = next(
+        item
+        for item in latest.json()["data"]["result"]["review_items"]
+        if item["id"] == str(item_id)
+    )
+    assert latest_item["status"] == "RESOLVED"
+    assert latest_item["user_choice"] == "ACCEPT"
+
+
+async def test_rejects_review_selection_after_adjustment_send(
+    analysis_context,
+) -> None:
+    client, repository, _service = analysis_context
+    contract_id, _task_id, item_id = await complete_analysis_for_review(
+        client,
+        repository,
+    )
+    selected = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "REQUEST"},
+    )
+    draft = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={
+            "review_item_ids": [str(item_id)],
+            "expires_in_hours": 24,
+        },
+    )
+    adjustment_id = draft.json()["data"]["id"]
+    sent = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests/{adjustment_id}/send",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"confirmed": True},
+    )
+
+    blocked = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "COMPROMISE"},
+    )
+
+    assert selected.status_code == 200
+    assert draft.status_code == 201
+    assert sent.status_code == 200
+    assert repository.mock_review_item_details[item_id].status.value == "SENT"
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+    assert [
+        event.event_type for event in repository.mock_audit_events
+    ].count("REVIEW_ITEM_SELECTION_UPDATED") == 1
+
+
+async def test_review_selection_handles_not_found_auth_and_validation(
+    analysis_context,
+) -> None:
+    client, repository, _service = analysis_context
+    contract_id, _task_id, item_id = await complete_analysis_for_review(
+        client,
+        repository,
+    )
+    other_contract_id = await create_contract(client)
+    path = f"/api/v1/contracts/{contract_id}/review-items/{item_id}"
+
+    wrong_contract = await client.patch(
+        f"/api/v1/contracts/{other_contract_id}/review-items/{item_id}",
+        headers=auth_headers(),
+        json={"user_choice": "REQUEST"},
+    )
+    unknown_item = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/{uuid4()}",
+        headers=auth_headers(),
+        json={"user_choice": "REQUEST"},
+    )
+    no_auth = await client.patch(path, json={"user_choice": "REQUEST"})
+    invalid_choice = await client.patch(
+        path,
+        headers=auth_headers(),
+        json={"user_choice": "OTHER"},
+    )
+    invalid_item_id = await client.patch(
+        f"/api/v1/contracts/{contract_id}/review-items/not-a-uuid",
+        headers=auth_headers(),
+        json={"user_choice": "REQUEST"},
+    )
+
+    assert wrong_contract.status_code == 404
+    assert unknown_item.status_code == 404
+    assert no_auth.status_code == 401
+    assert invalid_choice.status_code == 422
+    assert invalid_item_id.status_code == 422
+
+
+def test_fastapi_openapi_exposes_review_item_update_contract() -> None:
+    operation = app.openapi()["paths"][
+        "/api/v1/contracts/{contract_id}/review-items/{item_id}"
+    ]["patch"]
+
+    assert operation["responses"]["200"]
+    assert operation["responses"]["401"]
+    assert operation["responses"]["404"]
+    assert operation["responses"]["409"]
+    assert operation["responses"]["422"]
+    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    assert request_schema["$ref"].endswith("/ReviewItemUpdate")

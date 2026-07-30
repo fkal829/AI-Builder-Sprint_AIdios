@@ -228,6 +228,10 @@ class Analysis(StrictModel):
     review_items: list[ReviewItem]
 
 
+class ReviewItemUpdate(StrictModel):
+    user_choice: SuggestionChoice
+
+
 class AnalysisStartRequest(StrictModel):
     document_id: UUID
     supporting_document_ids: list[UUID] = Field(max_length=10)

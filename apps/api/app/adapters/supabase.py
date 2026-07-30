@@ -39,7 +39,11 @@ from app.repositories.contracts import AuditEventRecord, ContractRecord
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
 from app.repositories.public_tokens import PublicTokenRecord
-from app.schemas.analysis import Analysis
+from app.repositories.review_items import (
+    ReviewItemSelectionOutcome,
+    ReviewItemSelectionResult,
+)
+from app.schemas.analysis import Analysis, ReviewItem
 from app.schemas.contracts import ContractCreate
 from app.schemas.documents import DocumentParseStatus, DocumentType
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
@@ -132,6 +136,7 @@ class SupabaseAdapter:
         self._mock_analysis_tasks: dict[UUID, AnalysisTaskRecord] = {}
         self._mock_obligations: dict[UUID, MockObligation] = {}
         self._mock_review_items: dict[UUID, ReviewItemForAdjustment] = {}
+        self._mock_review_item_details: dict[UUID, ReviewItem] = {}
         self._mock_adjustment_requests: dict[UUID, AdjustmentRequestRecord] = {}
         self._mock_adjustment_responses: dict[
             UUID, tuple[AdjustmentResponseRecord, ...]
@@ -182,6 +187,10 @@ class SupabaseAdapter:
     @property
     def mock_review_items(self) -> dict[UUID, ReviewItemForAdjustment]:
         return dict(self._mock_review_items)
+
+    @property
+    def mock_review_item_details(self) -> dict[UUID, ReviewItem]:
+        return dict(self._mock_review_item_details)
 
     @property
     def mock_adjustment_requests(self) -> dict[UUID, AdjustmentRequestRecord]:
@@ -1115,6 +1124,12 @@ class SupabaseAdapter:
                     updated_at=now,
                 )
                 self._mock_analysis_tasks[task_id] = completed
+                for review_item in result.review_items:
+                    self._set_mock_review_item(
+                        review_item,
+                        updated_at=now,
+                        mirror_analysis_result=False,
+                    )
                 promoted_contract = _promote_verified_canonical_values(
                     contract=contract,
                     result=result,
@@ -1219,6 +1234,103 @@ class SupabaseAdapter:
             return None
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _analysis_task_record_from_row(row)
+
+    async def update_review_item_selection_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        item_id: UUID,
+        user_choice: SuggestionChoice,
+        target_status: ReviewItemStatus,
+        updated_at: datetime,
+    ) -> ReviewItemSelectionResult:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.NOT_FOUND,
+                        item=None,
+                    )
+                item = self._mock_review_item_details.get(item_id)
+                if item is None or item.contract_id != contract_id:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.NOT_FOUND,
+                        item=None,
+                    )
+                if item.status not in {
+                    ReviewItemStatus.UNREVIEWED,
+                    ReviewItemStatus.SELECTED,
+                }:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.INVALID_STATUS_TRANSITION,
+                        item=item,
+                    )
+                expected_status = (
+                    ReviewItemStatus.RESOLVED
+                    if user_choice == SuggestionChoice.ACCEPT
+                    else ReviewItemStatus.SELECTED
+                )
+                if target_status != expected_status:
+                    raise ValueError("검토 항목 선택과 대상 상태가 일치하지 않습니다.")
+                if item.user_choice == user_choice and item.status == target_status:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.UNCHANGED,
+                        item=item,
+                    )
+
+                updated = ReviewItem.model_validate(
+                    item.model_dump()
+                    | {
+                        "user_choice": user_choice,
+                        "status": target_status,
+                    }
+                )
+                self._set_mock_review_item(updated, updated_at=updated_at)
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="REVIEW_ITEM_SELECTION_UPDATED",
+                        actor_type="OWNER",
+                        summary="검토 항목 선택을 변경했습니다.",
+                        created_at=updated_at,
+                    )
+                )
+                return ReviewItemSelectionResult(
+                    outcome=ReviewItemSelectionOutcome.UPDATED,
+                    item=updated,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_item_id": str(item_id),
+            "p_user_choice": user_choice.value,
+            "p_target_status": target_status.value,
+            "p_updated_at": updated_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "update_review_item_selection_with_audit",
+                    params,
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("검토 항목 선택 저장에 실패했습니다.") from error
+        payload = response.data[0] if isinstance(response.data, list) else response.data
+        if not isinstance(payload, dict):
+            raise ExternalStorageFailure("검토 항목 선택 저장 결과를 확인할 수 없습니다.")
+        outcome = ReviewItemSelectionOutcome(payload["outcome"])
+        item_payload = payload.get("item")
+        return ReviewItemSelectionResult(
+            outcome=outcome,
+            item=_review_item_from_row(item_payload)
+            if isinstance(item_payload, dict)
+            else None,
+        )
 
     async def list_review_items_for_adjustment(
         self,
@@ -1570,10 +1682,20 @@ class SupabaseAdapter:
                 self._mock_adjustment_requests[record.id] = sent
                 for review_item in review_items:
                     assert review_item is not None
-                    self._mock_review_items[review_item.id] = replace(
+                    frozen = replace(
                         review_item,
                         status=ReviewItemStatus.SENT,
                     )
+                    self._mock_review_items[review_item.id] = frozen
+                    detail = self._mock_review_item_details.get(review_item.id)
+                    if detail is not None:
+                        sent_detail = ReviewItem.model_validate(
+                            detail.model_dump()
+                            | {
+                                "status": ReviewItemStatus.SENT,
+                            }
+                        )
+                        self._set_mock_review_item(sent_detail, updated_at=sent_at)
                 self._mock_contracts[contract_id] = replace(
                     contract,
                     status=ContractStatus.NEGOTIATING,
@@ -1615,6 +1737,37 @@ class SupabaseAdapter:
             return None
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _adjustment_request_record_from_row(row)
+
+    def _set_mock_review_item(
+        self,
+        item: ReviewItem,
+        *,
+        updated_at: datetime,
+        mirror_analysis_result: bool = True,
+    ) -> None:
+        self._mock_review_item_details[item.id] = item
+        self._mock_review_items[item.id] = _review_item_for_adjustment(item)
+        if not mirror_analysis_result:
+            return
+        for task_id, task in tuple(self._mock_analysis_tasks.items()):
+            if task.result is None:
+                continue
+            if not any(review_item.id == item.id for review_item in task.result.review_items):
+                continue
+            mirrored_result = Analysis(
+                contract_id=task.result.contract_id,
+                extracted_terms=task.result.extracted_terms,
+                review_items=[
+                    item if review_item.id == item.id else review_item
+                    for review_item in task.result.review_items
+                ],
+            )
+            self._mock_analysis_tasks[task_id] = replace(
+                task,
+                result=mirrored_result,
+                updated_at=updated_at,
+            )
+            return
 
     def _require_live_client(self) -> Client:
         if self._client is None:
@@ -1833,6 +1986,46 @@ def _analysis_task_record_from_row(row: dict) -> AnalysisTaskRecord:
         result=Analysis.model_validate(result) if result is not None else None,
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
+    )
+
+
+def _review_item_from_row(row: dict) -> ReviewItem:
+    return ReviewItem.model_validate(
+        {
+            "id": row["id"],
+            "contract_id": row["contract_id"],
+            "type": row["type"],
+            "severity": row["severity"],
+            "detection_method": row["detection_method"],
+            "model_confidence": row.get("model_confidence"),
+            "model_limitations": row.get("model_limitations"),
+            "plain_explanation": row["plain_explanation"],
+            "basis_type": row["basis_type"],
+            "basis_text": row["basis_text"],
+            "basis_citation": row.get("basis_citation"),
+            "related_extracted_term_ids": row["related_extracted_term_ids"],
+            "source_document_id": row.get("source_document_id"),
+            "source_page": row.get("source_page"),
+            "source_text": row.get("source_text"),
+            "source_confidence": row.get("source_confidence"),
+            "verification_status": row["verification_status"],
+            "suggestion_accept": row["suggestion_accept"],
+            "suggestion_compromise": row["suggestion_compromise"],
+            "suggestion_request": row["suggestion_request"],
+            "user_choice": row.get("user_choice"),
+            "status": row["status"],
+        }
+    )
+
+
+def _review_item_for_adjustment(item: ReviewItem) -> ReviewItemForAdjustment:
+    return ReviewItemForAdjustment(
+        id=item.id,
+        contract_id=item.contract_id,
+        status=item.status,
+        user_choice=item.user_choice,
+        suggestion_compromise=item.suggestion_compromise,
+        suggestion_request=item.suggestion_request,
     )
 
 

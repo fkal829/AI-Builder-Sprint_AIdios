@@ -138,4 +138,8 @@ supabase db push
 계약에서 가장 최근에 생성된 `AnalysisTask` 한 건을 반환합니다. 진행 중 작업은
 `result=null`, 완료 작업은 원문 근거가 포함된 `Analysis`, 실패 작업은 허용된
 `error_code`를 반환합니다.
+4.6의 `PATCH /api/v1/contracts/{contract_id}/review-items/{item_id}`는
+`UNREVIEWED`·`SELECTED` 항목에서만 사용자 선택을 저장합니다. `ACCEPT`는
+`RESOLVED`, `COMPROMISE`·`REQUEST`는 `SELECTED`로 바꾸며, 같은 선택의 반복 저장은
+감사 이벤트를 중복 생성하지 않습니다. `SENT` 이후 항목은 수정할 수 없습니다.
 원본 bucket은 `contracts`, `public=false`여야 합니다.

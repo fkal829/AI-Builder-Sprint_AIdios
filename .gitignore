@@ -23,6 +23,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .venv/
+.python-packages/
 
 # Local artifacts
 outputs/

@@ -37,9 +37,12 @@ class Settings(BaseSettings):
         min_length=32,
     )
 
-    upstage_mode: str = "mock"
+    upstage_mode: Literal["mock", "live"] = "mock"
     upstage_api_key: str = ""
     upstage_base_url: str = "https://api.upstage.ai"
+    upstage_parse_timeout_seconds: float = Field(default=120, ge=1, le=300)
+    upstage_extract_timeout_seconds: float = Field(default=180, ge=1, le=600)
+    upstage_extract_model: str = "information-extract"
 
     modusign_mode: str = "mock"
     modusign_api_key: str = ""
@@ -62,6 +65,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "SUPABASE_MODE=live에는 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY가 필요합니다."
             )
+        if self.upstage_mode == "live" and not self.upstage_api_key:
+            raise ValueError("UPSTAGE_MODE=live에는 UPSTAGE_API_KEY가 필요합니다.")
         if self.app_env == "production" and self.supabase_mode == "mock":
             raise ValueError("production에서는 SUPABASE_MODE=mock을 사용할 수 없습니다.")
         if (

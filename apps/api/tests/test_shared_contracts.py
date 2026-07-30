@@ -6,6 +6,7 @@ from app.core.enums import (
     AnalysisStatus,
     AuditEventType,
     ContractStatus,
+    ExtractedField,
     InternalSignatureStatus,
     ModusignStatus,
     ObligationStatus,
@@ -95,6 +96,18 @@ def test_extracted_term_schema_has_structured_fields_and_values() -> None:
         "BOOLEAN",
     ]
     assert "confidence" in schema["properties"]
+    assert set(schema["properties"]["field"]["enum"]) == {
+        field.value for field in ExtractedField
+    }
+    assert {
+        "id",
+        "contract_id",
+        "document_id",
+        "source_type",
+        "source_page",
+        "source_text",
+        "confidence",
+    } <= set(schema["required"])
 
 
 def test_review_schema_distinguishes_source_and_model_confidence() -> None:
@@ -110,6 +123,15 @@ def test_review_schema_distinguishes_source_and_model_confidence() -> None:
     assert "source_confidence" in schema["required"]
     assert "source_confidence" in schema["properties"]
     assert "model_confidence" in schema["properties"]
+    assert {
+        "model_limitations",
+        "basis_type",
+        "basis_text",
+        "basis_citation",
+        "related_extracted_term_ids",
+        "source_document_id",
+        "user_choice",
+    } <= set(schema["required"])
 
 
 def test_openapi_declares_security_and_separate_public_contracts() -> None:

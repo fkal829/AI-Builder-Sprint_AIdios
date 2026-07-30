@@ -54,6 +54,15 @@ class IdempotencyConflict(ApiException):
         )
 
 
+class AnalysisStartUnavailable(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=503,
+            code=ErrorCode.ANALYSIS_START_FAILED,
+            message="분석 작업을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        )
+
+
 class PublicTokenExpired(ApiException):
     def __init__(self, *, code: ErrorCode) -> None:
         super().__init__(

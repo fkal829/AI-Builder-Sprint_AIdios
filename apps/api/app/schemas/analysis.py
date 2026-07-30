@@ -2,13 +2,16 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.enums import (
     AnalysisStatus,
     DetectionMethod,
     ExtractedField,
+    ExtractedSourceType,
     ExtractedValueType,
+    ReviewBasisType,
+    ReviewItemStatus,
     ReviewSeverity,
     ReviewSignalType,
     SuggestionChoice,
@@ -17,9 +20,11 @@ from app.core.enums import (
 from app.core.errors import ErrorCode
 
 EXPECTED_VALUE_TYPES: dict[ExtractedField, ExtractedValueType] = {
+    ExtractedField.CONTRACT_SIGNED_DATE: ExtractedValueType.DATE,
     ExtractedField.CONTRACT_START_DATE: ExtractedValueType.DATE,
     ExtractedField.CONTRACT_END_DATE: ExtractedValueType.DATE,
     ExtractedField.TERMINATION_NOTICE_DATE: ExtractedValueType.DATE,
+    ExtractedField.DELIVERABLE_DUE_DATE: ExtractedValueType.DATE,
     ExtractedField.MONTHLY_AMOUNT: ExtractedValueType.MONEY_KRW,
     ExtractedField.CONTRACT_TOTAL_AMOUNT: ExtractedValueType.MONEY_KRW,
     ExtractedField.CONTENT_QUANTITY: ExtractedValueType.INTEGER,
@@ -29,7 +34,11 @@ EXPECTED_VALUE_TYPES: dict[ExtractedField, ExtractedValueType] = {
 }
 
 
-class ExtractedTerm(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExtractedTermCandidate(StrictModel):
     field: ExtractedField
     value_type: ExtractedValueType
     value: Any
@@ -39,17 +48,24 @@ class ExtractedTerm(BaseModel):
     verification_status: VerificationStatus
 
     @model_validator(mode="after")
-    def validate_evidence(self) -> "ExtractedTerm":
+    def validate_candidate(self) -> "ExtractedTermCandidate":
         has_page = self.source_page is not None
         has_text = self.source_text is not None
         if has_page != has_text:
             raise ValueError("source_page와 source_text는 함께 제공해야 합니다.")
-        if self.verification_status == VerificationStatus.VERIFIED and not has_page:
-            raise ValueError("VERIFIED 결과에는 원문 근거가 필요합니다.")
-        if self.verification_status == VerificationStatus.NOT_FOUND and has_page:
-            raise ValueError("NOT_FOUND 결과에는 원문 근거를 넣을 수 없습니다.")
-        if self.verification_status == VerificationStatus.NOT_FOUND and self.value is not None:
-            raise ValueError("NOT_FOUND 결과의 value는 null이어야 합니다.")
+
+        if self.verification_status == VerificationStatus.VERIFIED:
+            if self.value is None or not has_page:
+                raise ValueError("VERIFIED 결과에는 값과 원문 근거가 필요합니다.")
+        elif self.verification_status == VerificationStatus.NOT_FOUND:
+            if self.value is not None or has_page:
+                raise ValueError("NOT_FOUND 결과에는 값과 원문 근거를 넣을 수 없습니다.")
+        elif self.verification_status == VerificationStatus.MISSING_EVIDENCE:
+            if self.value is None or has_page:
+                raise ValueError("MISSING_EVIDENCE 결과에는 근거 없는 값만 허용됩니다.")
+        elif self.verification_status == VerificationStatus.NEEDS_CHECK and not has_page:
+            raise ValueError("NEEDS_CHECK 결과에는 확인할 원문 근거가 필요합니다.")
+
         self._validate_value_type()
         return self
 
@@ -72,10 +88,11 @@ class ExtractedTerm(BaseModel):
             ExtractedValueType.PERCENT,
         } and (not isinstance(self.value, int) or isinstance(self.value, bool)):
             raise ValueError(f"{self.value_type} 값은 정수여야 합니다.")
-        if self.value_type == ExtractedValueType.MONEY_KRW and self.value < 0:
-            raise ValueError("원화 금액은 0 이상이어야 합니다.")
-        if self.value_type == ExtractedValueType.INTEGER and self.value < 0:
-            raise ValueError("정수 값은 0 이상이어야 합니다.")
+        if self.value_type in {
+            ExtractedValueType.MONEY_KRW,
+            ExtractedValueType.INTEGER,
+        } and self.value < 0:
+            raise ValueError("금액과 정수 값은 0 이상이어야 합니다.")
         if self.value_type == ExtractedValueType.PERCENT and not 0 <= self.value <= 100:
             raise ValueError("비율은 0부터 100 사이여야 합니다.")
         if self.value_type == ExtractedValueType.BOOLEAN and self.value not in {
@@ -84,79 +101,151 @@ class ExtractedTerm(BaseModel):
             "UNKNOWN",
         }:
             raise ValueError("BOOLEAN 값은 YES, NO, UNKNOWN 중 하나여야 합니다.")
-        if self.value_type == ExtractedValueType.TEXT and not isinstance(self.value, str):
-            raise ValueError("TEXT 값은 문자열이어야 합니다.")
+        if self.value_type == ExtractedValueType.TEXT:
+            if not isinstance(self.value, str) or not self.value.strip():
+                raise ValueError("TEXT 값은 비어 있지 않은 문자열이어야 합니다.")
+            if self.field == ExtractedField.CONTRACT_RENEWAL_TYPE and self.value not in {
+                "AUTO",
+                "MANUAL",
+                "NONE",
+                "UNKNOWN",
+            }:
+                raise ValueError(
+                    "contract_renewal_type은 AUTO, MANUAL, NONE, UNKNOWN 중 하나여야 합니다."
+                )
+        if (
+            self.field
+            in {
+                ExtractedField.AUTO_RENEWAL,
+                ExtractedField.EARLY_TERMINATION_ALLOWED,
+                ExtractedField.CONTRACT_RENEWAL_TYPE,
+            }
+            and self.value == "UNKNOWN"
+            and self.verification_status != VerificationStatus.NEEDS_CHECK
+        ):
+            raise ValueError("UNKNOWN 값은 NEEDS_CHECK로 표시해야 합니다.")
 
 
-class ReviewItem(BaseModel):
+class ExtractedTerm(ExtractedTermCandidate):
+    id: UUID
+    contract_id: UUID
+    document_id: UUID
+    source_type: ExtractedSourceType
+
+
+class ReviewBasisCitation(StrictModel):
+    organization: str = Field(min_length=1)
+    document_title: str = Field(min_length=1)
+    url: str | None = Field(default=None, pattern=r"^https?://")
+    version: str | None = Field(default=None, min_length=1)
+    effective_date: date | None = None
+
+
+class ReviewItem(StrictModel):
+    id: UUID
+    contract_id: UUID
     type: ReviewSignalType
     severity: ReviewSeverity
-    plain_explanation: str = Field(min_length=1)
-    source_page: int | None = Field(default=None, ge=1)
-    source_text: str | None = Field(default=None, min_length=1)
-    source_confidence: float | None = Field(ge=0, le=1)
     detection_method: DetectionMethod
     model_confidence: float | None = Field(default=None, ge=0, le=1)
+    model_limitations: str | None = Field(default=None, min_length=1)
+    plain_explanation: str = Field(min_length=1)
+    basis_type: ReviewBasisType
+    basis_text: str = Field(min_length=1)
+    basis_citation: ReviewBasisCitation | None
+    related_extracted_term_ids: list[UUID] = Field(min_length=1, max_length=11)
+    source_document_id: UUID | None
+    source_page: int | None = Field(default=None, ge=1)
+    source_text: str | None = Field(default=None, min_length=1)
+    source_confidence: float | None = Field(default=None, ge=0, le=1)
     verification_status: VerificationStatus
     suggestion_accept: str = Field(min_length=1)
     suggestion_compromise: str = Field(min_length=1)
     suggestion_request: str = Field(min_length=1)
     user_choice: SuggestionChoice | None = None
+    status: ReviewItemStatus = ReviewItemStatus.UNREVIEWED
 
     @model_validator(mode="after")
-    def validate_evidence(self) -> "ReviewItem":
-        has_page = self.source_page is not None
-        has_text = self.source_text is not None
-        has_confidence = self.source_confidence is not None
-        if len({has_page, has_text, has_confidence}) != 1:
-            raise ValueError(
-                "source_page, source_text, source_confidence는 함께 제공해야 합니다."
-            )
+    def validate_review_item(self) -> "ReviewItem":
+        if len(set(self.related_extracted_term_ids)) != len(self.related_extracted_term_ids):
+            raise ValueError("related_extracted_term_ids는 중복될 수 없습니다.")
+
+        evidence_values = (
+            self.source_document_id,
+            self.source_page,
+            self.source_text,
+            self.source_confidence,
+        )
+        has_evidence = all(value is not None for value in evidence_values)
+        if any(value is not None for value in evidence_values) != has_evidence:
+            raise ValueError("검토 항목의 원문 근거 필드는 함께 제공해야 합니다.")
         if (
             self.verification_status
             in {VerificationStatus.VERIFIED, VerificationStatus.NEEDS_CHECK}
-            and not has_page
+            and not has_evidence
         ):
             raise ValueError("VERIFIED 또는 NEEDS_CHECK 검토 항목에는 원문 근거가 필요합니다.")
         if (
             self.verification_status
             in {VerificationStatus.NOT_FOUND, VerificationStatus.MISSING_EVIDENCE}
-            and has_page
+            and has_evidence
         ):
-            raise ValueError(
-                "NOT_FOUND 또는 MISSING_EVIDENCE 검토 항목에는 원문 근거를 넣을 수 없습니다."
-            )
+            raise ValueError("근거가 없는 검토 상태에는 원문 근거를 넣을 수 없습니다.")
+
+        if self.detection_method in {DetectionMethod.MODEL, DetectionMethod.HYBRID}:
+            if self.model_confidence is None or self.model_limitations is None:
+                raise ValueError("모델 기반 검토 항목에는 모델 확신도와 한계가 필요합니다.")
+        elif self.model_confidence is not None or self.model_limitations is not None:
+            raise ValueError("결정 규칙 기반 검토 항목에는 모델 확신도와 한계를 넣지 않습니다.")
+
+        if self.basis_type == ReviewBasisType.OFFICIAL_SOURCE:
+            if self.basis_citation is None:
+                raise ValueError("공식 기준에는 출처가 필요합니다.")
+        elif self.basis_citation is not None:
+            raise ValueError("내부 확인 규칙에는 공식 출처를 넣지 않습니다.")
+
+        if self.status == ReviewItemStatus.UNREVIEWED:
+            if self.user_choice is not None:
+                raise ValueError("미검토 항목에는 사용자 선택을 넣을 수 없습니다.")
+        elif self.user_choice is None:
+            raise ValueError("검토 상태가 변경된 항목에는 사용자 선택이 필요합니다.")
         if (
-            self.detection_method in {DetectionMethod.MODEL, DetectionMethod.HYBRID}
-            and self.model_confidence is None
+            self.status
+            in {
+                ReviewItemStatus.SELECTED,
+                ReviewItemStatus.SENT,
+                ReviewItemStatus.KEPT_ORIGINAL,
+            }
+            and self.user_choice == SuggestionChoice.ACCEPT
         ):
-            raise ValueError(
-                "모델 기반 검토 항목에는 model_confidence가 필요합니다."
-            )
-        if (
-            self.detection_method == DetectionMethod.DETERMINISTIC
-            and self.model_confidence is not None
-        ):
-            raise ValueError(
-                "규칙 기반 검토 항목에는 model_confidence를 넣지 않습니다."
-            )
+            raise ValueError("조정 대상으로 선택한 항목에는 ACCEPT를 사용할 수 없습니다.")
         return self
 
 
-class Analysis(BaseModel):
+class Analysis(StrictModel):
     contract_id: UUID
     extracted_terms: list[ExtractedTerm]
     review_items: list[ReviewItem]
 
 
-class AnalysisStartRequest(BaseModel):
+class AnalysisStartRequest(StrictModel):
     document_id: UUID
+    supporting_document_ids: list[UUID] = Field(max_length=10)
+
+    @model_validator(mode="after")
+    def validate_supporting_documents(self) -> "AnalysisStartRequest":
+        if len(set(self.supporting_document_ids)) != len(self.supporting_document_ids):
+            raise ValueError("supporting_document_ids는 중복될 수 없습니다.")
+        if self.document_id in self.supporting_document_ids:
+            raise ValueError("주 계약 문서는 선택 자료에 포함할 수 없습니다.")
+        return self
 
 
-class AnalysisTask(BaseModel):
+class AnalysisTask(StrictModel):
     id: UUID
     contract_id: UUID
     document_id: UUID
+    supporting_document_ids: list[UUID] = Field(max_length=10)
     status: AnalysisStatus
     attempt_count: int = Field(ge=0, le=2)
     error_code: ErrorCode | None
@@ -166,12 +255,19 @@ class AnalysisTask(BaseModel):
 
     @model_validator(mode="after")
     def validate_status_payload(self) -> "AnalysisTask":
-        if self.status in {AnalysisStatus.QUEUED, AnalysisStatus.PROCESSING}:
+        if len(set(self.supporting_document_ids)) != len(self.supporting_document_ids):
+            raise ValueError("supporting_document_ids는 중복될 수 없습니다.")
+        if self.status == AnalysisStatus.QUEUED:
+            if self.attempt_count != 0 or self.error_code is not None or self.result is not None:
+                raise ValueError("QUEUED 작업은 시도 전 상태여야 합니다.")
+        elif self.status == AnalysisStatus.PROCESSING:
+            if not 1 <= self.attempt_count <= 2:
+                raise ValueError("PROCESSING 작업의 시도 횟수는 1~2여야 합니다.")
             if self.error_code is not None or self.result is not None:
-                raise ValueError(
-                    "대기 또는 처리 중인 분석 작업에는 결과와 오류를 넣을 수 없습니다."
-                )
+                raise ValueError("PROCESSING 작업에는 결과와 오류를 넣을 수 없습니다.")
         elif self.status == AnalysisStatus.COMPLETED:
+            if not 1 <= self.attempt_count <= 2:
+                raise ValueError("COMPLETED 작업의 시도 횟수는 1~2여야 합니다.")
             if self.error_code is not None or self.result is None:
                 raise ValueError("완료된 분석 작업에는 결과만 필요합니다.")
         elif self.status == AnalysisStatus.FAILED:
@@ -179,6 +275,8 @@ class AnalysisTask(BaseModel):
                 ErrorCode.DOCUMENT_PARSE_FAILED,
                 ErrorCode.ANALYSIS_SCHEMA_INVALID,
             }
+            if not 1 <= self.attempt_count <= 2:
+                raise ValueError("FAILED 작업의 시도 횟수는 1~2여야 합니다.")
             if self.result is not None or self.error_code not in allowed_errors:
                 raise ValueError("실패한 분석 작업에는 허용된 분석 오류만 필요합니다.")
         return self

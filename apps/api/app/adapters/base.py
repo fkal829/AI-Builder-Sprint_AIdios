@@ -1,11 +1,46 @@
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Protocol
 
-from app.schemas.analysis import ExtractedTerm
+from app.core.enums import ExtractedField
+from app.schemas.analysis import ExtractedTermCandidate
+
+
+@dataclass(frozen=True)
+class ParsedPage:
+    number: int
+    text: str
+
+
+@dataclass(frozen=True)
+class ParsedElement:
+    page: int
+    text: str
+    coordinates: tuple[tuple[float, float], ...]
+
+
+@dataclass(frozen=True)
+class ParsedDocument:
+    pages: tuple[ParsedPage, ...]
+    model: str
+    elements: tuple[ParsedElement, ...] = ()
 
 
 class DocumentAnalysisAdapter(Protocol):
-    async def extract_terms(self, document_path: Path) -> list[ExtractedTerm]: ...
+    async def parse_document(
+        self,
+        *,
+        content: bytes,
+        content_type: str,
+    ) -> ParsedDocument: ...
+
+    async def extract_terms(
+        self,
+        *,
+        content: bytes,
+        content_type: str,
+        parsed_document: ParsedDocument,
+        target_fields: tuple[ExtractedField, ...],
+    ) -> list[ExtractedTermCandidate]: ...
 
 
 class SignatureAdapter(Protocol):

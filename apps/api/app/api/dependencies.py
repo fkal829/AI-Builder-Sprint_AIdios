@@ -10,6 +10,10 @@ from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedAccess
 from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.understood_terms import UnderstoodTermService
+from app.services.contracts import ContractService
+from app.services.documents import DocumentUploadService
+from app.services.idempotency import IdempotencyService
+from app.services.public_tokens import PublicTokenService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -59,6 +63,25 @@ async def get_understood_term_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> UnderstoodTermService:
     return UnderstoodTermService(repository=supabase)
+async def get_contract_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> ContractService:
+    return ContractService(supabase)
+
+
+async def get_public_token_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> PublicTokenService:
+    return PublicTokenService(
+        supabase,
+        signing_secret=get_settings().public_token_secret,
+    )
+
+
+async def get_idempotency_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> IdempotencyService:
+    return IdempotencyService(supabase)
 
 
 async def get_current_owner_id(

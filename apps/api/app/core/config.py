@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     demo_owner_id: UUID = UUID("00000000-0000-4000-8000-000000000013")
     demo_contract_id: UUID = UUID("00000000-0000-4000-8000-000000000041")
     demo_bearer_token: str = Field(default="local-demo-owner-token", min_length=16)
+    public_token_secret: str = Field(
+        default="local-development-public-token-secret-change-before-production",
+        min_length=32,
+    )
 
     upstage_mode: str = "mock"
     upstage_api_key: str = ""
@@ -59,6 +63,12 @@ class Settings(BaseSettings):
             )
         if self.app_env == "production" and self.supabase_mode == "mock":
             raise ValueError("production에서는 SUPABASE_MODE=mock을 사용할 수 없습니다.")
+        if (
+            self.app_env == "production"
+            and self.public_token_secret
+            == "local-development-public-token-secret-change-before-production"
+        ):
+            raise ValueError("production에서는 PUBLIC_TOKEN_SECRET을 별도로 설정해야 합니다.")
         return self
 
 

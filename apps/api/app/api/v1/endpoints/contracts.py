@@ -21,8 +21,61 @@ from app.services.documents import (
     read_upload_content,
 )
 from app.services.understood_terms import UnderstoodTermService
+    get_contract_service,
+    get_current_owner_id,
+    get_document_upload_service,
+)
+from app.core.http import request_id
+from app.schemas.common import ApiResponse
+from app.schemas.contracts import AuditEvent, Contract, ContractCreate, ContractListItem
+from app.schemas.documents import Document, DocumentType
+from app.services.contracts import ContractService
+from app.services.documents import DocumentUploadService, read_upload_content
 
 router = APIRouter()
+
+
+@router.post("", response_model=ApiResponse[Contract], status_code=201)
+async def create_contract(
+    request: Request,
+    payload: ContractCreate,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ContractService, Depends(get_contract_service)],
+) -> ApiResponse[Contract]:
+    contract = await service.create(owner_id=owner_id, payload=payload)
+    return ApiResponse(data=contract, error=None, request_id=request_id(request))
+
+
+@router.get("", response_model=ApiResponse[list[ContractListItem]])
+async def list_contracts(
+    request: Request,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ContractService, Depends(get_contract_service)],
+) -> ApiResponse[list[ContractListItem]]:
+    contracts = await service.list(owner_id=owner_id)
+    return ApiResponse(data=contracts, error=None, request_id=request_id(request))
+
+
+@router.get("/{contract_id}", response_model=ApiResponse[Contract])
+async def get_contract(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ContractService, Depends(get_contract_service)],
+) -> ApiResponse[Contract]:
+    contract = await service.get(owner_id=owner_id, contract_id=contract_id)
+    return ApiResponse(data=contract, error=None, request_id=request_id(request))
+
+
+@router.get("/{contract_id}/timeline", response_model=ApiResponse[list[AuditEvent]])
+async def get_contract_timeline(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ContractService, Depends(get_contract_service)],
+) -> ApiResponse[list[AuditEvent]]:
+    timeline = await service.timeline(owner_id=owner_id, contract_id=contract_id)
+    return ApiResponse(data=timeline, error=None, request_id=request_id(request))
 
 
 @router.post(

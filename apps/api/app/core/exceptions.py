@@ -36,6 +36,24 @@ class InvalidDocument(ApiException):
         )
 
 
+class IdempotencyConflict(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=409,
+            code=ErrorCode.IDEMPOTENCY_CONFLICT,
+            message="같은 멱등 키에 다른 요청을 사용할 수 없습니다.",
+        )
+
+
+class PublicTokenExpired(ApiException):
+    def __init__(self, *, code: ErrorCode) -> None:
+        super().__init__(
+            status_code=410,
+            code=code,
+            message="공개 링크가 만료되었습니다.",
+        )
+
+
 class ExternalStorageFailure(RuntimeError):
     """Private storage or metadata persistence failed without exposing vendor details."""
 

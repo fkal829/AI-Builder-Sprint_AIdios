@@ -1,11 +1,12 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Protocol
+from enum import StrEnum
+from typing import Protocol
 from uuid import UUID
 
-from app.core.enums import ContractStatus
-from app.schemas.contracts import ContractCreate
+from app.core.enums import ContractStatus, RenewalDecisionType
+from app.schemas.contracts import ContractCreate, RenewalDecision
 from app.schemas.understood_terms import UnderstoodTerm
 
 
@@ -23,7 +24,7 @@ class ContractRecord:
     renewal_type: str | None
     total_amount: int | None
     understood_term: UnderstoodTerm | None
-    renewal_decision: dict[str, Any] | None
+    renewal_decision: RenewalDecision | None
     modusign_document_id: str | None
     created_at: datetime
     updated_at: datetime
@@ -37,6 +38,19 @@ class AuditEventRecord:
     actor_type: str
     summary: str | None
     created_at: datetime
+
+
+class RenewalDecisionSaveOutcome(StrEnum):
+    SAVED = "SAVED"
+    UNCHANGED = "UNCHANGED"
+    NOT_FOUND = "NOT_FOUND"
+    OUTSIDE_REVIEW_WINDOW = "OUTSIDE_REVIEW_WINDOW"
+
+
+@dataclass(frozen=True)
+class RenewalDecisionSaveResult:
+    outcome: RenewalDecisionSaveOutcome
+    decision: RenewalDecision | None
 
 
 class ContractRepository(Protocol):
@@ -58,3 +72,13 @@ class ContractRepository(Protocol):
         owner_id: UUID,
         contract_id: UUID,
     ) -> Sequence[AuditEventRecord] | None: ...
+
+    async def save_renewal_decision_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        decision: RenewalDecisionType,
+        today: date,
+        decided_at: datetime,
+    ) -> RenewalDecisionSaveResult: ...

@@ -38,7 +38,14 @@ from app.schemas.adjustments import (
 )
 from app.schemas.analysis import AnalysisStartRequest, AnalysisTask, ReviewItem, ReviewItemUpdate
 from app.schemas.common import ApiResponse
-from app.schemas.contracts import AuditEvent, Contract, ContractCreate, ContractListItem
+from app.schemas.contracts import (
+    AuditEvent,
+    Contract,
+    ContractCreate,
+    ContractListItem,
+    RenewalDecision,
+    RenewalDecisionRequest,
+)
 from app.schemas.documents import Document, DocumentAccess, DocumentType
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
 from app.services.adjustments import AdjustmentService
@@ -162,6 +169,31 @@ async def get_contract_timeline(
 ) -> ApiResponse[list[AuditEvent]]:
     timeline = await service.timeline(owner_id=owner_id, contract_id=contract_id)
     return ApiResponse(data=timeline, error=None, request_id=request_id(request))
+
+
+@router.put(
+    "/{contract_id}/renewal-decision",
+    response_model=ApiResponse[RenewalDecision],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "재계약 검토 기간이 아님"},
+        422: {"model": ApiResponse[None], "description": "요청 검증 실패"},
+    },
+)
+async def save_contract_renewal_decision(
+    request: Request,
+    contract_id: UUID,
+    payload: RenewalDecisionRequest,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ContractService, Depends(get_contract_service)],
+) -> ApiResponse[RenewalDecision]:
+    decision = await service.save_renewal_decision(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        payload=payload,
+    )
+    return ApiResponse(data=decision, error=None, request_id=request_id(request))
 
 
 @router.post(

@@ -25,6 +25,10 @@
 반복 저장은 기존 결과를 반환하고, 분석 작업의 `result.review_items` 미러도 함께
 갱신한다.
 
+`20260730250000_expand_contract_audit_event_types.sql`은 3.5 감사 타임라인에서 사용하는
+`CONTRACT_STARTED`, `CONTRACT_COMPLETED`, `CONTRACT_RENEWAL_DUE`를
+`audit_events.event_type` 체크 제약에 추가해 API·Python enum·DB 허용값을 일치시킨다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

@@ -208,6 +208,41 @@ async def test_timeline_is_ordered_and_never_returns_internal_payload(contract_c
     assert set(matching[0]) == {"id", "event_type", "actor_type", "summary", "created_at"}
 
 
+async def test_timeline_returns_contract_lifecycle_events(contract_context) -> None:
+    client, adapter = contract_context
+    contract_id = UUID((await create_contract(client, "계약 상태 타임라인"))["id"])
+    created_at = datetime(2026, 7, 31, 1, tzinfo=UTC)
+    expected_event_types = [
+        "CONTRACT_STARTED",
+        "CONTRACT_COMPLETED",
+        "CONTRACT_RENEWAL_DUE",
+    ]
+    adapter._mock_audit_events.extend(
+        MockAuditEvent(
+            id=uuid4(),
+            contract_id=contract_id,
+            event_type=event_type,
+            actor_type="SYSTEM",
+            summary=None,
+            created_at=created_at,
+        )
+        for event_type in expected_event_types
+    )
+
+    response = await client.get(
+        f"/api/v1/contracts/{contract_id}/timeline",
+        headers=authorization_header(),
+    )
+
+    assert response.status_code == 200
+    returned_event_types = [
+        event["event_type"]
+        for event in response.json()["data"]
+        if event["event_type"] in expected_event_types
+    ]
+    assert sorted(returned_event_types) == sorted(expected_event_types)
+
+
 async def test_contract_apis_require_valid_owner_authentication(contract_context) -> None:
     client, _adapter = contract_context
 

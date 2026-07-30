@@ -17,12 +17,19 @@ from app.core.enums import (
     AgreementClauseCategory,
     AgreementClauseDisposition,
     AgreementClauseOutcome,
+    AnalysisStatus,
     ContractStatus,
+    ExtractedField,
+    ExtractedSourceType,
     IdempotencyOperation,
+    ObligationStatus,
     PublicTokenScope,
+    RenewalDecisionType,
     ReviewItemStatus,
     SuggestionChoice,
+    VerificationStatus,
 )
+from app.core.errors import ErrorCode
 from app.core.exceptions import ExternalStorageFailure
 from app.repositories.adjustments import (
     AdjustmentDetailRecord,
@@ -34,12 +41,23 @@ from app.repositories.adjustments import (
     ReviewItemForAdjustment,
 )
 from app.repositories.agreements import AgreementCreationContext, AgreementRecord
-from app.repositories.contracts import AuditEventRecord, ContractRecord
+from app.repositories.analysis import AnalysisTaskRecord
+from app.repositories.contracts import (
+    AuditEventRecord,
+    ContractRecord,
+    RenewalDecisionSaveOutcome,
+    RenewalDecisionSaveResult,
+)
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
 from app.repositories.public_tokens import PublicTokenRecord
+from app.repositories.review_items import (
+    ReviewItemSelectionOutcome,
+    ReviewItemSelectionResult,
+)
 from app.schemas.agreements import Agreement
-from app.schemas.contracts import ContractCreate
+from app.schemas.analysis import Analysis, ReviewItem
+from app.schemas.contracts import ContractCreate, RenewalDecision
 from app.schemas.documents import DocumentParseStatus, DocumentType
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
 
@@ -67,6 +85,23 @@ class MockSignedAccess:
 class MockPrivateObject:
     content: bytes
     content_type: str
+
+
+@dataclass(frozen=True)
+class MockObligation:
+    id: UUID
+    contract_id: UUID
+    title: str
+    due_date: date
+    assignee: str
+    evidence_type: str
+    source_document_id: UUID
+    source_page: int
+    source_text: str
+    confidence: float
+    status: ObligationStatus
+    created_at: datetime
+    updated_at: datetime
 
 
 def utc_now() -> datetime:
@@ -105,13 +140,17 @@ class SupabaseAdapter:
         self._mock_object_content_types: dict[str, str] = {}
         self._mock_documents: dict[UUID, DocumentRecord] = {}
         self._mock_understood_terms: dict[UUID, UnderstoodTerm] = {}
+        self._mock_renewal_decisions: dict[UUID, RenewalDecision] = {}
         self._mock_audit_events: list[MockAuditEvent] = []
         self._mock_signed_accesses: dict[str, MockSignedAccess] = {}
         self._mock_public_tokens: dict[str, PublicTokenRecord] = {}
         self._mock_idempotency: dict[
             tuple[UUID, IdempotencyOperation, UUID, UUID], IdempotencyRecord
         ] = {}
+        self._mock_analysis_tasks: dict[UUID, AnalysisTaskRecord] = {}
+        self._mock_obligations: dict[UUID, MockObligation] = {}
         self._mock_review_items: dict[UUID, ReviewItemForAdjustment] = {}
+        self._mock_review_item_details: dict[UUID, ReviewItem] = {}
         self._mock_adjustment_requests: dict[UUID, AdjustmentRequestRecord] = {}
         self._mock_adjustment_responses: dict[
             UUID, tuple[AdjustmentResponseRecord, ...]
@@ -134,6 +173,10 @@ class SupabaseAdapter:
         return dict(self._mock_understood_terms)
 
     @property
+    def mock_renewal_decisions(self) -> dict[UUID, RenewalDecision]:
+        return dict(self._mock_renewal_decisions)
+
+    @property
     def mock_audit_events(self) -> tuple[MockAuditEvent, ...]:
         return tuple(self._mock_audit_events)
 
@@ -154,8 +197,20 @@ class SupabaseAdapter:
         return tuple(self._mock_idempotency.values())
 
     @property
+    def mock_analysis_tasks(self) -> dict[UUID, AnalysisTaskRecord]:
+        return dict(self._mock_analysis_tasks)
+
+    @property
+    def mock_obligations(self) -> dict[UUID, MockObligation]:
+        return dict(self._mock_obligations)
+
+    @property
     def mock_review_items(self) -> dict[UUID, ReviewItemForAdjustment]:
         return dict(self._mock_review_items)
+
+    @property
+    def mock_review_item_details(self) -> dict[UUID, ReviewItem]:
+        return dict(self._mock_review_item_details)
 
     @property
     def mock_adjustment_requests(self) -> dict[UUID, AdjustmentRequestRecord]:
@@ -249,6 +304,25 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("업로드 롤백에 실패했습니다.") from error
 
+    async def download_private_object(self, *, path: str) -> bytes:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                content = self._mock_objects.get(path)
+                if content is None:
+                    raise ExternalStorageFailure("비공개 문서를 찾을 수 없습니다.")
+                return content
+        client = self._require_live_client()
+        try:
+            content = await asyncio.to_thread(
+                client.storage.from_(self.bucket).download,
+                path,
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("비공개 문서를 읽지 못했습니다.") from error
+        if not isinstance(content, bytes):
+            raise ExternalStorageFailure("비공개 문서 응답이 올바르지 않습니다.")
+        return content
+
     async def create_document_with_audit(
         self,
         *,
@@ -335,6 +409,51 @@ class SupabaseAdapter:
             return None
         row = response.data[0] if isinstance(response.data, list) else response.data
         return self._document_record_from_row(row)
+
+    async def get_latest_owned_document(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        document_type: DocumentType,
+    ) -> DocumentRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                candidates = [
+                    document
+                    for document in self._mock_documents.values()
+                    if document.contract_id == contract_id and document.type == document_type
+                ]
+                if not candidates:
+                    return None
+                return max(candidates, key=lambda item: (item.created_at, str(item.id)))
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("documents")
+                    .select(
+                        "id,contract_id,type,parse_status,storage_path,"
+                        "content_type,size_bytes,page_count,created_at,"
+                        "contracts!inner(owner_id)"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .eq("type", document_type.value)
+                    .eq("contracts.owner_id", str(owner_id))
+                    .order("created_at", desc=True)
+                    .order("id", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("최신 계약 문서 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        return self._document_record_from_row(response.data[0])
 
     async def create_signed_access_url(
         self,
@@ -446,6 +565,71 @@ class SupabaseAdapter:
         row = response.data[0] if isinstance(response.data, list) else response.data
         return UnderstoodTerm.model_validate(row)
 
+    async def get_understood_term(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> UnderstoodTerm | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                return self._mock_understood_terms.get(contract_id)
+
+        if not await self.is_contract_owned(owner_id=owner_id, contract_id=contract_id):
+            return None
+        return await self._get_understood_term_for_owned_contract(contract_id=contract_id)
+
+    async def _get_understood_term_for_owned_contract(
+        self,
+        *,
+        contract_id: UUID,
+    ) -> UnderstoodTerm | None:
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("understood_terms")
+                    .select(
+                        "contract_id,duration_text,monthly_amount,total_amount,"
+                        "refund_text,termination_text,source_type"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("사용자 이해조건 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        return UnderstoodTerm.model_validate(response.data[0])
+
+    async def _get_renewal_decision_for_owned_contract(
+        self,
+        *,
+        contract_id: UUID,
+    ) -> RenewalDecision | None:
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("renewal_decisions")
+                    .select(
+                        "contract_id,decision,decided_at,revisit_review_item_ids"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("재계약 의사 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        return RenewalDecision.model_validate(response.data[0])
+
     @staticmethod
     def _document_record_from_row(row) -> DocumentRecord:
         return DocumentRecord(
@@ -510,7 +694,14 @@ class SupabaseAdapter:
             async with self._mock_lock:
                 if (owner_id, contract_id) not in self._mock_owned_contracts:
                     return None
-                return self._mock_contracts.get(contract_id)
+                record = self._mock_contracts.get(contract_id)
+                if record is None:
+                    return None
+                return replace(
+                    record,
+                    understood_term=self._mock_understood_terms.get(contract_id),
+                    renewal_decision=self._mock_renewal_decisions.get(contract_id),
+                )
 
         client = self._require_live_client()
         try:
@@ -528,7 +719,18 @@ class SupabaseAdapter:
             raise ExternalStorageFailure("계약 조회에 실패했습니다.") from error
         if not response.data:
             return None
-        return _contract_record_from_row(response.data[0], owner_id=owner_id)
+        record = _contract_record_from_row(response.data[0], owner_id=owner_id)
+        understood_term = await self._get_understood_term_for_owned_contract(
+            contract_id=contract_id,
+        )
+        renewal_decision = await self._get_renewal_decision_for_owned_contract(
+            contract_id=contract_id,
+        )
+        return replace(
+            record,
+            understood_term=understood_term,
+            renewal_decision=renewal_decision,
+        )
 
     async def list(self, *, owner_id: UUID) -> Sequence[ContractRecord]:
         if self.mode == "mock":
@@ -591,6 +793,111 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("계약 감사 타임라인 조회에 실패했습니다.") from error
         return [_audit_event_record_from_row(row) for row in response.data or []]
+
+    async def save_renewal_decision_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        decision: RenewalDecisionType,
+        today: date,
+        decided_at: datetime,
+    ) -> RenewalDecisionSaveResult:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if (
+                    contract is None
+                    or (owner_id, contract_id) not in self._mock_owned_contracts
+                ):
+                    return RenewalDecisionSaveResult(
+                        outcome=RenewalDecisionSaveOutcome.NOT_FOUND,
+                        decision=None,
+                    )
+                if not _is_contract_in_renewal_review_window(contract, today=today):
+                    return RenewalDecisionSaveResult(
+                        outcome=RenewalDecisionSaveOutcome.OUTSIDE_REVIEW_WINDOW,
+                        decision=None,
+                    )
+
+                existing = self._mock_renewal_decisions.get(contract_id)
+                if existing is not None and existing.decision == decision:
+                    return RenewalDecisionSaveResult(
+                        outcome=RenewalDecisionSaveOutcome.UNCHANGED,
+                        decision=existing,
+                    )
+
+                revisit_review_item_ids: list[UUID] = []
+                if decision == RenewalDecisionType.RENEW_WITH_CHANGES:
+                    revisit_ids = {
+                        item.id
+                        for item in self._mock_review_items.values()
+                        if item.contract_id == contract_id
+                        and item.status == ReviewItemStatus.KEPT_ORIGINAL
+                    }
+                    for request_id, responses in self._mock_adjustment_responses.items():
+                        request = self._mock_adjustment_requests.get(request_id)
+                        if request is None or request.contract_id != contract_id:
+                            continue
+                        revisit_ids.update(
+                            response.review_item_id
+                            for response in responses
+                            if response.decision == AdjustmentResponseDecision.REJECT
+                        )
+                    revisit_review_item_ids = sorted(revisit_ids, key=str)
+
+                saved = RenewalDecision(
+                    contract_id=contract_id,
+                    decision=decision,
+                    decided_at=decided_at,
+                    revisit_review_item_ids=revisit_review_item_ids,
+                )
+                self._mock_renewal_decisions[contract_id] = saved
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="RENEWAL_DECISION_SAVED",
+                        actor_type="OWNER",
+                        summary="만료·재계약 의사를 저장했습니다.",
+                        created_at=decided_at,
+                    )
+                )
+                return RenewalDecisionSaveResult(
+                    outcome=RenewalDecisionSaveOutcome.SAVED,
+                    decision=saved,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_decision": decision.value,
+            "p_today": today.isoformat(),
+            "p_decided_at": decided_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "save_renewal_decision_with_audit",
+                    params,
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("재계약 의사 저장에 실패했습니다.") from error
+        payload = response.data[0] if isinstance(response.data, list) else response.data
+        if not isinstance(payload, dict):
+            raise ExternalStorageFailure("재계약 의사 저장 결과를 확인할 수 없습니다.")
+        outcome = RenewalDecisionSaveOutcome(payload["outcome"])
+        decision_payload = payload.get("decision")
+        return RenewalDecisionSaveResult(
+            outcome=outcome,
+            decision=(
+                RenewalDecision.model_validate(decision_payload)
+                if isinstance(decision_payload, dict)
+                else None
+            ),
+        )
 
     async def create_public_token(self, *, record: PublicTokenRecord) -> PublicTokenRecord:
         if self.mode == "mock":
@@ -811,6 +1118,397 @@ class SupabaseAdapter:
             await asyncio.to_thread(lambda: client.rpc("abandon_idempotency", params).execute())
         except Exception as error:
             raise ExternalStorageFailure("멱등성 예약 정리에 실패했습니다.") from error
+
+    async def get_latest_analysis_task(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> AnalysisTaskRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                candidates = [
+                    task
+                    for task in self._mock_analysis_tasks.values()
+                    if task.contract_id == contract_id
+                ]
+                if not candidates:
+                    return None
+                return max(candidates, key=lambda item: (item.created_at, str(item.id)))
+
+        if not await self.is_contract_owned(owner_id=owner_id, contract_id=contract_id):
+            return None
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("analysis_tasks")
+                    .select("*")
+                    .eq("contract_id", str(contract_id))
+                    .order("created_at", desc=True)
+                    .order("id", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("최근 분석 작업 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        return _analysis_task_record_from_row(response.data[0])
+
+    async def start_analysis_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        task: AnalysisTaskRecord,
+        restart: bool,
+    ) -> AnalysisTaskRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(task.contract_id)
+                if contract is None or contract.owner_id != owner_id:
+                    return None
+                active = any(
+                    item.contract_id == task.contract_id
+                    and item.status in {AnalysisStatus.QUEUED, AnalysisStatus.PROCESSING}
+                    for item in self._mock_analysis_tasks.values()
+                )
+                if active:
+                    return None
+                if restart:
+                    latest = max(
+                        (
+                            item
+                            for item in self._mock_analysis_tasks.values()
+                            if item.contract_id == task.contract_id
+                        ),
+                        key=lambda item: (item.created_at, str(item.id)),
+                        default=None,
+                    )
+                    if (
+                        contract.status != ContractStatus.ANALYZING
+                        or latest is None
+                        or latest.status != AnalysisStatus.FAILED
+                    ):
+                        return None
+                    event_type = "ANALYSIS_RESTARTED"
+                    summary = "실패한 계약 분석을 다시 접수했습니다."
+                else:
+                    if contract.status != ContractStatus.DRAFT:
+                        return None
+                    event_type = "ANALYSIS_STARTED"
+                    summary = "계약 분석을 접수했습니다."
+
+                self._mock_contracts[task.contract_id] = replace(
+                    contract,
+                    status=ContractStatus.ANALYZING,
+                    updated_at=task.created_at,
+                )
+                self._mock_analysis_tasks[task.id] = task
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=task.contract_id,
+                        event_type=event_type,
+                        actor_type="OWNER",
+                        summary=summary,
+                        created_at=task.created_at,
+                    )
+                )
+                return task
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_task_id": str(task.id),
+            "p_contract_id": str(task.contract_id),
+            "p_document_id": str(task.document_id),
+            "p_supporting_document_ids": [
+                str(document_id) for document_id in task.supporting_document_ids
+            ],
+            "p_restart": restart,
+            "p_created_at": task.created_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("start_analysis_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("분석 작업 접수에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _analysis_task_record_from_row(row)
+
+    async def mark_analysis_processing(
+        self,
+        *,
+        task_id: UUID,
+    ) -> AnalysisTaskRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                task = self._mock_analysis_tasks.get(task_id)
+                if task is None or task.status != AnalysisStatus.QUEUED:
+                    return None
+                processing = replace(
+                    task,
+                    status=AnalysisStatus.PROCESSING,
+                    attempt_count=1,
+                    updated_at=self._clock(),
+                )
+                self._mock_analysis_tasks[task_id] = processing
+                return processing
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "mark_analysis_processing",
+                    {"p_task_id": str(task_id)},
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("분석 처리 상태 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _analysis_task_record_from_row(row)
+
+    async def complete_analysis_with_audit(
+        self,
+        *,
+        task_id: UUID,
+        attempt_count: int,
+        result: Analysis,
+    ) -> AnalysisTaskRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                task = self._mock_analysis_tasks.get(task_id)
+                if task is None or task.status != AnalysisStatus.PROCESSING:
+                    return None
+                contract = self._mock_contracts.get(task.contract_id)
+                if contract is None or contract.status != ContractStatus.ANALYZING:
+                    return None
+                now = self._clock()
+                completed = replace(
+                    task,
+                    status=AnalysisStatus.COMPLETED,
+                    attempt_count=attempt_count,
+                    error_code=None,
+                    result=result,
+                    updated_at=now,
+                )
+                self._mock_analysis_tasks[task_id] = completed
+                for review_item in result.review_items:
+                    self._set_mock_review_item(
+                        review_item,
+                        updated_at=now,
+                        mirror_analysis_result=False,
+                    )
+                promoted_contract = _promote_verified_canonical_values(
+                    contract=contract,
+                    result=result,
+                )
+                self._mock_contracts[task.contract_id] = replace(
+                    promoted_contract,
+                    status=ContractStatus.REVIEW_REQUIRED,
+                    updated_at=now,
+                )
+                obligation = _representative_obligation(result=result, now=now)
+                if (
+                    obligation is not None
+                    and obligation.contract_id not in self._mock_obligations
+                ):
+                    self._mock_obligations[obligation.contract_id] = obligation
+                    self._mock_audit_events.append(
+                        MockAuditEvent(
+                            id=uuid4(),
+                            contract_id=task.contract_id,
+                            event_type="OBLIGATION_CREATED",
+                            actor_type="SYSTEM",
+                            summary="대표 산출물 이행 항목을 생성했습니다.",
+                            created_at=now,
+                        )
+                    )
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=task.contract_id,
+                        event_type="ANALYSIS_COMPLETED",
+                        actor_type="SYSTEM",
+                        summary="계약 분석을 완료했습니다.",
+                        created_at=now,
+                    )
+                )
+                return completed
+
+        client = self._require_live_client()
+        params = {
+            "p_task_id": str(task_id),
+            "p_attempt_count": attempt_count,
+            "p_result": result.model_dump(mode="json"),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("complete_analysis_result_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("분석 완료 결과 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _analysis_task_record_from_row(row)
+
+    async def fail_analysis_with_audit(
+        self,
+        *,
+        task_id: UUID,
+        attempt_count: int,
+        error_code: ErrorCode,
+    ) -> AnalysisTaskRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                task = self._mock_analysis_tasks.get(task_id)
+                if task is None or task.status != AnalysisStatus.PROCESSING:
+                    return None
+                now = self._clock()
+                failed = replace(
+                    task,
+                    status=AnalysisStatus.FAILED,
+                    attempt_count=attempt_count,
+                    error_code=error_code,
+                    result=None,
+                    updated_at=now,
+                )
+                self._mock_analysis_tasks[task_id] = failed
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=task.contract_id,
+                        event_type="ANALYSIS_FAILED",
+                        actor_type="SYSTEM",
+                        summary="계약 분석에 실패했습니다.",
+                        created_at=now,
+                    )
+                )
+                return failed
+
+        client = self._require_live_client()
+        params = {
+            "p_task_id": str(task_id),
+            "p_attempt_count": attempt_count,
+            "p_error_code": error_code.value,
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("fail_analysis_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("분석 실패 상태 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _analysis_task_record_from_row(row)
+
+    async def update_review_item_selection_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        item_id: UUID,
+        user_choice: SuggestionChoice,
+        target_status: ReviewItemStatus,
+        updated_at: datetime,
+    ) -> ReviewItemSelectionResult:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.NOT_FOUND,
+                        item=None,
+                    )
+                item = self._mock_review_item_details.get(item_id)
+                if item is None or item.contract_id != contract_id:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.NOT_FOUND,
+                        item=None,
+                    )
+                if item.status not in {
+                    ReviewItemStatus.UNREVIEWED,
+                    ReviewItemStatus.SELECTED,
+                }:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.INVALID_STATUS_TRANSITION,
+                        item=item,
+                    )
+                expected_status = (
+                    ReviewItemStatus.RESOLVED
+                    if user_choice == SuggestionChoice.ACCEPT
+                    else ReviewItemStatus.SELECTED
+                )
+                if target_status != expected_status:
+                    raise ValueError("검토 항목 선택과 대상 상태가 일치하지 않습니다.")
+                if item.user_choice == user_choice and item.status == target_status:
+                    return ReviewItemSelectionResult(
+                        outcome=ReviewItemSelectionOutcome.UNCHANGED,
+                        item=item,
+                    )
+
+                updated = ReviewItem.model_validate(
+                    item.model_dump()
+                    | {
+                        "user_choice": user_choice,
+                        "status": target_status,
+                    }
+                )
+                self._set_mock_review_item(updated, updated_at=updated_at)
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="REVIEW_ITEM_SELECTION_UPDATED",
+                        actor_type="OWNER",
+                        summary="검토 항목 선택을 변경했습니다.",
+                        created_at=updated_at,
+                    )
+                )
+                return ReviewItemSelectionResult(
+                    outcome=ReviewItemSelectionOutcome.UPDATED,
+                    item=updated,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_item_id": str(item_id),
+            "p_user_choice": user_choice.value,
+            "p_target_status": target_status.value,
+            "p_updated_at": updated_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "update_review_item_selection_with_audit",
+                    params,
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("검토 항목 선택 저장에 실패했습니다.") from error
+        payload = response.data[0] if isinstance(response.data, list) else response.data
+        if not isinstance(payload, dict):
+            raise ExternalStorageFailure("검토 항목 선택 저장 결과를 확인할 수 없습니다.")
+        outcome = ReviewItemSelectionOutcome(payload["outcome"])
+        item_payload = payload.get("item")
+        return ReviewItemSelectionResult(
+            outcome=outcome,
+            item=_review_item_from_row(item_payload)
+            if isinstance(item_payload, dict)
+            else None,
+        )
 
     async def list_review_items_for_adjustment(
         self,
@@ -1416,7 +2114,9 @@ class SupabaseAdapter:
                 ):
                     return None
                 review_item_ids = {item.review_item_id for item in record.items}
-                review_items = [self._mock_review_items.get(item_id) for item_id in review_item_ids]
+                review_items = [
+                    self._mock_review_items.get(item_id) for item_id in review_item_ids
+                ]
                 if any(
                     item is None
                     or item.status != ReviewItemStatus.SELECTED
@@ -1436,10 +2136,20 @@ class SupabaseAdapter:
                 self._mock_adjustment_requests[record.id] = sent
                 for review_item in review_items:
                     assert review_item is not None
-                    self._mock_review_items[review_item.id] = replace(
+                    frozen = replace(
                         review_item,
                         status=ReviewItemStatus.SENT,
                     )
+                    self._mock_review_items[review_item.id] = frozen
+                    detail = self._mock_review_item_details.get(review_item.id)
+                    if detail is not None:
+                        sent_detail = ReviewItem.model_validate(
+                            detail.model_dump()
+                            | {
+                                "status": ReviewItemStatus.SENT,
+                            }
+                        )
+                        self._set_mock_review_item(sent_detail, updated_at=sent_at)
                 self._mock_contracts[contract_id] = replace(
                     contract,
                     status=ContractStatus.NEGOTIATING,
@@ -1482,6 +2192,37 @@ class SupabaseAdapter:
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _adjustment_request_record_from_row(row)
 
+    def _set_mock_review_item(
+        self,
+        item: ReviewItem,
+        *,
+        updated_at: datetime,
+        mirror_analysis_result: bool = True,
+    ) -> None:
+        self._mock_review_item_details[item.id] = item
+        self._mock_review_items[item.id] = _review_item_for_adjustment(item)
+        if not mirror_analysis_result:
+            return
+        for task_id, task in tuple(self._mock_analysis_tasks.items()):
+            if task.result is None:
+                continue
+            if not any(review_item.id == item.id for review_item in task.result.review_items):
+                continue
+            mirrored_result = Analysis(
+                contract_id=task.result.contract_id,
+                extracted_terms=task.result.extracted_terms,
+                review_items=[
+                    item if review_item.id == item.id else review_item
+                    for review_item in task.result.review_items
+                ],
+            )
+            self._mock_analysis_tasks[task_id] = replace(
+                task,
+                result=mirrored_result,
+                updated_at=updated_at,
+            )
+            return
+
     def _require_live_client(self) -> Client:
         if self._client is None:
             raise RuntimeError("Supabase live client가 초기화되지 않았습니다.")
@@ -1501,7 +2242,113 @@ def _parse_date(value: str | date | None) -> date | None:
     return date.fromisoformat(value)
 
 
+def _promote_verified_canonical_values(
+    *,
+    contract: ContractRecord,
+    result: Analysis,
+) -> ContractRecord:
+    field_mapping = {
+        ExtractedField.CONTRACT_SIGNED_DATE: "signed_date",
+        ExtractedField.CONTRACT_START_DATE: "start_date",
+        ExtractedField.CONTRACT_END_DATE: "end_date",
+        ExtractedField.TERMINATION_NOTICE_DATE: "termination_notice_date",
+        ExtractedField.CONTRACT_RENEWAL_TYPE: "renewal_type",
+        ExtractedField.CONTRACT_TOTAL_AMOUNT: "total_amount",
+    }
+    updates: dict[str, date | str | int] = {}
+    for field, attribute in field_mapping.items():
+        if getattr(contract, attribute) is not None:
+            continue
+        candidates = [
+            term
+            for term in result.extracted_terms
+            if term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
+            and term.field == field
+            and term.verification_status == VerificationStatus.VERIFIED
+        ]
+        if len(candidates) != 1:
+            continue
+        value = candidates[0].value
+        if field in {
+            ExtractedField.CONTRACT_SIGNED_DATE,
+            ExtractedField.CONTRACT_START_DATE,
+            ExtractedField.CONTRACT_END_DATE,
+            ExtractedField.TERMINATION_NOTICE_DATE,
+        }:
+            value = date.fromisoformat(str(value))
+        elif field == ExtractedField.CONTRACT_RENEWAL_TYPE:
+            if value not in {"AUTO", "MANUAL", "NONE"}:
+                continue
+        elif not isinstance(value, int) or isinstance(value, bool):
+            continue
+        updates[attribute] = value
+    return replace(contract, **updates) if updates else contract
+
+
+def _representative_obligation(
+    *,
+    result: Analysis,
+    now: datetime,
+) -> MockObligation | None:
+    contract_terms = [
+        term
+        for term in result.extracted_terms
+        if term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
+        and term.verification_status == VerificationStatus.VERIFIED
+    ]
+    due_dates = [
+        term
+        for term in contract_terms
+        if term.field == ExtractedField.DELIVERABLE_DUE_DATE
+    ]
+    if len(due_dates) != 1:
+        return None
+    due = due_dates[0]
+    title_fields = (
+        ExtractedField.ADVERTISING_CHANNEL,
+        ExtractedField.CONTENT_TYPE,
+        ExtractedField.CONTENT_QUANTITY,
+    )
+    title_terms = [
+        term
+        for field in title_fields
+        for term in contract_terms
+        if term.field == field
+        and term.document_id == due.document_id
+        and term.source_page == due.source_page
+        and term.source_text == due.source_text
+    ]
+    if not title_terms or due.source_page is None or due.source_text is None:
+        return None
+    values = {
+        term.field: (
+            f"{term.value}건"
+            if term.field == ExtractedField.CONTENT_QUANTITY
+            else str(term.value)
+        )
+        for term in title_terms
+    }
+    title = " ".join(values[field] for field in title_fields if field in values)
+    return MockObligation(
+        id=uuid4(),
+        contract_id=result.contract_id,
+        title=title,
+        due_date=date.fromisoformat(str(due.value)),
+        assignee="AGENCY",
+        evidence_type="URL",
+        source_document_id=due.document_id,
+        source_page=due.source_page,
+        source_text=due.source_text,
+        confidence=min(term.confidence for term in (due, *title_terms)),
+        status=ObligationStatus.PENDING,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def _contract_record_from_row(row: dict, *, owner_id: UUID) -> ContractRecord:
+    understood_term = row.get("understood_term")
+    renewal_decision = row.get("renewal_decision")
     return ContractRecord(
         id=UUID(str(row["id"])),
         owner_id=UUID(str(row.get("owner_id", owner_id))),
@@ -1514,11 +2361,45 @@ def _contract_record_from_row(row: dict, *, owner_id: UUID) -> ContractRecord:
         termination_notice_date=_parse_date(row.get("termination_notice_date")),
         renewal_type=row.get("renewal_type"),
         total_amount=int(row["total_amount"]) if row.get("total_amount") is not None else None,
-        understood_term=row.get("understood_term"),
-        renewal_decision=row.get("renewal_decision"),
+        understood_term=(
+            UnderstoodTerm.model_validate(understood_term)
+            if understood_term is not None
+            else None
+        ),
+        renewal_decision=(
+            RenewalDecision.model_validate(renewal_decision)
+            if renewal_decision is not None
+            else None
+        ),
         modusign_document_id=row.get("modusign_document_id"),
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
+    )
+
+
+def _is_contract_in_renewal_review_window(
+    contract: ContractRecord,
+    *,
+    today: date,
+) -> bool:
+    expiry_d_day = (contract.end_date - today).days if contract.end_date else None
+    termination_notice_d_day = (
+        (contract.termination_notice_date - today).days
+        if contract.termination_notice_date
+        else None
+    )
+    auto_renewal_d_day = (
+        expiry_d_day
+        if contract.renewal_type == "AUTO" and contract.end_date
+        else None
+    )
+    return any(
+        d_day is not None and 0 <= d_day <= upper_bound
+        for d_day, upper_bound in (
+            (expiry_d_day, 30),
+            (termination_notice_d_day, 14),
+            (auto_renewal_d_day, 7),
+        )
     )
 
 
@@ -1576,6 +2457,65 @@ def _idempotency_record_from_row(row: dict) -> IdempotencyRecord:
         response_status=row.get("response_status"),
         response_payload=row.get("response_payload"),
         created_at=_parse_datetime(row["created_at"]),
+    )
+
+
+def _analysis_task_record_from_row(row: dict) -> AnalysisTaskRecord:
+    result = row.get("result")
+    return AnalysisTaskRecord(
+        id=UUID(str(row["id"])),
+        contract_id=UUID(str(row["contract_id"])),
+        document_id=UUID(str(row["document_id"])),
+        supporting_document_ids=tuple(
+            UUID(str(document_id))
+            for document_id in row.get("supporting_document_ids") or []
+        ),
+        status=AnalysisStatus(row["status"]),
+        attempt_count=int(row["attempt_count"]),
+        error_code=ErrorCode(row["error_code"]) if row.get("error_code") else None,
+        result=Analysis.model_validate(result) if result is not None else None,
+        created_at=_parse_datetime(row["created_at"]),
+        updated_at=_parse_datetime(row["updated_at"]),
+    )
+
+
+def _review_item_from_row(row: dict) -> ReviewItem:
+    return ReviewItem.model_validate(
+        {
+            "id": row["id"],
+            "contract_id": row["contract_id"],
+            "type": row["type"],
+            "severity": row["severity"],
+            "detection_method": row["detection_method"],
+            "model_confidence": row.get("model_confidence"),
+            "model_limitations": row.get("model_limitations"),
+            "plain_explanation": row["plain_explanation"],
+            "basis_type": row["basis_type"],
+            "basis_text": row["basis_text"],
+            "basis_citation": row.get("basis_citation"),
+            "related_extracted_term_ids": row["related_extracted_term_ids"],
+            "source_document_id": row.get("source_document_id"),
+            "source_page": row.get("source_page"),
+            "source_text": row.get("source_text"),
+            "source_confidence": row.get("source_confidence"),
+            "verification_status": row["verification_status"],
+            "suggestion_accept": row["suggestion_accept"],
+            "suggestion_compromise": row["suggestion_compromise"],
+            "suggestion_request": row["suggestion_request"],
+            "user_choice": row.get("user_choice"),
+            "status": row["status"],
+        }
+    )
+
+
+def _review_item_for_adjustment(item: ReviewItem) -> ReviewItemForAdjustment:
+    return ReviewItemForAdjustment(
+        id=item.id,
+        contract_id=item.contract_id,
+        status=item.status,
+        user_choice=item.user_choice,
+        suggestion_compromise=item.suggestion_compromise,
+        suggestion_request=item.suggestion_request,
     )
 
 

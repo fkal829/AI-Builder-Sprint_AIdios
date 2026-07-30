@@ -14,8 +14,8 @@ export default function AgencyDonePage() {
         </div>
         <h1 className="text-base font-black text-ink">응답을 모두 보냈어요</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-gray700">
-          광안리 카페 사장님께 결과가 전달됐어요. 합의가 확정되면 서명 요청 링크를
-          다시 보내드릴게요.
+          조정 요청자에게 결과가 전달됐어요. 합의가 확정되면 서명 요청 링크를 다시
+          보내드릴게요.
         </p>
 
         <div className="mt-5 rounded-lg bg-paper px-4 py-3">

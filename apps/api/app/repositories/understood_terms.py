@@ -12,3 +12,10 @@ class UnderstoodTermRepository(Protocol):
         contract_id: UUID,
         payload: UnderstoodTermInput,
     ) -> UnderstoodTerm | None: ...
+
+    async def get_understood_term(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> UnderstoodTerm | None: ...

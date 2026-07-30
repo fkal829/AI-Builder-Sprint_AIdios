@@ -20,7 +20,7 @@ BEARER_TOKEN = "local-demo-owner-token"
 FIXED_NOW = datetime(2026, 7, 30, 13, 0, tzinfo=UTC)
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_DIR = REPOSITORY_ROOT / "supabase" / "migrations"
-MIGRATION_PATH = MIGRATION_DIR / "20260730180000_add_understood_terms.sql"
+MIGRATION_PATH = MIGRATION_DIR / "20260730180001_add_understood_terms.sql"
 
 
 def understood_term_payload(**overrides):

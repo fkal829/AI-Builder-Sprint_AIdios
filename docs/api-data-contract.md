@@ -206,6 +206,13 @@ Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서�
 페이지 개념이 없는 이미지·text `MESSAGE`는 단일 가상 페이지 `source_page=1`로
 정규화한다.
 
+Upstage live 모드는 Universal Extraction의 1-based `page`와 정규화 location 좌표를
+같은 요청의 Document Parse 요소 좌표에 연결한다. 좌표가 겹친 요소의 원문만
+`source_text`로 인정하며 연결되지 않은 값은 `MISSING_EVIDENCE`다. Upstage가 반환하는
+confidence 범주 `high`, `low`는 number 저장 계약을 위해 각각 `0.9`, `0.4`로
+정규화한다. `low`는 근거를 보존하되 `NEEDS_CHECK`로 분류한다. 이 값은 별도 보정된
+확률이나 검토 판단의 `model_confidence`가 아니다.
+
 ### 6.3 추출 필드와 값 타입
 
 | `value_type` | 값 |

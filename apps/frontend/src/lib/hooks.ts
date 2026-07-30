@@ -20,8 +20,11 @@ export function useAsync<T>(
 
   useEffect(() => {
     let alive = true;
-    setState({ status: "loading", data: null, error: null });
-    fetcher()
+    Promise.resolve()
+      .then(() => {
+        if (alive) setState({ status: "loading", data: null, error: null });
+        return fetcher();
+      })
       .then((data) => {
         if (alive) setState({ status: "ready", data, error: null });
       })

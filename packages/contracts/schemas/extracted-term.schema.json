@@ -5,6 +5,10 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "id",
+    "contract_id",
+    "document_id",
+    "source_type",
     "field",
     "value_type",
     "value",
@@ -14,17 +18,26 @@
     "verification_status"
   ],
   "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "contract_id": {"type": "string", "format": "uuid"},
+    "document_id": {"type": "string", "format": "uuid"},
+    "source_type": {
+      "type": "string",
+      "enum": ["CONTRACT_DOCUMENT", "DOCUMENTED_EXPLANATION"]
+    },
     "field": {
       "type": "string",
       "enum": [
         "contract_party_owner",
         "contract_party_agency",
+        "contract_signed_date",
         "contract_start_date",
         "contract_end_date",
         "monthly_amount",
         "contract_total_amount",
         "payment_method",
         "auto_renewal",
+        "contract_renewal_type",
         "termination_notice_date",
         "early_termination_allowed",
         "termination_penalty_rate",
@@ -32,11 +45,15 @@
         "advertising_channel",
         "content_type",
         "content_quantity",
+        "deliverable_due_date",
         "posting_frequency",
         "reporting_frequency",
         "performance_guarantee",
+        "advertising_account_ownership",
         "content_ownership",
+        "shooting_safety",
         "portrait_rights",
+        "personal_information_handling",
         "facility_damage_liability",
         "false_advertising_liability"
       ]
@@ -69,7 +86,13 @@
       "if": {
         "properties": {
           "field": {
-            "enum": ["contract_start_date", "contract_end_date", "termination_notice_date"]
+            "enum": [
+              "contract_signed_date",
+              "contract_start_date",
+              "contract_end_date",
+              "termination_notice_date",
+              "deliverable_due_date"
+            ]
           }
         }
       },
@@ -96,6 +119,17 @@
     {
       "if": {"properties": {"value_type": {"const": "TEXT"}}},
       "then": {"properties": {"value": {"type": ["string", "null"]}}}
+    },
+    {
+      "if": {"properties": {"field": {"const": "contract_renewal_type"}}},
+      "then": {
+        "properties": {
+          "value": {
+            "type": ["string", "null"],
+            "enum": ["AUTO", "MANUAL", "NONE", "UNKNOWN", null]
+          }
+        }
+      }
     },
     {
       "if": {"properties": {"value_type": {"const": "DATE"}}},
@@ -137,7 +171,8 @@
       "then": {
         "properties": {
           "source_page": {"type": "integer", "minimum": 1},
-          "source_text": {"type": "string", "minLength": 1}
+          "source_text": {"type": "string", "minLength": 1},
+          "value": {"not": {"type": "null"}}
         }
       }
     },
@@ -148,6 +183,44 @@
           "source_page": {"type": "null"},
           "source_text": {"type": "null"},
           "value": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verification_status": {"const": "MISSING_EVIDENCE"}}},
+      "then": {
+        "properties": {
+          "source_page": {"type": "null"},
+          "source_text": {"type": "null"},
+          "value": {"not": {"type": "null"}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verification_status": {"const": "NEEDS_CHECK"}}},
+      "then": {
+        "properties": {
+          "source_page": {"type": "integer", "minimum": 1},
+          "source_text": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "field": {
+            "enum": [
+              "auto_renewal",
+              "early_termination_allowed",
+              "contract_renewal_type"
+            ]
+          },
+          "value": {"const": "UNKNOWN"}
+        }
+      },
+      "then": {
+        "properties": {
+          "verification_status": {"const": "NEEDS_CHECK"}
         }
       }
     }

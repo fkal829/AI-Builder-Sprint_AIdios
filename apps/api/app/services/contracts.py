@@ -4,8 +4,20 @@ from uuid import UUID, uuid4
 
 from app.core.enums import ContractStatus
 from app.core.exceptions import ResourceNotFound
-from app.repositories.contracts import ContractRecord, ContractRepository
-from app.schemas.contracts import AuditEvent, Contract, ContractCreate, ContractListItem
+from app.repositories.contracts import (
+    ContractRecord,
+    ContractRepository,
+    RenewalDecisionSaveOutcome,
+)
+from app.schemas.contracts import (
+    AuditEvent,
+    Contract,
+    ContractCreate,
+    ContractListItem,
+    RenewalDecision,
+    RenewalDecisionRequest,
+)
+from app.services.state_machine import InvalidStatusTransition
 
 # Korea has no daylight saving time.  A fixed offset keeps Asia/Seoul date
 # calculations available in minimal Windows environments without tzdata.
@@ -80,6 +92,46 @@ class ContractService:
             for event in sorted(events, key=lambda item: (item.created_at, str(item.id)))
         ]
 
+    async def save_renewal_decision(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        payload: RenewalDecisionRequest,
+    ) -> RenewalDecision:
+        record = await self._repository.get(owner_id=owner_id, contract_id=contract_id)
+        if record is None:
+            raise ResourceNotFound()
+        decided_at = self._utc_now()
+        today = decided_at.astimezone(SEOUL).date()
+        if not _is_renewal_review_window(record, today=today):
+            raise InvalidStatusTransition(
+                "현재 계약은 재계약 의사를 저장할 수 있는 기간이 아닙니다."
+            )
+
+        result = await self._repository.save_renewal_decision_with_audit(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            decision=payload.decision,
+            today=today,
+            decided_at=decided_at,
+        )
+        if result.outcome == RenewalDecisionSaveOutcome.NOT_FOUND:
+            raise ResourceNotFound()
+        if result.outcome == RenewalDecisionSaveOutcome.OUTSIDE_REVIEW_WINDOW:
+            raise InvalidStatusTransition(
+                "현재 계약은 재계약 의사를 저장할 수 있는 기간이 아닙니다."
+            )
+        if result.decision is None:
+            raise RuntimeError("재계약 의사 저장 결과가 없습니다.")
+        return result.decision
+
+    def _utc_now(self) -> datetime:
+        now = self._now()
+        if now.tzinfo is None:
+            raise ValueError("Contract timestamps must be timezone-aware.")
+        return now.astimezone(UTC)
+
 
 def _contract_from_record(record: ContractRecord) -> Contract:
     return Contract(
@@ -121,4 +173,24 @@ def _list_item_from_record(record: ContractRecord, *, today: date) -> ContractLi
         expiry_d_day=expiry_d_day,
         termination_notice_d_day=termination_notice_d_day,
         auto_renewal_d_day=auto_renewal_d_day,
+    )
+
+
+def _is_renewal_review_window(record: ContractRecord, *, today: date) -> bool:
+    expiry_d_day = (record.end_date - today).days if record.end_date else None
+    termination_notice_d_day = (
+        (record.termination_notice_date - today).days
+        if record.termination_notice_date
+        else None
+    )
+    auto_renewal_d_day = (
+        expiry_d_day if record.renewal_type == "AUTO" and record.end_date else None
+    )
+    return any(
+        d_day is not None and 0 <= d_day <= upper_bound
+        for d_day, upper_bound in (
+            (expiry_d_day, 30),
+            (termination_notice_d_day, 14),
+            (auto_renewal_d_day, 7),
+        )
     )

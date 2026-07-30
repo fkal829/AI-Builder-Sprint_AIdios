@@ -467,6 +467,19 @@ text 파일을 선택 자료로 받는다. 확장자만 신뢰하지 않고 MIME
 결과(보통 `202` 접수, 접수 자체 실패 시 `503`)를 재생하고 새 작업을 만들지 않는다.
 비동기 `FAILED` 상태는 조회 API에서 확인하며 자동 무한 재시도는 하지 않는다.
 
+구현은 최초 접수에서 계약을 `ANALYZING`, 작업을 `QUEUED`로 저장하고 감사 이벤트를
+같은 트랜잭션에 기록한 뒤 `202`를 반환한다. 이후 백그라운드 작업이 private Storage
+원문을 읽어 Upstage Adapter의 mock/live 모드로 파싱·추출한다. live 모드는
+Document Parse와 Universal Extraction의 location 메타데이터를 연결해
+`source_page`, `source_text`, `confidence`를 검증한다. 1차 결과의 누락·근거 부족
+필드만 한 번 재추출하며 두 번째 결과도 Pydantic AI 스키마에 맞지 않으면
+`FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다.
+
+완료 저장은 `ExtractedTerm`, `ReviewItem`, 비어 있는 Contract canonical 값,
+`AnalysisTask=COMPLETED`, `Contract=REVIEW_REQUIRED`,
+`ANALYSIS_COMPLETED` 이벤트를 하나의 DB 트랜잭션으로 기록한다. 기존 non-null canonical
+값은 덮어쓰지 않고 최신 계약 원문과 다르면 확인용 `ReviewItem`을 남긴다.
+
 ### 4.5 최근 분석 상태·결과 조회
 
 `GET /api/v1/contracts/{contract_id}/analysis`

@@ -6,14 +6,17 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.adapters.supabase import SupabaseAdapter
+from app.adapters.upstage import UpstageAdapter
 from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedAccess
 from app.services.adjustments import AdjustmentService
 from app.services.agreements import AgreementService
+from app.services.analysis import AnalysisService
 from app.services.contracts import ContractService
 from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.public_tokens import PublicTokenService
+from app.services.review_items import ReviewItemService
 from app.services.understood_terms import UnderstoodTermService
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -36,6 +39,23 @@ def _get_supabase_adapter() -> SupabaseAdapter:
 
 async def get_supabase_adapter() -> SupabaseAdapter:
     return _get_supabase_adapter()
+
+
+@lru_cache
+def _get_upstage_adapter() -> UpstageAdapter:
+    settings = get_settings()
+    return UpstageAdapter(
+        mode=settings.upstage_mode,
+        api_key=settings.upstage_api_key,
+        base_url=settings.upstage_base_url,
+        parse_timeout_seconds=settings.upstage_parse_timeout_seconds,
+        extract_timeout_seconds=settings.upstage_extract_timeout_seconds,
+        extract_model=settings.upstage_extract_model,
+    )
+
+
+async def get_upstage_adapter() -> UpstageAdapter:
+    return _get_upstage_adapter()
 
 
 async def get_document_upload_service(
@@ -64,6 +84,26 @@ async def get_understood_term_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> UnderstoodTermService:
     return UnderstoodTermService(repository=supabase)
+
+
+async def get_analysis_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    upstage: Annotated[UpstageAdapter, Depends(get_upstage_adapter)],
+) -> AnalysisService:
+    return AnalysisService(
+        adapter=upstage,
+        contracts=supabase,
+        documents=supabase,
+        understood_terms=supabase,
+        analyses=supabase,
+        storage=supabase,
+    )
+
+
+async def get_review_item_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> ReviewItemService:
+    return ReviewItemService(repository=supabase)
 
 
 async def get_contract_service(

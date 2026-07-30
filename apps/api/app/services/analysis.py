@@ -194,6 +194,20 @@ class AnalysisService:
         except ExternalStorageFailure as error:
             raise AnalysisStartUnavailable() from error
 
+    async def get_latest(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> AnalysisTask:
+        task = await self.analyses.get_latest_analysis_task(
+            owner_id=owner_id,
+            contract_id=contract_id,
+        )
+        if task is None:
+            raise ResourceNotFound()
+        return _task_from_record(task)
+
     async def process(
         self,
         *,

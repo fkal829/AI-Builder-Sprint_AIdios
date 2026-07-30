@@ -134,4 +134,8 @@ supabase db push
 4.4에는 `20260730200000_add_analysis_pipeline.sql`이 추가되며 `AnalysisTask`,
 `ExtractedTerm`, `ReviewItem`, 대표 `Obligation`과 분석 시작·완료·실패 감사
 트랜잭션을 생성합니다.
+4.5의 `GET /api/v1/contracts/{contract_id}/analysis`는 추가 상태 변경 없이 소유자
+계약에서 가장 최근에 생성된 `AnalysisTask` 한 건을 반환합니다. 진행 중 작업은
+`result=null`, 완료 작업은 원문 근거가 포함된 `Analysis`, 실패 작업은 허용된
+`error_code`를 반환합니다.
 원본 bucket은 `contracts`, `public=false`여야 합니다.

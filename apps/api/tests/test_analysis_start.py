@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from uuid import UUID, uuid4
 
@@ -12,6 +13,7 @@ from app.adapters.upstage import UpstageAdapter, UpstageExtractionError
 from app.api.dependencies import get_analysis_service, get_supabase_adapter
 from app.core.enums import AnalysisStatus, ContractStatus, ExtractedField
 from app.main import app
+from app.repositories.analysis import AnalysisTaskRecord
 from app.services.analysis import AnalysisService
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000013")
@@ -376,3 +378,150 @@ def test_fastapi_openapi_exposes_analysis_start_contract() -> None:
     )
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
     assert request_schema["$ref"].endswith("/AnalysisStartRequest")
+
+
+async def test_gets_latest_completed_analysis_result(analysis_context) -> None:
+    client, _repository, _service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    await save_understood_terms(client, contract_id=contract_id)
+
+    started = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"document_id": str(document_id), "supporting_document_ids": []},
+    )
+    task_id = started.json()["data"]["id"]
+
+    response = await client.get(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["id"] == task_id
+    assert body["data"]["status"] == "COMPLETED"
+    assert body["data"]["attempt_count"] == 2
+    assert body["data"]["error_code"] is None
+    assert body["data"]["result"]["contract_id"] == str(contract_id)
+    assert body["data"]["result"]["extracted_terms"]
+    assert body["data"]["result"]["review_items"]
+
+
+async def test_gets_newest_analysis_task_by_creation_time(analysis_context) -> None:
+    client, repository, _service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = uuid4()
+    first_created_at = datetime(2026, 7, 31, 9, tzinfo=UTC)
+    queued = AnalysisTaskRecord(
+        id=uuid4(),
+        contract_id=contract_id,
+        document_id=document_id,
+        supporting_document_ids=(),
+        status=AnalysisStatus.QUEUED,
+        attempt_count=0,
+        error_code=None,
+        result=None,
+        created_at=first_created_at,
+        updated_at=first_created_at,
+    )
+    processing = AnalysisTaskRecord(
+        id=uuid4(),
+        contract_id=contract_id,
+        document_id=document_id,
+        supporting_document_ids=(),
+        status=AnalysisStatus.PROCESSING,
+        attempt_count=1,
+        error_code=None,
+        result=None,
+        created_at=first_created_at + timedelta(seconds=1),
+        updated_at=first_created_at + timedelta(seconds=2),
+    )
+    repository._mock_analysis_tasks[queued.id] = queued
+    repository._mock_analysis_tasks[processing.id] = processing
+
+    response = await client.get(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "id": str(processing.id),
+        "contract_id": str(contract_id),
+        "document_id": str(document_id),
+        "supporting_document_ids": [],
+        "status": "PROCESSING",
+        "attempt_count": 1,
+        "error_code": None,
+        "result": None,
+        "created_at": "2026-07-31T09:00:01Z",
+        "updated_at": "2026-07-31T09:00:02Z",
+    }
+
+
+async def test_gets_latest_failed_analysis_result(analysis_context) -> None:
+    client, _repository, service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    service.adapter = AlwaysInvalidExtractAdapter()
+
+    await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"document_id": str(document_id), "supporting_document_ids": []},
+    )
+    restarted = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"document_id": str(document_id), "supporting_document_ids": []},
+    )
+
+    response = await client.get(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == restarted.json()["data"]["id"]
+    assert response.json()["data"]["status"] == "FAILED"
+    assert response.json()["data"]["attempt_count"] == 2
+    assert response.json()["data"]["error_code"] == "ANALYSIS_SCHEMA_INVALID"
+    assert response.json()["data"]["result"] is None
+
+
+async def test_get_analysis_handles_not_found_auth_and_invalid_contract_id(
+    analysis_context,
+) -> None:
+    client, _repository, _service = analysis_context
+    contract_id = await create_contract(client)
+
+    no_task = await client.get(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(),
+    )
+    unknown_contract = await client.get(
+        f"/api/v1/contracts/{uuid4()}/analysis",
+        headers=auth_headers(),
+    )
+    no_auth = await client.get(f"/api/v1/contracts/{contract_id}/analysis")
+    invalid_contract_id = await client.get(
+        "/api/v1/contracts/not-a-uuid/analysis",
+        headers=auth_headers(),
+    )
+
+    assert no_task.status_code == 404
+    assert unknown_contract.status_code == 404
+    assert no_auth.status_code == 401
+    assert invalid_contract_id.status_code == 422
+
+
+def test_fastapi_openapi_exposes_analysis_get_contract() -> None:
+    operation = app.openapi()["paths"]["/api/v1/contracts/{contract_id}/analysis"]["get"]
+
+    assert operation["responses"]["200"]
+    assert operation["responses"]["401"]
+    assert operation["responses"]["404"]
+    assert operation["responses"]["422"]
+    assert "requestBody" not in operation

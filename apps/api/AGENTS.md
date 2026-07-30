@@ -110,6 +110,7 @@ fastapi>=0.116,<1.0
 pydantic>=2.11,<3.0
 pydantic-settings>=2.10,<3.0
 httpx>=0.28,<1.0
+pypdf>=6.14,<7.0
 python-multipart>=0.0.20,<1.0
 supabase>=2.17,<3.0
 uvicorn[standard]>=0.35,<1.0

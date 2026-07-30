@@ -7,17 +7,48 @@ from app.core.enums import (
     AnalysisStatus,
     DetectionMethod,
     ExtractedField,
+    ExtractedSourceType,
     ExtractedValueType,
+    ReviewBasisType,
     ReviewSeverity,
     ReviewSignalType,
     VerificationStatus,
 )
 from app.core.errors import ErrorCode
-from app.schemas.analysis import AnalysisTask, ExtractedTerm, ReviewItem
+from app.schemas.analysis import (
+    AnalysisStartRequest,
+    AnalysisTask,
+    ExtractedTerm,
+    ExtractedTermCandidate,
+    ReviewItem,
+)
+
+CONTRACT_ID = uuid4()
+DOCUMENT_ID = uuid4()
+TERM_ID = uuid4()
+
+
+def make_review_item(**overrides) -> ReviewItem:
+    evidence_values = (
+        overrides.get("source_page"),
+        overrides.get("source_text"),
+        overrides.get("source_confidence"),
+    )
+    values = {
+        "id": uuid4(),
+        "contract_id": CONTRACT_ID,
+        "basis_type": ReviewBasisType.INTERNAL_RULE,
+        "basis_text": "계약 원문과 사용자 이해조건 비교",
+        "basis_citation": None,
+        "related_extracted_term_ids": [TERM_ID],
+        "source_document_id": DOCUMENT_ID if any(v is not None for v in evidence_values) else None,
+    }
+    values.update(overrides)
+    return ReviewItem(**values)
 
 
 def test_accepts_verified_term_with_evidence() -> None:
-    term = ExtractedTerm(
+    term = ExtractedTermCandidate(
         field=ExtractedField.CONTRACT_TOTAL_AMOUNT,
         value_type=ExtractedValueType.MONEY_KRW,
         value=6_000_000,
@@ -31,7 +62,7 @@ def test_accepts_verified_term_with_evidence() -> None:
 
 
 def test_accepts_not_found_term_without_evidence() -> None:
-    term = ExtractedTerm(
+    term = ExtractedTermCandidate(
         field=ExtractedField.REFUND_CONDITION,
         value_type=ExtractedValueType.TEXT,
         value=None,
@@ -54,7 +85,7 @@ def test_accepts_not_found_term_without_evidence() -> None:
 )
 def test_rejects_inconsistent_evidence(source_page, source_text, status) -> None:
     with pytest.raises(ValidationError):
-        ExtractedTerm(
+        ExtractedTermCandidate(
             field=ExtractedField.REFUND_CONDITION,
             value_type=ExtractedValueType.TEXT,
             value=None,
@@ -66,7 +97,7 @@ def test_rejects_inconsistent_evidence(source_page, source_text, status) -> None
 
 
 def test_review_item_keeps_evidence() -> None:
-    item = ReviewItem(
+    item = make_review_item(
         type=ReviewSignalType.MISMATCH,
         severity=ReviewSeverity.IMPORTANT,
         detection_method=DetectionMethod.MODEL,
@@ -75,6 +106,7 @@ def test_review_item_keeps_evidence() -> None:
         source_text="계약 기간은 5년으로 한다.",
         source_confidence=0.96,
         model_confidence=0.92,
+        model_limitations="계약 원문 표현은 사용자가 직접 확인해야 합니다.",
         verification_status=VerificationStatus.VERIFIED,
         suggestion_accept="원안을 유지합니다.",
         suggestion_compromise="기간을 2년으로 조정하는 방안을 제안드립니다.",
@@ -96,7 +128,7 @@ def test_review_item_keeps_evidence() -> None:
 )
 def test_rejects_invalid_structured_values(field, value_type, value) -> None:
     with pytest.raises(ValidationError):
-        ExtractedTerm(
+        ExtractedTermCandidate(
             field=field,
             value_type=value_type,
             value=value,
@@ -108,7 +140,7 @@ def test_rejects_invalid_structured_values(field, value_type, value) -> None:
 
 
 def test_deterministic_review_does_not_fake_model_confidence() -> None:
-    item = ReviewItem(
+    item = make_review_item(
         type=ReviewSignalType.MISMATCH,
         severity=ReviewSeverity.IMPORTANT,
         detection_method=DetectionMethod.DETERMINISTIC,
@@ -138,7 +170,7 @@ def test_review_item_rejects_inconsistent_source_confidence(
     source_page, source_text, source_confidence, status
 ) -> None:
     with pytest.raises(ValidationError):
-        ReviewItem(
+        make_review_item(
             type=ReviewSignalType.MISMATCH,
             severity=ReviewSeverity.CHECK,
             detection_method=DetectionMethod.DETERMINISTIC,
@@ -155,7 +187,7 @@ def test_review_item_rejects_inconsistent_source_confidence(
 
 
 def test_performance_guarantee_is_extracted_as_text() -> None:
-    term = ExtractedTerm(
+    term = ExtractedTermCandidate(
         field=ExtractedField.PERFORMANCE_GUARANTEE,
         value_type=ExtractedValueType.TEXT,
         value="월 방문자 수를 보장하지 않는다.",
@@ -174,10 +206,39 @@ def test_analysis_task_rejects_inconsistent_status_payload() -> None:
             id=uuid4(),
             contract_id=uuid4(),
             document_id=uuid4(),
+            supporting_document_ids=[],
             status=AnalysisStatus.FAILED,
             attempt_count=1,
             error_code=ErrorCode.ANALYSIS_START_FAILED,
             result=None,
             created_at="2026-07-29T00:00:00Z",
             updated_at="2026-07-29T00:00:00Z",
+        )
+
+
+def test_persisted_extracted_term_keeps_document_and_source_type() -> None:
+    term = ExtractedTerm(
+        id=TERM_ID,
+        contract_id=CONTRACT_ID,
+        document_id=DOCUMENT_ID,
+        source_type=ExtractedSourceType.CONTRACT_DOCUMENT,
+        field=ExtractedField.CONTRACT_TOTAL_AMOUNT,
+        value_type=ExtractedValueType.MONEY_KRW,
+        value=6_000_000,
+        source_page=2,
+        source_text="총 계약금액은 금 육백만원으로 한다.",
+        confidence=0.96,
+        verification_status=VerificationStatus.VERIFIED,
+    )
+
+    assert term.document_id == DOCUMENT_ID
+    assert term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
+
+
+def test_analysis_start_requires_unique_supporting_documents() -> None:
+    supporting = uuid4()
+    with pytest.raises(ValidationError):
+        AnalysisStartRequest(
+            document_id=DOCUMENT_ID,
+            supporting_document_ids=[supporting, supporting],
         )

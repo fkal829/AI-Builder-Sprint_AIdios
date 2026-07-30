@@ -22,10 +22,10 @@ uvicorn app.main:app --reload
 
 라우터에서 외부 API를 직접 호출하거나 계약 상태를 직접 변경하지 않습니다.
 
-## 문서 업로드·원문 접근·이해조건 mock 모드
+## 문서 업로드·원문 접근·이해조건·분석 mock 모드
 
 기본 `SUPABASE_MODE=mock`은 외부 Supabase 없이 4.1 문서 업로드와 4.2 원문 임시
-접근, 4.3 이해조건 저장을 확인하기 위한 로컬 전용 모드입니다. `.env.example`의
+접근, 4.3 이해조건 저장, 4.4 분석 시작을 확인하기 위한 로컬 전용 모드입니다. `.env.example`의
 데모 owner·contract와 Bearer 토큰이 메모리에 시드되며 production에서는 mock 모드로
 기동할 수 없습니다.
 
@@ -78,3 +78,60 @@ curl -X PUT \
 - live 모드: `SUPABASE_MODE=live`와 서버 전용 Supabase URL·service-role key가
   필요하며 Supabase private bucket의 실제 signed URL을 발급
 - 원본은 private bucket에 저장하며 응답과 로그에 Storage 경로를 노출하지 않음
+
+이해조건 저장 후 업로드 응답의 문서 ID와 새 UUID 멱등 키로 분석을 시작합니다.
+
+```bash
+curl -X POST \
+  http://localhost:8000/api/v1/contracts/00000000-0000-4000-8000-000000000041/analysis \
+  -H "Authorization: Bearer local-demo-owner-token" \
+  -H "Idempotency-Key: 10000000-0000-4000-8000-000000000001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "document_id": "{document_id}",
+    "supporting_document_ids": []
+  }'
+```
+
+최초 응답은 `202 QUEUED`이며 백그라운드 작업이 Document Parse, 구조화 추출,
+최대 2회의 Evaluator Loop, 원문 근거 검증을 수행합니다. 같은 멱등 키와 같은 요청은
+최초 `202` 응답을 재생하고, 다른 요청은 `409 IDEMPOTENCY_CONFLICT`로 거부합니다.
+mock 분석 결과도 `source_page`, `source_text`, `confidence` 필드를 유지하며 찾지 못한
+값의 원문 필드는 `null`입니다.
+
+## Upstage live 모드
+
+`UPSTAGE_MODE=live`와 서버 전용 `UPSTAGE_API_KEY`를 설정하면 다음 API를 사용합니다.
+
+- Document Parse: `/v1/document-digitization`
+- Universal Extraction: `/v1/information-extraction/chat/completions`
+
+PDF는 문서 항목 하나로 보내고 Universal Extraction의 location 좌표를 Document Parse
+요소에 다시 연결해 `source_page`와 `source_text`를 검증합니다. Upstage의 `high`,
+`low` confidence는 각각 `0.9`, `0.4`로 정규화하며 `low`는 근거를 보존한
+`NEEDS_CHECK`로 처리합니다. 이 값은 확률 보정값으로 해석하지 않습니다. 원문 위치를
+검증하지 못한 값은 `MISSING_EVIDENCE`로 저장합니다.
+
+## Supabase live 준비
+
+`SUPABASE_MODE=live`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`는 실행 중인 API의
+Auth·DB·Storage 접근에 사용합니다. service-role key만으로 DDL 마이그레이션을 실행할
+수는 없으므로 새 원격 프로젝트는 먼저 `supabase/migrations`를 날짜 순서로 적용해야
+합니다.
+
+live 소유자 API의 Bearer 값은 Supabase Auth가 발급한 실제 사용자 access token이어야
+합니다. `DEMO_BEARER_TOKEN`과 `DEMO_OWNER_ID`는 mock 전용이며 live에서 계약의
+`owner_id`로 사용할 수 없습니다.
+
+Supabase CLI를 사용하는 경우 저장소 루트에서 프로젝트를 로그인·연결한 뒤 적용합니다.
+
+```bash
+supabase login
+supabase link --project-ref <project-ref>
+supabase db push
+```
+
+4.4에는 `20260730200000_add_analysis_pipeline.sql`이 추가되며 `AnalysisTask`,
+`ExtractedTerm`, `ReviewItem`, 대표 `Obligation`과 분석 시작·완료·실패 감사
+트랜잭션을 생성합니다.
+원본 bucket은 `contracts`, `public=false`여야 합니다.

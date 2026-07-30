@@ -43,6 +43,14 @@ class DocumentRepository(Protocol):
         document_id: UUID,
     ) -> DocumentRecord | None: ...
 
+    async def get_latest_owned_document(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        document_type: DocumentType,
+    ) -> DocumentRecord | None: ...
+
 
 class PrivateStorage(Protocol):
     async def upload_private_object(
@@ -54,6 +62,8 @@ class PrivateStorage(Protocol):
     ) -> None: ...
 
     async def delete_private_object(self, *, path: str) -> None: ...
+
+    async def download_private_object(self, *, path: str) -> bytes: ...
 
     async def create_signed_access_url(
         self,

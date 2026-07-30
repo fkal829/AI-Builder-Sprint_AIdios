@@ -146,12 +146,14 @@ class SuggestionChoice(StrEnum):
 class ExtractedField(StrEnum):
     CONTRACT_PARTY_OWNER = "contract_party_owner"
     CONTRACT_PARTY_AGENCY = "contract_party_agency"
+    CONTRACT_SIGNED_DATE = "contract_signed_date"
     CONTRACT_START_DATE = "contract_start_date"
     CONTRACT_END_DATE = "contract_end_date"
     MONTHLY_AMOUNT = "monthly_amount"
     CONTRACT_TOTAL_AMOUNT = "contract_total_amount"
     PAYMENT_METHOD = "payment_method"
     AUTO_RENEWAL = "auto_renewal"
+    CONTRACT_RENEWAL_TYPE = "contract_renewal_type"
     TERMINATION_NOTICE_DATE = "termination_notice_date"
     EARLY_TERMINATION_ALLOWED = "early_termination_allowed"
     TERMINATION_PENALTY_RATE = "termination_penalty_rate"
@@ -159,11 +161,15 @@ class ExtractedField(StrEnum):
     ADVERTISING_CHANNEL = "advertising_channel"
     CONTENT_TYPE = "content_type"
     CONTENT_QUANTITY = "content_quantity"
+    DELIVERABLE_DUE_DATE = "deliverable_due_date"
     POSTING_FREQUENCY = "posting_frequency"
     REPORTING_FREQUENCY = "reporting_frequency"
     PERFORMANCE_GUARANTEE = "performance_guarantee"
+    ADVERTISING_ACCOUNT_OWNERSHIP = "advertising_account_ownership"
     CONTENT_OWNERSHIP = "content_ownership"
+    SHOOTING_SAFETY = "shooting_safety"
     PORTRAIT_RIGHTS = "portrait_rights"
+    PERSONAL_INFORMATION_HANDLING = "personal_information_handling"
     FACILITY_DAMAGE_LIABILITY = "facility_damage_liability"
     FALSE_ADVERTISING_LIABILITY = "false_advertising_liability"
 
@@ -181,3 +187,21 @@ class DetectionMethod(StrEnum):
     DETERMINISTIC = "DETERMINISTIC"
     MODEL = "MODEL"
     HYBRID = "HYBRID"
+
+
+class ExtractedSourceType(StrEnum):
+    CONTRACT_DOCUMENT = "CONTRACT_DOCUMENT"
+    DOCUMENTED_EXPLANATION = "DOCUMENTED_EXPLANATION"
+
+
+class ReviewBasisType(StrEnum):
+    OFFICIAL_SOURCE = "OFFICIAL_SOURCE"
+    INTERNAL_RULE = "INTERNAL_RULE"
+
+
+class ReviewItemStatus(StrEnum):
+    UNREVIEWED = "UNREVIEWED"
+    SELECTED = "SELECTED"
+    SENT = "SENT"
+    RESOLVED = "RESOLVED"
+    KEPT_ORIGINAL = "KEPT_ORIGINAL"

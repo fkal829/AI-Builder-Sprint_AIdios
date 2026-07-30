@@ -104,3 +104,20 @@
 - 계약 소유권 확인, 이해조건 upsert, `UNDERSTOOD_TERMS_SAVED` 감사 이벤트는 한
   트랜잭션에서 수행한다. 기존 값과 완전히 같은 PUT은 상태 변화가 없으므로 새 감사
   이벤트를 만들지 않는다.
+
+## ADR-011 Upstage 분석·근거 검증
+
+- 상태: P0 확정
+- 결정: Upstage Adapter는 `mock`과 `live` 모드를 분리한다. live 문서 구조 분석은
+  `/v1/document-digitization`, 구조화 추출은
+  `/v1/information-extraction/chat/completions`의 `information-extract` 모델을 쓴다.
+- Universal Extraction에는 PDF를 base64 문서 항목 하나로 보내고 first-level scalar
+  JSON Schema, `location=true`, `confidence=true`, `split=false`를 사용한다.
+- location 좌표가 같은 페이지의 Document Parse 요소와 겹친 경우에만 해당 요소
+  원문을 `source_text`로 인정한다. 좌표를 연결하지 못한 값은
+  `MISSING_EVIDENCE`이며 canonical 값으로 승격하지 않는다.
+- Upstage의 confidence 범주 `high`, `low`는 저장 계약의 0~1 number에 맞춰 각각
+  `0.9`, `0.4`로 정규화한다. `low`는 근거를 유지한 `NEEDS_CHECK`로 처리하며 이
+  매핑은 보정된 확률이 아니다.
+- 1차 결과에서 해결되지 않은 필드만 한 번 재추출하고 Evaluator Loop는 작업당 최대
+  2회에서 종료한다. 모델 응답은 저장 전에 Pydantic과 원문 근거 규칙으로 검증한다.

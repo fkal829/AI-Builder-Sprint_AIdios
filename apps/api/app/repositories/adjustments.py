@@ -3,7 +3,12 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from app.core.enums import AdjustmentRequestStatus, ReviewItemStatus, SuggestionChoice
+from app.core.enums import (
+    AdjustmentRequestStatus,
+    AdjustmentResponseDecision,
+    ReviewItemStatus,
+    SuggestionChoice,
+)
 from app.repositories.public_tokens import PublicTokenRecord
 
 
@@ -39,6 +44,26 @@ class AdjustmentRequestRecord:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class AdjustmentResponseRecord:
+    review_item_id: UUID
+    decision: AdjustmentResponseDecision
+    counter_text: str | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class AdjustmentDetailRecord:
+    request: AdjustmentRequestRecord
+    responses: tuple[AdjustmentResponseRecord, ...]
+
+
+@dataclass(frozen=True)
+class PublicAdjustmentRecord:
+    contract_title: str
+    request: AdjustmentRequestRecord
+
+
 class AdjustmentRepository(Protocol):
     async def list_review_items_for_adjustment(
         self,
@@ -61,6 +86,35 @@ class AdjustmentRepository(Protocol):
         owner_id: UUID,
         contract_id: UUID,
         adjustment_request_id: UUID,
+    ) -> AdjustmentRequestRecord | None: ...
+
+    async def get_owned_adjustment_detail(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        adjustment_request_id: UUID,
+    ) -> AdjustmentDetailRecord | None: ...
+
+    async def get_public_adjustment_request(
+        self,
+        *,
+        adjustment_request_id: UUID,
+    ) -> PublicAdjustmentRecord | None: ...
+
+    async def open_public_adjustment_request(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        opened_at: datetime,
+    ) -> AdjustmentRequestRecord | None: ...
+
+    async def submit_public_adjustment_responses(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        responses: tuple[AdjustmentResponseRecord, ...],
+        responded_at: datetime,
     ) -> AdjustmentRequestRecord | None: ...
 
     async def send_adjustment_with_audit(

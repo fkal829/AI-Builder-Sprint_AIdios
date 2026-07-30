@@ -5,7 +5,9 @@ from uuid import UUID, uuid4
 
 from app.core.enums import (
     AdjustmentRequestStatus,
+    AdjustmentResponseDecision,
     IdempotencyOperation,
+    PublicTokenScope,
     ReviewItemStatus,
     SuggestionChoice,
 )
@@ -14,6 +16,7 @@ from app.repositories.adjustments import (
     AdjustmentRepository,
     AdjustmentRequestItemRecord,
     AdjustmentRequestRecord,
+    AdjustmentResponseRecord,
     ReviewItemForAdjustment,
 )
 from app.schemas.adjustments import (
@@ -21,10 +24,18 @@ from app.schemas.adjustments import (
     AdjustmentRequestCreate,
     AdjustmentRequestItem,
     AdjustmentRequestSent,
+    AdjustmentResponseItem,
+    AdjustmentResponsesSubmit,
+    CounterproposalComparison,
     OwnerAdjustmentDetail,
+    PublicAdjustment,
+    PublicAdjustmentItem,
+    PublicAdjustmentOpen,
+    PublicSubmission,
 )
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
 from app.services.public_tokens import PublicTokenService
+from app.services.state_machine import InvalidStatusTransition
 
 
 class AdjustmentService:
@@ -104,19 +115,17 @@ class AdjustmentService:
         contract_id: UUID,
         adjustment_request_id: UUID,
     ) -> OwnerAdjustmentDetail:
-        record = await self._repository.get_owned_adjustment_request(
+        detail = await self._repository.get_owned_adjustment_detail(
             owner_id=owner_id,
             contract_id=contract_id,
             adjustment_request_id=adjustment_request_id,
         )
-        if record is None:
+        if detail is None:
             raise ResourceNotFound()
-        # Agency response and comparison entries are added by C-5/B; keeping
-        # these arrays explicit makes the owner response stable before then.
         return OwnerAdjustmentDetail(
-            request=_adjustment_from_record(record),
-            responses=[],
-            comparisons=[],
+            request=_adjustment_from_record(detail.request),
+            responses=[_response_from_record(response) for response in detail.responses],
+            comparisons=[_comparison_from_response(response) for response in detail.responses],
         )
 
     async def send(
@@ -149,8 +158,6 @@ class AdjustmentService:
                 public_token=token_record,
             )
             if sent is None or sent.expires_at is None:
-                from app.services.state_machine import InvalidStatusTransition
-
                 raise InvalidStatusTransition("조정 요청을 발송할 수 없는 상태입니다.")
             response = AdjustmentRequestSent(
                 id=sent.id,
@@ -178,6 +185,84 @@ class AdjustmentService:
             replay=self._replay_sent,
         )
         return result.response
+
+    async def get_public_request(self, *, token: str) -> PublicAdjustment:
+        token_record = await self._public_tokens.resolve(
+            token=token,
+            expected_scope=PublicTokenScope.ADJUSTMENT_RESPONSE,
+        )
+        public = await self._repository.get_public_adjustment_request(
+            adjustment_request_id=token_record.resource_id,
+        )
+        if public is None or public.request.status not in {
+            AdjustmentRequestStatus.SENT,
+            AdjustmentRequestStatus.OPENED,
+            AdjustmentRequestStatus.RESPONDED,
+            AdjustmentRequestStatus.CONFIRMED,
+        }:
+            raise ResourceNotFound()
+        if public.request.expires_at is None:
+            raise ResourceNotFound()
+        return PublicAdjustment(
+            contract_title=public.contract_title,
+            status=public.request.status,
+            expires_at=public.request.expires_at,
+            items=[
+                PublicAdjustmentItem(
+                    item_id=self._public_item_id(
+                        adjustment_request_id=public.request.id,
+                        review_item_id=item.review_item_id,
+                    ),
+                    request_text=item.request_text,
+                )
+                for item in public.request.items
+            ],
+        )
+
+    async def open_public_request(self, *, token: str) -> PublicAdjustmentOpen:
+        token_record = await self._public_tokens.resolve(
+            token=token,
+            expected_scope=PublicTokenScope.ADJUSTMENT_RESPONSE,
+        )
+        opened = await self._repository.open_public_adjustment_request(
+            adjustment_request_id=token_record.resource_id,
+            opened_at=self._utc_now(),
+        )
+        if opened is None or opened.opened_at is None:
+            raise ResourceNotFound()
+        return PublicAdjustmentOpen(
+            status=AdjustmentRequestStatus.OPENED,
+            opened_at=opened.opened_at,
+        )
+
+    async def submit_public_responses(
+        self,
+        *,
+        token: str,
+        payload: AdjustmentResponsesSubmit,
+    ) -> PublicSubmission:
+        token_record = await self._public_tokens.resolve(
+            token=token,
+            expected_scope=PublicTokenScope.ADJUSTMENT_RESPONSE,
+        )
+        public = await self._repository.get_public_adjustment_request(
+            adjustment_request_id=token_record.resource_id,
+        )
+        if public is None:
+            raise ResourceNotFound()
+        responses = self._response_records_from_payload(
+            adjustment_request_id=public.request.id,
+            request_item_ids={item.review_item_id for item in public.request.items},
+            payload=payload,
+        )
+        submitted = await self._repository.submit_public_adjustment_responses(
+            adjustment_request_id=public.request.id,
+            responses=responses,
+            responded_at=self._utc_now(),
+        )
+        if submitted is None:
+            raise InvalidStatusTransition("조정 응답을 제출할 수 없는 상태입니다.")
+        return PublicSubmission(submitted=True)
 
     async def _validated_draft_items(
         self,
@@ -209,6 +294,46 @@ class AdjustmentService:
 
     def _public_url(self, token: str) -> str:
         return f"{self._public_app_base_url}/adjustments/{token}"
+
+    def _public_item_id(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        review_item_id: UUID,
+    ) -> str:
+        return self._public_tokens.adjustment_item_id(
+            adjustment_request_id=adjustment_request_id,
+            review_item_id=review_item_id,
+        )
+
+    def _response_records_from_payload(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        request_item_ids: set[UUID],
+        payload: AdjustmentResponsesSubmit,
+    ) -> tuple[AdjustmentResponseRecord, ...]:
+        item_ids_by_public_id = {
+            self._public_item_id(
+                adjustment_request_id=adjustment_request_id,
+                review_item_id=review_item_id,
+            ): review_item_id
+            for review_item_id in request_item_ids
+        }
+        submitted_public_ids = {response.item_id for response in payload.responses}
+        if submitted_public_ids != set(item_ids_by_public_id):
+            raise InvalidAdjustmentRequest(
+                "공개 요청의 모든 항목을 정확히 한 번씩 응답해야 합니다."
+            )
+        return tuple(
+            AdjustmentResponseRecord(
+                review_item_id=item_ids_by_public_id[response.item_id],
+                decision=response.decision,
+                counter_text=response.counter_text,
+                reason=response.reason,
+            )
+            for response in payload.responses
+        )
 
     def _utc_now(self) -> datetime:
         now = self._now()
@@ -257,4 +382,38 @@ def _adjustment_from_record(record: AdjustmentRequestRecord) -> AdjustmentReques
         expires_at=record.expires_at,
         opened_at=record.opened_at,
         responded_at=record.responded_at,
+    )
+
+
+def _response_from_record(response: AdjustmentResponseRecord) -> AdjustmentResponseItem:
+    return AdjustmentResponseItem(
+        review_item_id=response.review_item_id,
+        decision=response.decision,
+        counter_text=response.counter_text,
+        reason=response.reason,
+    )
+
+
+def _comparison_from_response(
+    response: AdjustmentResponseRecord,
+) -> CounterproposalComparison:
+    if response.decision == AdjustmentResponseDecision.ACCEPT:
+        return CounterproposalComparison(
+            review_item_id=response.review_item_id,
+            changed_summary="대행사가 요청 문구를 수락했습니다.",
+            remaining_checks=[],
+            final_confirmation="요청안을 최종 반영할 수 있습니다.",
+        )
+    if response.decision == AdjustmentResponseDecision.REJECT:
+        return CounterproposalComparison(
+            review_item_id=response.review_item_id,
+            changed_summary="대행사가 요청을 거절했습니다.",
+            remaining_checks=["거절 사유를 확인하세요."],
+            final_confirmation="원안 유지 또는 추가 협의가 필요합니다.",
+        )
+    return CounterproposalComparison(
+        review_item_id=response.review_item_id,
+        changed_summary="대행사가 역제안을 제시했습니다.",
+        remaining_checks=["역제안 문구가 요청 취지에 맞는지 확인하세요."],
+        final_confirmation="역제안 채택 여부를 선택하세요.",
     )

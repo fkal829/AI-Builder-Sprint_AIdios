@@ -140,6 +140,18 @@ class PublicTokenService:
         ).digest()
         return f"{token_id}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode('ascii')}"
 
+    def adjustment_item_id(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        review_item_id: UUID,
+    ) -> str:
+        """Derive an opaque, request-scoped item identifier for public responses."""
+
+        material = f"adjustment-item:{adjustment_request_id}:{review_item_id}".encode("ascii")
+        digest = hmac.new(self._secret, material, hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
     def _validate_token_format(self, token: str) -> UUID:
         match = _TOKEN_PATTERN.fullmatch(token)
         if match is None:

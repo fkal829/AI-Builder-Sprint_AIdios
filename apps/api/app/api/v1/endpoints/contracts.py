@@ -336,3 +336,29 @@ async def start_contract_analysis(
             task_id=outcome.response.data.id,
         )
     return outcome.response
+
+
+@router.get(
+    "/{contract_id}/analysis",
+    response_model=ApiResponse[AnalysisTask],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "최근 분석 작업을 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
+async def get_contract_analysis(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[AnalysisService, Depends(get_analysis_service)],
+) -> ApiResponse[AnalysisTask]:
+    task = await service.get_latest(
+        owner_id=owner_id,
+        contract_id=contract_id,
+    )
+    return ApiResponse(
+        data=task,
+        error=None,
+        request_id=request_id(request),
+    )

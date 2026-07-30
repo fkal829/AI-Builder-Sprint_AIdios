@@ -4,6 +4,7 @@ from pathlib import Path
 from app.core.enums import (
     AdjustmentRequestStatus,
     AnalysisStatus,
+    AuditEventType,
     ContractStatus,
     InternalSignatureStatus,
     ModusignStatus,
@@ -34,40 +35,34 @@ def _normalize_shared_transitions(transitions):
 
 
 def test_shared_state_machines_match_backend() -> None:
-    shared = json.loads((SHARED_CONTRACTS / "state-machines.json").read_text())
+    shared = json.loads((SHARED_CONTRACTS / "state-machines.json").read_text(encoding="utf-8"))
 
     assert _normalize_shared_transitions(shared["contract"]) == _as_string_transitions(
         ALLOWED_CONTRACT_TRANSITIONS
     )
-    assert _normalize_shared_transitions(
-        shared["adjustment_request"]
-    ) == _as_string_transitions(
+    assert _normalize_shared_transitions(shared["adjustment_request"]) == _as_string_transitions(
         ALLOWED_ADJUSTMENT_REQUEST_TRANSITIONS
     )
-    assert _normalize_shared_transitions(
-        shared["internal_signature"]
-    ) == _as_string_transitions(ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS)
+    assert _normalize_shared_transitions(shared["internal_signature"]) == _as_string_transitions(
+        ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS
+    )
     assert _normalize_shared_transitions(shared["modusign"]) == _as_string_transitions(
         ALLOWED_MODUSIGN_TRANSITIONS
     )
     assert _normalize_shared_transitions(shared["obligation"]) == _as_string_transitions(
         ALLOWED_OBLIGATION_TRANSITIONS
     )
-    assert _normalize_shared_transitions(
-        shared["analysis_task"]
-    ) == _as_string_transitions(ALLOWED_ANALYSIS_TASK_TRANSITIONS)
+    assert _normalize_shared_transitions(shared["analysis_task"]) == _as_string_transitions(
+        ALLOWED_ANALYSIS_TASK_TRANSITIONS
+    )
 
 
 def test_shared_state_machines_include_every_enum_member() -> None:
-    shared = json.loads((SHARED_CONTRACTS / "state-machines.json").read_text())
+    shared = json.loads((SHARED_CONTRACTS / "state-machines.json").read_text(encoding="utf-8"))
 
     assert set(shared["contract"]) == {status.value for status in ContractStatus}
-    assert set(shared["adjustment_request"]) == {
-        status.value for status in AdjustmentRequestStatus
-    }
-    assert set(shared["internal_signature"]) == {
-        status.value for status in InternalSignatureStatus
-    }
+    assert set(shared["adjustment_request"]) == {status.value for status in AdjustmentRequestStatus}
+    assert set(shared["internal_signature"]) == {status.value for status in InternalSignatureStatus}
     assert set(shared["modusign"]) == {status.value for status in ModusignStatus}
     assert set(shared["obligation"]) == {status.value for status in ObligationStatus}
     assert set(shared["analysis_task"]) == {status.value for status in AnalysisStatus}
@@ -75,7 +70,7 @@ def test_shared_state_machines_include_every_enum_member() -> None:
 
 def test_evidence_schemas_use_api_snake_case() -> None:
     for filename in ("extracted-term.schema.json", "review-item.schema.json"):
-        schema = json.loads((SHARED_CONTRACTS / "schemas" / filename).read_text())
+        schema = json.loads((SHARED_CONTRACTS / "schemas" / filename).read_text(encoding="utf-8"))
         properties = schema["properties"]
 
         assert "source_page" in properties
@@ -86,7 +81,7 @@ def test_evidence_schemas_use_api_snake_case() -> None:
 
 def test_extracted_term_schema_has_structured_fields_and_values() -> None:
     schema = json.loads(
-        (SHARED_CONTRACTS / "schemas" / "extracted-term.schema.json").read_text()
+        (SHARED_CONTRACTS / "schemas" / "extracted-term.schema.json").read_text(encoding="utf-8")
     )
 
     assert schema["additionalProperties"] is False
@@ -104,7 +99,7 @@ def test_extracted_term_schema_has_structured_fields_and_values() -> None:
 
 def test_review_schema_distinguishes_source_and_model_confidence() -> None:
     schema = json.loads(
-        (SHARED_CONTRACTS / "schemas" / "review-item.schema.json").read_text()
+        (SHARED_CONTRACTS / "schemas" / "review-item.schema.json").read_text(encoding="utf-8")
     )
 
     assert schema["properties"]["detection_method"]["enum"] == [
@@ -118,7 +113,7 @@ def test_review_schema_distinguishes_source_and_model_confidence() -> None:
 
 
 def test_openapi_declares_security_and_separate_public_contracts() -> None:
-    openapi = (SHARED_CONTRACTS / "openapi" / "openapi.yaml").read_text()
+    openapi = (SHARED_CONTRACTS / "openapi" / "openapi.yaml").read_text(encoding="utf-8")
 
     assert "BearerAuth:" in openapi
     assert "ModusignWebhookSecret:" in openapi
@@ -127,3 +122,10 @@ def test_openapi_declares_security_and_separate_public_contracts() -> None:
     assert "PublicSubmissionResponse:" in openapi
     assert "Evidence:" not in openapi
     assert "requestId:" in openapi
+
+
+def test_openapi_declares_every_audit_event_type() -> None:
+    openapi = (SHARED_CONTRACTS / "openapi" / "openapi.yaml").read_text(encoding="utf-8")
+
+    for event_type in AuditEventType:
+        assert f"        - {event_type.value}" in openapi

@@ -24,6 +24,7 @@ from app.api.dependencies import (
     get_document_access_service,
     get_document_upload_service,
     get_idempotency_service,
+    get_review_item_service,
     get_understood_term_service,
 )
 from app.core.enums import IdempotencyOperation
@@ -35,7 +36,7 @@ from app.schemas.adjustments import (
     ExplicitConfirmation,
     OwnerAdjustmentDetail,
 )
-from app.schemas.analysis import AnalysisStartRequest, AnalysisTask
+from app.schemas.analysis import AnalysisStartRequest, AnalysisTask, ReviewItem, ReviewItemUpdate
 from app.schemas.common import ApiResponse
 from app.schemas.contracts import AuditEvent, Contract, ContractCreate, ContractListItem
 from app.schemas.documents import Document, DocumentAccess, DocumentType
@@ -49,6 +50,7 @@ from app.services.documents import (
     read_upload_content,
 )
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
+from app.services.review_items import ReviewItemService
 from app.services.understood_terms import UnderstoodTermService
 
 router = APIRouter()
@@ -359,6 +361,37 @@ async def get_contract_analysis(
     )
     return ApiResponse(
         data=task,
+        error=None,
+        request_id=request_id(request),
+    )
+
+
+@router.patch(
+    "/{contract_id}/review-items/{item_id}",
+    response_model=ApiResponse[ReviewItem],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "검토 항목을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "검토 항목 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "선택값 또는 ID 검증 실패"},
+    },
+)
+async def update_contract_review_item(
+    request: Request,
+    contract_id: UUID,
+    item_id: UUID,
+    payload: ReviewItemUpdate,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ReviewItemService, Depends(get_review_item_service)],
+) -> ApiResponse[ReviewItem]:
+    item = await service.update_selection(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        item_id=item_id,
+        payload=payload,
+    )
+    return ApiResponse(
+        data=item,
         error=None,
         request_id=request_id(request),
     )

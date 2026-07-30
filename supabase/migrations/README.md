@@ -20,6 +20,11 @@
 트랜잭션으로 처리한다. 실패한 작업은 계약을 `ANALYZING`으로 유지해 사용자가 새
 멱등 키로 재시작할 수 있다.
 
+`20260730240000_add_review_item_selection.sql`은 4.6의 검토 선택과
+`REVIEW_ITEM_SELECTION_UPDATED` 감사 이벤트를 원자적으로 저장한다. 같은 선택의
+반복 저장은 기존 결과를 반환하고, 분석 작업의 `result.review_items` 미러도 함께
+갱신한다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

@@ -489,9 +489,9 @@ def _coordinates(value: Any) -> tuple[tuple[float, float], ...]:
         x = point.get("x")
         y = point.get("y")
         if (
-            not isinstance(x, (int, float))
+            not isinstance(x, int | float)
             or isinstance(x, bool)
-            or not isinstance(y, (int, float))
+            or not isinstance(y, int | float)
             or isinstance(y, bool)
         ):
             return ()
@@ -562,7 +562,7 @@ def _boxes_overlap(
 
 
 def _numeric_confidence(value: Any) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    if isinstance(value, int | float) and not isinstance(value, bool):
         return min(max(float(value), 0), 1)
     if isinstance(value, str):
         normalized = value.strip().lower()

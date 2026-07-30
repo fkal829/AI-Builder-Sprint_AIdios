@@ -45,7 +45,20 @@ class PublicTokenService:
         adjustment_request_id: UUID,
         expires_at: datetime,
     ) -> IssuedPublicToken:
-        return await self.issue(
+        issued, record = self.prepare_adjustment_response(
+            adjustment_request_id=adjustment_request_id,
+            expires_at=expires_at,
+        )
+        await self._repository.create_public_token(record=record)
+        return issued
+
+    def prepare_adjustment_response(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        expires_at: datetime,
+    ) -> tuple[IssuedPublicToken, PublicTokenRecord]:
+        return self.prepare(
             scope=PublicTokenScope.ADJUSTMENT_RESPONSE,
             resource_id=adjustment_request_id,
             expires_at=expires_at,
@@ -58,28 +71,44 @@ class PublicTokenService:
         resource_id: UUID,
         expires_at: datetime,
     ) -> IssuedPublicToken:
+        issued, record = self.prepare(
+            scope=scope,
+            resource_id=resource_id,
+            expires_at=expires_at,
+        )
+        await self._repository.create_public_token(record=record)
+        return issued
+
+    def prepare(
+        self,
+        *,
+        scope: PublicTokenScope,
+        resource_id: UUID,
+        expires_at: datetime,
+    ) -> tuple[IssuedPublicToken, PublicTokenRecord]:
         now = self._utc_now()
         normalized_expiry = _as_utc(expires_at)
         if normalized_expiry <= now:
             raise ValueError("Public token expiry must be in the future.")
         token_id = uuid4()
         token = self.token_for_id(token_id)
-        await self._repository.create_public_token(
-            record=PublicTokenRecord(
-                id=token_id,
-                token_hash=_token_hash(token),
-                scope=scope,
-                resource_id=resource_id,
-                expires_at=normalized_expiry,
-                revoked_at=None,
-                created_at=now,
-            )
-        )
-        return IssuedPublicToken(
-            token=token,
-            expires_at=normalized_expiry,
+        record = PublicTokenRecord(
+            id=token_id,
+            token_hash=_token_hash(token),
             scope=scope,
             resource_id=resource_id,
+            expires_at=normalized_expiry,
+            revoked_at=None,
+            created_at=now,
+        )
+        return (
+            IssuedPublicToken(
+                token=token,
+                expires_at=normalized_expiry,
+                scope=scope,
+                resource_id=resource_id,
+            ),
+            record,
         )
 
     async def resolve(
@@ -110,6 +139,18 @@ class PublicTokenService:
             hashlib.sha256,
         ).digest()
         return f"{token_id}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode('ascii')}"
+
+    def adjustment_item_id(
+        self,
+        *,
+        adjustment_request_id: UUID,
+        review_item_id: UUID,
+    ) -> str:
+        """Derive an opaque, request-scoped item identifier for public responses."""
+
+        material = f"adjustment-item:{adjustment_request_id}:{review_item_id}".encode("ascii")
+        digest = hmac.new(self._secret, material, hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
     def _validate_token_format(self, token: str) -> UUID:
         match = _TOKEN_PATTERN.fullmatch(token)

@@ -148,9 +148,9 @@ def _json_normalize(value: Any) -> Any:
         return _json_normalize(value.model_dump(mode="json"))
     if isinstance(value, dict):
         return {str(key): _json_normalize(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_json_normalize(item) for item in value]
-    if isinstance(value, (UUID, date, datetime, Enum)):
+    if isinstance(value, UUID | date | datetime | Enum):
         return str(value.value if isinstance(value, Enum) else value)
     return value
 

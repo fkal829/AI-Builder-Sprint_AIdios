@@ -31,7 +31,11 @@ def install_http_contract(app: FastAPI) -> None:
         request.state.request_id = new_request_id()
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
-        if "/public/" in request.url.path or request.url.path.endswith("/send"):
+        if (
+            "/public/" in request.url.path
+            or request.url.path.endswith("/send")
+            or request.url.path.endswith("/evidence-link")
+        ):
             set_no_store(response)
         return response
 

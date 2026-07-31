@@ -85,8 +85,9 @@ class PublicTokenService:
         scope: PublicTokenScope,
         resource_id: UUID,
         expires_at: datetime,
+        created_at: datetime | None = None,
     ) -> tuple[IssuedPublicToken, PublicTokenRecord]:
-        now = self._utc_now()
+        now = _as_utc(created_at) if created_at is not None else self._utc_now()
         normalized_expiry = _as_utc(expires_at)
         if normalized_expiry <= now:
             raise ValueError("Public token expiry must be in the future.")

@@ -53,7 +53,7 @@ from app.repositories.contracts import (
 )
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
-from app.repositories.obligations import ObligationRecord
+from app.repositories.obligations import EvidenceLinkCreateOutcome, ObligationRecord
 from app.repositories.public_tokens import PublicTokenRecord
 from app.repositories.review_items import (
     ReviewItemSelectionOutcome,
@@ -805,6 +805,74 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("이행 항목 목록 조회에 실패했습니다.") from error
         return [_obligation_record_from_row(row) for row in response.data or []]
+
+    async def create_obligation_evidence_link_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        obligation_id: UUID,
+        public_token: PublicTokenRecord,
+    ) -> EvidenceLinkCreateOutcome:
+        if (
+            public_token.scope != PublicTokenScope.OBLIGATION_EVIDENCE
+            or public_token.resource_id != obligation_id
+            or public_token.expires_at <= public_token.created_at
+        ):
+            raise ValueError("증빙 제출 공개 토큰 정보가 올바르지 않습니다.")
+
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return EvidenceLinkCreateOutcome.NOT_FOUND
+                obligation = self._mock_obligations.get(contract_id)
+                if obligation is None or obligation.id != obligation_id:
+                    return EvidenceLinkCreateOutcome.NOT_FOUND
+                if obligation.status != ObligationStatus.PENDING:
+                    return EvidenceLinkCreateOutcome.INVALID_STATUS_TRANSITION
+                if public_token.token_hash in self._mock_public_tokens:
+                    raise ExternalStorageFailure("증빙 제출 링크 저장에 실패했습니다.")
+                self._mock_public_tokens[public_token.token_hash] = public_token
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="EVIDENCE_LINK_CREATED",
+                        actor_type="OWNER",
+                        summary="산출물 증빙 제출 링크를 생성했습니다.",
+                        created_at=public_token.created_at,
+                    )
+                )
+                return EvidenceLinkCreateOutcome.CREATED
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_obligation_id": str(obligation_id),
+            "p_public_token_id": str(public_token.id),
+            "p_token_hash": public_token.token_hash,
+            "p_token_scope": public_token.scope.value,
+            "p_token_resource_id": str(public_token.resource_id),
+            "p_token_expires_at": public_token.expires_at.isoformat(),
+            "p_token_created_at": public_token.created_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "create_obligation_evidence_link_with_audit",
+                    params,
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("증빙 제출 링크 저장에 실패했습니다.") from error
+        payload = response.data[0] if isinstance(response.data, list) else response.data
+        try:
+            return EvidenceLinkCreateOutcome(payload)
+        except (TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "증빙 제출 링크 저장 결과를 확인할 수 없습니다."
+            ) from error
 
     async def list_audit_events(
         self,

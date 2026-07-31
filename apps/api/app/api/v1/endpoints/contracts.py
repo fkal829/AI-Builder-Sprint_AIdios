@@ -51,7 +51,7 @@ from app.schemas.contracts import (
     RenewalDecisionRequest,
 )
 from app.schemas.documents import Document, DocumentAccess, DocumentType
-from app.schemas.obligations import ObligationList
+from app.schemas.obligations import ObligationList, PublicLink, PublicLinkCreate
 from app.schemas.signatures import (
     EmbeddedSignatureDraft,
     EmbeddedSignatureDraftCreate,
@@ -287,6 +287,40 @@ async def list_contract_obligations(
     obligations = await service.list(owner_id=owner_id, contract_id=contract_id)
     return ApiResponse(
         data=list(obligations),
+        error=None,
+        request_id=request_id(request),
+    )
+
+
+@router.post(
+    "/{contract_id}/obligations/{obligation_id}/evidence-link",
+    response_model=ApiResponse[PublicLink],
+    status_code=201,
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "이행 항목을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "이행 항목 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "요청 검증 실패"},
+    },
+)
+async def create_obligation_evidence_link(
+    request: Request,
+    contract_id: UUID,
+    obligation_id: UUID,
+    payload: PublicLinkCreate,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ObligationService, Depends(get_obligation_service)],
+) -> ApiResponse[PublicLink]:
+    link = await service.create_evidence_link(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        obligation_id=obligation_id,
+        idempotency_key=idempotency_key,
+        payload=payload,
+    )
+    return ApiResponse(
+        data=link,
         error=None,
         request_id=request_id(request),
     )

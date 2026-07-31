@@ -56,7 +56,7 @@ B는 기존 6개 문서·AI API에 공통 health와 이행·증빙 4개를 더 �
 | C | `POST` | `/contracts/{contract_id}/adjustment-confirmation` | 최종 조정 결과 확정 |
 | C | `POST` | `/contracts/{contract_id}/agreement` | 변경·확인 합의서 생성 |
 | C | `GET` | `/contracts/{contract_id}/agreement` | 변경·확인 합의서 조회 |
-| C | `POST` | `/contracts/{contract_id}/signature-requests` | 모두싸인 서명 요청 |
+| C | `POST` | `/contracts/{contract_id}/signature-embedded-drafts` | 모두싸인 임베디드 서명 초안 생성 |
 | C | `GET` | `/contracts/{contract_id}/signature` | 서명 상태 조회 |
 | C | `POST` | `/webhooks/modusign` | 모두싸인 웹훅 수신 |
 | B | `GET` | `/contracts/{contract_id}/obligations` | 이행 항목 목록 조회 |
@@ -101,11 +101,13 @@ Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 - 조정 요청 초안 생성
 - 조정 링크 활성화
 - 합의서 생성
-- 모두싸인 서명 요청
+- 모두싸인 임베디드 서명 초안 생성
 - 증빙 제출 링크 생성
 
 같은 키와 같은 요청은 최초 결과를 재생한다. 같은 키에 다른 요청을 사용하면
 `409 IDEMPOTENCY_CONFLICT`다.
+단, 임베디드 초안의 `editor_url`은 저장하지 않으므로 같은 키 재호출에서 재생하지
+않고 `409`를 반환한다.
 
 ### 2.3 공통 성공 응답
 
@@ -297,7 +299,8 @@ DOCUMENT_UPLOADED, UNDERSTOOD_TERMS_SAVED,
 ANALYSIS_STARTED, ANALYSIS_RESTARTED, ANALYSIS_COMPLETED, ANALYSIS_FAILED,
 REVIEW_ITEM_SELECTION_UPDATED, ADJUSTMENT_DRAFT_CREATED, ADJUSTMENT_SENT,
 ADJUSTMENT_OPENED, ADJUSTMENT_RESPONDED, ADJUSTMENT_CONFIRMED,
-ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, SIGNATURE_REQUESTED, SIGNATURE_STARTED,
+ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, SIGNATURE_DRAFT_CREATED,
+SIGNATURE_REQUESTED, SIGNATURE_STARTED,
 SIGNATURE_COMPLETED, SIGNATURE_ABORTED, SIGNATURE_FAILED, OBLIGATION_CREATED,
 EVIDENCE_LINK_CREATED, EVIDENCE_SUBMITTED, EVIDENCE_APPROVED,
 EVIDENCE_DISPUTED, RENEWAL_DECISION_SAVED
@@ -847,15 +850,21 @@ canonical `signed_date`가 없으면 `409 INVALID_STATUS_TRANSITION`으로 거�
 - 성공: `200 AgreementResponse`
 - 오류: `401`, `404`, `422`
 
-### 6.3 모두싸인 서명 요청
+### 6.3 모두싸인 임베디드 서명 초안 생성
 
-`POST /api/v1/contracts/{contract_id}/signature-requests`
+`POST /api/v1/contracts/{contract_id}/signature-embedded-drafts`
 
 - 인증: Bearer
 - 담당: C
 - 필수 헤더: `Idempotency-Key`
-- 성공: `201 SignatureResponse`
+- 성공: `201 EmbeddedSignatureDraftResponse`
+- 성공 응답 헤더: `Cache-Control: no-store`
 - 오류: `401`, `404`, `409`, `422`, `502`
+
+> **C-7 변경(2026-07-31):** 기존
+> `POST /contracts/{contract_id}/signature-requests` 템플릿 기반 즉시 발송 API를
+> 임베디드 초안 생성 API로 대체했다. 이 API는 서명 요청을 발송하지 않으며, 사용자가
+> 반환된 모두싸인 편집 화면에서 서명란을 배치하고 직접 발송한다.
 
 요청:
 
@@ -892,13 +901,43 @@ canonical `signed_date`가 없으면 `409 INVALID_STATUS_TRANSITION`으로 거�
 - `EMAIL`은 email 형식
 - `KAKAO`는 하이픈 없는 국내 휴대전화 번호
 - 역할과 연락처 중복 금지
-- 연락처 원문을 응답과 로그에 재노출하지 않음
-- 로컬 요청 상태와 `SIGNATURE_REQUESTED` 감사 이벤트를 하나의 트랜잭션으로 기록
+- 연락처 원문을 모두싸인 Adapter에만 전달하고 API 응답·DB·로그에 저장하지 않음
+- 서버가 확정 합의서를 메모리에서 PDF로 생성하고 모두싸인
+  `POST /embedded-drafts`에 Base64 PDF로 전달
+- `Signature=REQUESTING → EDITING`, `modusign_status=DRAFT`,
+  `modusign_draft_id`와 `SIGNATURE_DRAFT_CREATED` 감사 이벤트를 저장
+- 이 단계에서는 Contract를 `READY_TO_SIGN`으로 유지하며 자동 발송하지 않음
+- `editor_url`과 `expires_at`은 생성 응답에서만 반환하고 DB·로그·멱등 재생값에
+  저장하지 않음
+- 같은 `Idempotency-Key` 재호출은 민감 URL을 재발급·재생하지 않고 `409` 반환
 
-외부 문서 생성 전 로컬 실패는 `502`를 반환하고 `Signature=FAILED`를 보존하되 계약은
-`READY_TO_SIGN`을 유지하거나 되돌린다. 이전 시도가 `ABORTED` 또는 `FAILED`이면
-자동 재요청하지 않는다. 사용자가 현재 합의서를 다시 확인하고 새 `Idempotency-Key`와
-`confirmed=true`로 명시적으로 요청해야 새 `Signature` 시도를 만든다.
+응답 예시:
+
+```json
+{
+  "data": {
+    "signature": {
+      "id": "signature_uuid",
+      "contract_id": "contract_uuid",
+      "status": "EDITING",
+      "modusign_status": "DRAFT",
+      "modusign_draft_id": "modusign_draft_id",
+      "modusign_document_id": null,
+      "last_event_id": null,
+      "requested_at": "2026-07-31T06:00:00Z",
+      "completed_at": null
+    },
+    "editor_url": "https://app.modusign.co.kr/embedded-draft/...",
+    "expires_at": "2026-07-31T08:00:00Z"
+  },
+  "error": null,
+  "requestId": "req_123abc"
+}
+```
+
+PDF 생성 또는 외부 초안 생성 실패는 `502`를 반환하고 `Signature=FAILED`를 보존하되
+Contract는 `READY_TO_SIGN`을 유지한다. 실패·중단 뒤 자동 재요청하지 않으며 사용자가
+현재 합의서를 다시 확인하고 새 `Idempotency-Key`와 `confirmed=true`로 요청해야 한다.
 
 ### 6.4 서명 상태 조회
 
@@ -914,28 +953,30 @@ canonical `signed_date`가 없으면 `409 INVALID_STATUS_TRANSITION`으로 거�
 
 내부 상태:
 
-`REQUEST_READY`, `REQUESTING`, `SIGNING`, `COMPLETED`, `ABORTED`, `FAILED`
+`REQUEST_READY`, `REQUESTING`, `EDITING`, `SIGNING`, `COMPLETED`, `ABORTED`, `FAILED`
 
 모두싸인 원본 상태:
 
 `DRAFT`, `SCHEDULED`, `ON_PROCESSING`, `ON_GOING`, `COMPLETED`, `ABORTED`,
 `PROCESSING_FAILED`
 
-두 상태는 별도 필드로 저장한다. 정상 P0 원본 흐름은
-`ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED`다.
-`DRAFT`, `SCHEDULED`는 수신한 원본 보존용이며 정상 흐름에는 사용하지 않는다.
+두 상태는 별도 필드로 저장한다. 임베디드 초안 생성 직후는 원본 `DRAFT`이고 사용자가
+편집 화면에서 직접 발송한 뒤 `ON_PROCESSING → ON_GOING → COMPLETED / ABORTED /
+PROCESSING_FAILED`로 진행한다.
 내부 `Signature`는 `id`와 마지막으로 반영한 `last_event_id`를 보존한다.
-`modusign_document_id`, `last_event_id`, `requested_at`, `completed_at`은 값이
-없더라도 응답 필드를 생략하지 않고 `null`로 반환한다.
+`modusign_draft_id`, `modusign_document_id`, `last_event_id`, `requested_at`,
+`completed_at`은 값이 없더라도 응답 필드를 생략하지 않고 `null`로 반환한다.
+`EDITING`은 원본 `DRAFT`, `modusign_draft_id`, 요청 시각이 필요하고
+`modusign_document_id`, `last_event_id`, `completed_at`은 `null`이다.
 `SIGNING`은 원본 `ON_GOING`, 외부 문서 ID, 마지막 이벤트, 요청 시각이 필요하고
 `completed_at=null`이다. `COMPLETED`는 원본 `COMPLETED`와 외부 문서 ID, 마지막
 이벤트, 요청·완료 시각을 모두 보존한다. `ABORTED`도 원본 `ABORTED`와 같은 추적
 필드를 보존한다.
-`REQUESTING`은 외부 생성 전 세 추적 필드가 모두 `null`이거나, 생성 후 원본
-`DRAFT`·`SCHEDULED`·`ON_PROCESSING`과 문서 ID가 있는 경우만 허용한다. 생성 직후
-인증 웹훅이 아직 없다면 `last_event_id=null`일 수 있고 `SIGNING`·terminal 상태부터
-마지막 이벤트 ID 또는 fingerprint가 필수다.
-`FAILED`는 외부 생성 전 로컬 실패의 세 `null` 필드 또는 원본
+`REQUESTING`은 초안 생성 호출 중인 내부 상태이므로 원본 상태·초안 ID·문서 ID·
+이벤트 ID가 모두 `null`이다. `SIGNING`·terminal 상태부터 마지막 이벤트 ID 또는
+fingerprint가 필수다.
+`FAILED`는 외부 생성 전 로컬 실패의 외부 상태·초안 ID·문서 ID·이벤트 ID가 모두
+`null`인 경우 또는 원본
 `PROCESSING_FAILED`와 문서·이벤트 ID가 모두 있는 외부 실패만 허용하고, 두 경우 모두
 요청·완료 시각을 보존한다.
 
@@ -965,7 +1006,10 @@ fingerprint로 사용한다. `requester.email`은 인증에 사용하지 않는�
 분류로 남기며, 이 vendor endpoint의 오류 body로 반환하지 않고 동일하게 `204`로
 승인한다.
 
-최신 조회 원본이 `COMPLETED`이면 계약을 `SIGNING → SIGNED`로 전환한다. `ABORTED`
+사용자가 임베디드 편집기에서 발송한 뒤 인증된 최신 원본이 `ON_GOING`이면
+`modusign_draft_id`와 외부 문서 ID를 연결하고 Contract를
+`READY_TO_SIGN → SIGNING`으로 전환한다. 최신 조회 원본이 `COMPLETED`이면 계약을
+`SIGNING → SIGNED`로 전환한다. `ABORTED`
 또는 `PROCESSING_FAILED`이면 terminal Signature와 대응 감사 이벤트를 보존하고 계약을
 `SIGNING → READY_TO_SIGN`으로 되돌린다. 종료 상태 뒤의 오래된 이벤트는 상태를
 되돌리지 않으며 실패·중단 뒤 서명을 자동 재요청하지 않는다.
@@ -1133,15 +1177,16 @@ URL은 `http://` 또는 `https://`, 최대 2,048자만 허용한다. 서버는 U
 
 ### 9.5 내부 서명과 모두싸인 원본
 
-- 내부: `REQUEST_READY → REQUESTING → SIGNING → COMPLETED / ABORTED / FAILED`
+- 내부:
+  `REQUEST_READY → REQUESTING → EDITING → SIGNING → COMPLETED / ABORTED / FAILED`
 - 원본 enum: `DRAFT`, `SCHEDULED`, `ON_PROCESSING`, `ON_GOING`, `COMPLETED`,
   `ABORTED`, `PROCESSING_FAILED`
 - 정상 원본 흐름:
-  `ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED`
-- 최신 `COMPLETED`는 Contract `SIGNING → SIGNED`, 최신 `ABORTED`·
-  `PROCESSING_FAILED` 또는 외부 생성 전 로컬 실패는
-  Contract `SIGNING → READY_TO_SIGN`이다. 실패·중단 후 재요청은 새 멱등 키를 사용한
-  사용자의 명시적 확인에서만 허용한다.
+  `DRAFT → ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED`
+- 초안 생성 동안 Contract는 `READY_TO_SIGN`을 유지한다. 인증된 최신 `ON_GOING`은
+  Contract `READY_TO_SIGN → SIGNING`, 최신 `COMPLETED`는 `SIGNING → SIGNED`,
+  최신 `ABORTED`·`PROCESSING_FAILED`는 `SIGNING → READY_TO_SIGN`이다.
+  실패·중단 후 재요청은 새 멱등 키를 사용한 사용자의 명시적 확인에서만 허용한다.
 
 ### 9.6 재계약 의사
 
@@ -1191,7 +1236,7 @@ C는 B의 분석 결과가 완성될 때까지 기다리지 않고 고정 `Revie
 | C-4 | 조정 초안·상세·발송 | B의 ReviewItem fixture로 미리보기와 계약당 1회 `/send` |
 | C-5 | 대행사 공개 조회·열람 기록·1회 응답 | GET 무변경, `/open` 최초 시각 유지, 전체 항목 정확히 한 번 제출 |
 | C-6 | 최종 확정·합의서 생성·조회 | 임의 최종 문구 거부, 원계약 체결일, 합의서 최대 4조항 |
-| C-7 | 모두싸인 `mock/live` Adapter와 서명 요청 | 합의서 ID·버전, 서명자 2명, 멱등 요청 검증 |
+| C-7 | 모두싸인 `mock/live` Adapter와 임베디드 초안 | 합의서 PDF, 서명자 2명, `EDITING`, 민감 URL 비저장 검증 |
 | C-8 | 웹훅 인증·중복·순서 역전 처리 | 즉시 204, 종료 상태 회귀 방지 |
 | C-9 | D-day·갱신 날짜 계산 | 한국 날짜 경계와 D-30·D-14·D-7 테스트 통과 |
 | C-10 | 대시보드 집계 | 상태 집합·distinct·D-day·금액 집계 테스트 통과 |
@@ -1234,7 +1279,7 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 | Day 2 | `계약 생성(C) → 문서 업로드·원문 접근(B) → 5문항(B) → 분석 시작·조회(B)` |
 | Day 3 | `ReviewItem 생성·선택(B) → 조정 초안(C)` |
 | Day 4 | `공개 조정 링크·응답(C) → 역제안 비교(B) → 최종 확정·합의서(C)`, 공개 흐름 검증(D) |
-| Day 5 | `합의서(C) → 모두싸인 요청·웹훅(C) → 대표 산출물·증빙 승인(B)`, 전체 E2E 실행(D) |
+| Day 5 | `합의서(C) → 모두싸인 임베디드 편집·사용자 발송·웹훅(C) → 대표 산출물·증빙 승인(B)`, 전체 E2E 실행(D) |
 | Day 6 | 계약 목록·D-day·대시보드·타임라인(C) → 전체 P0 회귀(B·C) → 배포본 완료 검증(D) |
 | Day 7 | 새 기능 없이 P0 버그 수정, 문서·데모 안정화 |
 

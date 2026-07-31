@@ -1,0 +1,39 @@
+{
+  "case_id": "04-ambiguous-deliverables",
+  "category": "모호한 산출물",
+  "contract_pages": [
+    {
+      "page": 1,
+      "text": "달맞이식당 홍보 계약의 산출물은 인스타그램 SNS 게시물이다. 콘텐츠 수량은 별도 협의한다. 첫 게시 기한은 2026년 5월 20일이다. 게시 빈도는 주 1회이며 성과 보고 주기는 상황에 따라 변경한다."
+    }
+  ],
+  "understood_terms": {
+    "duration_text": "12개월",
+    "monthly_amount": null,
+    "total_amount": null,
+    "refund_text": "계약서 확인",
+    "termination_text": "계약서 확인",
+    "source_type": "USER_MEMORY"
+  },
+  "observed_terms": [
+    {"field": "content_type", "value": "SNS 게시물", "source_page": 1, "source_text": "산출물은 인스타그램 SNS 게시물이다.", "confidence": 0.94},
+    {"field": "content_quantity", "value": null, "source_page": 1, "source_text": "콘텐츠 수량은 별도 협의한다.", "confidence": 0.45, "verification_status": "NEEDS_CHECK"},
+    {"field": "deliverable_due_date", "value": "2026-05-20", "source_page": 1, "source_text": "첫 게시 기한은 2026년 5월 20일이다.", "confidence": 0.94},
+    {"field": "advertising_channel", "value": "인스타그램", "source_page": 1, "source_text": "산출물은 인스타그램 SNS 게시물이다.", "confidence": 0.94},
+    {"field": "reporting_frequency", "value": "상황에 따라 변경", "source_page": 1, "source_text": "성과 보고 주기는 상황에 따라 변경한다.", "confidence": 0.45, "verification_status": "NEEDS_CHECK"},
+    {"field": "posting_frequency", "value": "주 1회", "source_page": 1, "source_text": "게시 빈도는 주 1회이며", "confidence": 0.93}
+  ],
+  "expected_terms": [
+    {"field": "content_type", "value": "SNS 게시물", "source_page": 1, "source_text": "산출물은 인스타그램 SNS 게시물이다."},
+    {"field": "content_quantity", "value": null, "source_page": 1, "source_text": "콘텐츠 수량은 별도 협의한다.", "confidence": 0.5, "verification_status": "NEEDS_CHECK"},
+    {"field": "deliverable_due_date", "value": "2026-05-20", "source_page": 1, "source_text": "첫 게시 기한은 2026년 5월 20일이다."},
+    {"field": "advertising_channel", "value": "인스타그램", "source_page": 1, "source_text": "산출물은 인스타그램 SNS 게시물이다."},
+    {"field": "reporting_frequency", "value": "상황에 따라 변경", "source_page": 1, "source_text": "성과 보고 주기는 상황에 따라 변경한다.", "confidence": 0.5, "verification_status": "NEEDS_CHECK"},
+    {"field": "posting_frequency", "value": "주 1회", "source_page": 1, "source_text": "게시 빈도는 주 1회이며"}
+  ],
+  "expected_signals": [
+    {"field": "content_quantity", "signal": "UNCLEAR"},
+    {"field": "reporting_frequency", "signal": "UNCLEAR"}
+  ],
+  "mismatch_targets": []
+}

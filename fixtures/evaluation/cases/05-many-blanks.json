@@ -1,0 +1,41 @@
+{
+  "case_id": "05-many-blanks",
+  "category": "빈칸 다수",
+  "contract_pages": [
+    {
+      "page": 1,
+      "text": "송도체험공방과 가상기획사는 2026년 4월 1일부터 2027년 3월 31일까지 계약한다. 산출물 수량, 제출 기한, 보고 주기와 촬영 안전 조건은 작성하지 않았다."
+    }
+  ],
+  "understood_terms": {
+    "duration_text": "12개월",
+    "monthly_amount": null,
+    "total_amount": null,
+    "refund_text": "계약서 확인",
+    "termination_text": "계약서 확인",
+    "source_type": "USER_MEMORY"
+  },
+  "observed_terms": [
+    {"field": "contract_start_date", "value": "2026-04-01", "source_page": 1, "source_text": "2026년 4월 1일부터 2027년 3월 31일까지 계약한다.", "confidence": 0.98},
+    {"field": "contract_end_date", "value": "2027-03-31", "source_page": 1, "source_text": "2026년 4월 1일부터 2027년 3월 31일까지 계약한다.", "confidence": 0.98},
+    {"field": "content_quantity", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"},
+    {"field": "deliverable_due_date", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"},
+    {"field": "reporting_frequency", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"},
+    {"field": "shooting_safety", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"}
+  ],
+  "expected_terms": [
+    {"field": "contract_start_date", "value": "2026-04-01", "source_page": 1, "source_text": "2026년 4월 1일부터 2027년 3월 31일까지 계약한다."},
+    {"field": "contract_end_date", "value": "2027-03-31", "source_page": 1, "source_text": "2026년 4월 1일부터 2027년 3월 31일까지 계약한다."},
+    {"field": "content_quantity", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"},
+    {"field": "deliverable_due_date", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"},
+    {"field": "reporting_frequency", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"},
+    {"field": "shooting_safety", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"}
+  ],
+  "expected_signals": [
+    {"field": "content_quantity", "signal": "MISSING"},
+    {"field": "deliverable_due_date", "signal": "MISSING"},
+    {"field": "reporting_frequency", "signal": "MISSING"},
+    {"field": "shooting_safety", "signal": "MISSING"}
+  ],
+  "mismatch_targets": []
+}

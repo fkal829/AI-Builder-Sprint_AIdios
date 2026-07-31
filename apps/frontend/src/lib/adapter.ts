@@ -61,6 +61,22 @@ type ApiContractListItem = {
   expiry_d_day: number | null;
 };
 
+type ContractCreateInput = {
+  title: string;
+  counterpartyName: string;
+};
+
+type UnderstoodTermInput = {
+  durationText: string;
+  monthlyAmount: number | null;
+  totalAmount: number | null;
+  refundText: string;
+  terminationText: string;
+};
+
+type ApiContract = { id: string };
+type ApiDocument = { id: string };
+
 export class PublicApiError extends Error {
   constructor(
     readonly status: number,
@@ -83,6 +99,10 @@ export interface DataAdapter {
   getDashboard(): Promise<{ stats: DashboardStats; contracts: ContractSummary[] }>;
   /** GET /api/v1/contracts/{contractId} (+ analysis). 미존재 시 reject(404). */
   getContract(contractId: string): Promise<ContractDetail>;
+  createContract(input: ContractCreateInput): Promise<{ id: string }>;
+  uploadContractDocument(contractId: string, file: File): Promise<{ id: string }>;
+  saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput): Promise<void>;
+  startContractAnalysis(contractId: string, documentId: string): Promise<void>;
   /** GET /api/v1/public/adjustment-requests/{token} */
   getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic | null>;
   /** POST /api/v1/public/adjustment-requests/{token}/open */
@@ -109,6 +129,31 @@ class MockAdapter implements DataAdapter {
     // 데모: 어떤 id로 진입해도 대표 계약(광안리 카페)을 보여줌.
     // 실 API에서는 미존재 시 reject 해 error 상태로 처리.
     return DEMO_CONTRACT;
+  }
+
+  async createContract(input: ContractCreateInput) {
+    void input;
+    await delay(120);
+    return { id: DEMO_CONTRACT.summary.id };
+  }
+
+  async uploadContractDocument(contractId: string, file: File) {
+    void contractId;
+    void file;
+    await delay(240);
+    return { id: "mock-contract-document" };
+  }
+
+  async saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput) {
+    void contractId;
+    void input;
+    await delay(120);
+  }
+
+  async startContractAnalysis(contractId: string, documentId: string) {
+    void contractId;
+    void documentId;
+    await delay(240);
   }
 
   async getAdjustmentRequest(token: string) {
@@ -199,6 +244,55 @@ class ApiAdapter extends MockAdapter {
     };
   }
 
+  async createContract(input: ContractCreateInput): Promise<{ id: string }> {
+    const contract = await this.request<ApiContract>("/api/v1/contracts", {
+      method: "POST",
+      headers: this.ownerHeaders(),
+      body: JSON.stringify({
+        title: input.title.trim(),
+        counterparty_name: input.counterpartyName.trim(),
+      }),
+    });
+    return { id: contract.id };
+  }
+
+  async uploadContractDocument(contractId: string, file: File): Promise<{ id: string }> {
+    const formData = new FormData();
+    formData.set("file", file);
+    formData.set("type", "CONTRACT");
+    const document = await this.request<ApiDocument>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/documents`,
+      { method: "POST", headers: this.ownerHeaders(), body: formData },
+    );
+    return { id: document.id };
+  }
+
+  async saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput): Promise<void> {
+    await this.request(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/understood-terms`,
+      {
+        method: "PUT",
+        headers: this.ownerHeaders(),
+        body: JSON.stringify({
+          duration_text: input.durationText,
+          monthly_amount: input.monthlyAmount,
+          total_amount: input.totalAmount,
+          refund_text: input.refundText,
+          termination_text: input.terminationText,
+          source_type: "USER_MEMORY",
+        }),
+      },
+    );
+  }
+
+  async startContractAnalysis(contractId: string, documentId: string): Promise<void> {
+    await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`, {
+      method: "POST",
+      headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ document_id: documentId, supporting_document_ids: [] }),
+    });
+  }
+
   async getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic> {
     const data = await this.request<ApiPublicAdjustment>(
       `/api/v1/public/adjustment-requests/${encodeURIComponent(token)}`,
@@ -268,7 +362,7 @@ class ApiAdapter extends MockAdapter {
         credentials: "omit",
         headers: {
           Accept: "application/json",
-          ...(init.body ? { "Content-Type": "application/json" } : {}),
+          ...(init.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
           ...init.headers,
         },
       });

@@ -555,6 +555,8 @@ export const DEMO_ADJUSTMENT_REQUEST: AdjustmentRequestPublic = {
         clauseId: c.id,
         requestText: chosen.text,
         officialBasis: c.officialBasis,
+        beforeText: c.original.text,
+        sourcePage: c.original.page,
       };
     }),
 };

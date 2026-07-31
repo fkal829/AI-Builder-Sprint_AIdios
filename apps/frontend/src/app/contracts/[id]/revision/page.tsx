@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
+import { FileDropzone } from "@/components/FileDropzone";
 import { adapter, isUsingMock, type RevisedContractReview } from "@/lib/adapter";
 
 export default function RevisedContractPage() {
@@ -95,12 +96,19 @@ export default function RevisedContractPage() {
             대행사는 이메일이나 메신저로 수정 계약서를 전달합니다. 단디계약은 계약서를
             대신 만들지 않고, 확정한 조정 내용이 수정본에 들어갔는지 대조합니다.
           </p>
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            className="mt-3 block w-full text-xs text-neutral700"
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          />
+          <div className="mt-3">
+            <FileDropzone
+              file={file}
+              onFile={(next) => {
+                setError(null);
+                setFile(next);
+              }}
+              onError={(message) => {
+                setError(message);
+                setFile(null);
+              }}
+            />
+          </div>
           <button
             type="button"
             disabled={!file || working}

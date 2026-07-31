@@ -142,6 +142,24 @@ async def test_rejects_unexpected_multipart_fields(upload_context) -> None:
     assert adapter.mock_documents == {}
 
 
+async def test_rejects_performance_report_through_general_document_upload(
+    upload_context,
+) -> None:
+    client, adapter, _service = upload_context
+
+    response = await client.post(
+        f"/api/v1/contracts/{CONTRACT_ID}/documents",
+        headers=authorization_header(),
+        data={"type": "PERFORMANCE_REPORT"},
+        files={"file": ("performance.pdf", make_pdf(), "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert adapter.mock_objects == {}
+    assert adapter.mock_documents == {}
+
+
 @pytest.mark.parametrize(
     ("filename", "content", "content_type"),
     [

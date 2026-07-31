@@ -11,6 +11,17 @@ class DocumentType(StrEnum):
     PROPOSAL = "PROPOSAL"
     ESTIMATE = "ESTIMATE"
     MESSAGE = "MESSAGE"
+    PERFORMANCE_REPORT = "PERFORMANCE_REPORT"
+
+
+class ContractDocumentUploadType(StrEnum):
+    """Document types accepted by the existing general contract upload API."""
+
+    CONTRACT = "CONTRACT"
+    REVISED_CONTRACT = "REVISED_CONTRACT"
+    PROPOSAL = "PROPOSAL"
+    ESTIMATE = "ESTIMATE"
+    MESSAGE = "MESSAGE"
 
 
 class DocumentParseStatus(StrEnum):

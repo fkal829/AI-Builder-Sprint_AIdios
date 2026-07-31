@@ -33,9 +33,9 @@ export function ConfirmModal({
         className="w-full max-w-[400px] animate-fade-up rounded-2xl border-2 border-ink bg-white p-5"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-1 text-xs font-medium text-gray500">{eyebrow}</div>
+        <div className="mb-1 text-xs font-medium text-neutral500">{eyebrow}</div>
         <h2 className="text-base font-black text-ink">{title}</h2>
-        <div className="mt-2 text-[13px] leading-relaxed text-gray700">{body}</div>
+        <div className="mt-2 text-[13px] leading-relaxed text-neutral700">{body}</div>
         <div className="mt-4 flex gap-2">
           <button
             onClick={onCancel}

@@ -8,7 +8,7 @@ export function ProgressDots({ total, current }: { total: number; current: numbe
         <span
           key={i}
           className={`h-1 flex-1 rounded-full ${
-            i < current ? "bg-amber700" : "bg-gray200"
+            i < current ? "bg-brand700" : "bg-neutral200"
           }`}
         />
       ))}
@@ -25,7 +25,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-gray200 bg-white p-4 ${className}`}>
+    <div className={`rounded-xl border border-neutral200 bg-white p-4 ${className}`}>
       {children}
     </div>
   );
@@ -34,14 +34,14 @@ export function Card({
 /** 섹션 제목 */
 export function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="text-[13px] font-bold text-gray700">{children}</h2>
+    <h2 className="text-[13px] font-bold text-neutral700">{children}</h2>
   );
 }
 
 /** '지급 조건 충족 ≠ 실제 송금' 등 고지 문구 (설계 원칙 #8) */
 export function Disclaimer({ children }: { children: ReactNode }) {
   return (
-    <p className="border-t border-dashed border-gray300 pt-2 text-[10px] leading-relaxed text-gray500">
+    <p className="border-t border-dashed border-neutral300 pt-2 text-[10px] leading-relaxed text-neutral500">
       {children}
     </p>
   );

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
-/* 대시보드 숫자 타일 (§6.13) — 화려한 차트 대신 숫자 타일 위주. */
+/* 대시보드 숫자 타일 (§6.13) — 화려한 차트 대신 숫자 타일 위주.
+   emphasis는 채움 무게로 구분한다. 색조로 튀게 하지 않는다. */
 export function StatTile({
   value,
   label,
@@ -9,7 +10,7 @@ export function StatTile({
 }: {
   value: ReactNode;
   label: string;
-  /** 만료 임박 등 강조(앰버) */
+  /** 만료 임박 등 강조 — 유일한 솔리드 타일 */
   emphasis?: boolean;
   size?: "sm" | "lg";
 }) {
@@ -17,14 +18,16 @@ export function StatTile({
   const num = size === "lg" ? "text-3xl" : "text-lg";
   return (
     <div
-      className={`rounded-2xl text-center ${pad} ${
-        emphasis ? "bg-amber50 ring-1 ring-amber200" : "bg-gray100"
+      className={`card text-center ${pad} ${
+        emphasis ? "border-brand200 bg-brand50" : ""
       }`}
     >
-      <div className={`font-black ${num} ${emphasis ? "text-amber700" : "text-ink"}`}>
+      <div
+        className={`font-black tabular-nums ${num} ${emphasis ? "text-brand700" : "text-ink"}`}
+      >
         {value}
       </div>
-      <div className="mt-1 text-[11px] text-gray500">{label}</div>
+      <div className="mt-1 text-[11px] text-neutral500">{label}</div>
     </div>
   );
 }
@@ -38,9 +41,9 @@ export function StatRow({
   value: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-white px-5 py-4 text-sm ring-1 ring-gray200">
-      <span className="text-gray700">{label}</span>
-      <span className="font-bold text-ink">{value}</span>
+    <div className="card flex items-center justify-between px-5 py-4 text-sm">
+      <span className="text-neutral700">{label}</span>
+      <span className="font-bold tabular-nums text-ink">{value}</span>
     </div>
   );
 }

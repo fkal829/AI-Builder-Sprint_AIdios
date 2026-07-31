@@ -1,7 +1,11 @@
 /* ===========================================================================
    상태 → 쉬운 한국어 매핑 (기획안 §6.9, §11, UX원칙)
    외부/내부 enum은 types.ts에 그대로 두고, 여기서만 표시 문구·색을 매핑.
-   색 규칙: 경고색·빨강 없음. 거절/원안유지/대기는 gray, 진행/합의는 amber.
+
+   색 규칙: 경고색·빨강 없음. 색조가 아니라 무게로 구분한다.
+     윤곽·점선 = 아직 확정 아님 (미검토·대기·내 선택)
+     채움      = 확정됐거나 내가 볼 차례 (원안유지·역제안 도착·합의)
+   같은 규칙이 LayerBlock의 층위 구분에도 그대로 적용된다.
    =========================================================================== */
 import type {
   ClauseCardState,
@@ -12,8 +16,16 @@ import type {
   AdjustmentRequestStatus,
 } from "./types";
 
-/** 배지 톤 — Tailwind 유틸 클래스 묶음. red 계열 없음. */
-export type BadgeTone = "gray" | "amberSoft" | "amberMid" | "amberStrong";
+/** 배지 톤 — Tailwind 유틸 클래스 묶음. red 계열 없음.
+    앞의 넷은 윤곽(미확정), 뒤의 셋은 채움(확정·내 차례). */
+export type BadgeTone =
+  | "unseen"
+  | "waiting"
+  | "pick"
+  | "pickStrong"
+  | "neutral"
+  | "active"
+  | "done";
 
 export interface BadgeStyle {
   /** 배지 자체(text/bg) */
@@ -22,26 +34,45 @@ export interface BadgeStyle {
   card: string;
 }
 
+/* chip은 전부 1px 테두리를 가진다. 채움 배지의 테두리를 transparent로 두어야
+   한 줄에 섞여 놓였을 때 높이가 어긋나지 않는다. */
 const TONES: Record<BadgeTone, BadgeStyle> = {
-  // 미검토·발송대기·거절·원안유지 — 중립 회색
-  gray: {
-    chip: "text-gray700 bg-gray300",
-    card: "bg-gray100 border-gray500",
+  // 미검토 — 점선. 아직 시작조차 안 했다는 뜻.
+  unseen: {
+    chip: "border border-dashed border-neutral300 text-neutral500",
+    card: "border-dashed bg-white border-neutral300",
   },
-  // 원안 수용 선택 — 옅은 앰버
-  amberSoft: {
-    chip: "text-amber700 bg-amber100",
-    card: "bg-amber50 border-amber200",
+  // 발송됨·대기 — 실선 윤곽. 공이 상대에게 있음.
+  waiting: {
+    chip: "border border-neutral300 text-neutral700",
+    card: "bg-white border-neutral400",
   },
-  // 절충안·역제안 도착 — 중간 앰버
-  amberMid: {
-    chip: "text-amber800 bg-amber200",
-    card: "bg-amber100 border-amber400",
+  // 원안 수용·절충안 선택 — 내 선택이지만 아직 보내지 않음.
+  pick: {
+    chip: "border border-brand400 bg-brand600/5 text-brand700",
+    card: "bg-brand50 border-brand300",
   },
-  // 요청안·합의 — 진한 앰버(채워짐)
-  amberStrong: {
-    chip: "text-white bg-amber700",
-    card: "bg-amber200 border-amber600",
+  // 요청안 선택 — 가장 강한 요청. 테두리를 겹쳐 굵게 보이게 한다.
+  pickStrong: {
+    chip: "border border-brand600 bg-brand600/10 text-brand800 ring-1 ring-inset ring-brand600",
+    card: "bg-brand50 border-brand600",
+  },
+  // 진행 중·원안 유지 — 확정이지만 내가 움직인 결과는 아님.
+  neutral: {
+    chip: "border border-transparent bg-neutral200 text-neutral700",
+    card: "bg-neutral100 border-neutral400",
+  },
+  // 역제안 도착·만료 임박 — 내가 볼 차례. 목록에서 눈에 띄어야 함.
+  // brand600은 흰 글자 대비가 4.45:1로 AA에 못 미쳐 brand700을 쓴다.
+  active: {
+    chip: "border border-transparent bg-brand700 text-white",
+    card: "bg-brand100 border-brand600",
+  },
+  // 합의 — 최종 확정. 가장 짙은 채움.
+  // brand800은 로고 색이라 워드마크 전용으로 두고, 배지는 brand900을 쓴다.
+  done: {
+    chip: "border border-transparent bg-brand900 text-white",
+    card: "bg-brand200 border-brand800",
   },
 };
 
@@ -54,14 +85,14 @@ export const CLAUSE_STATE_META: Record<
   ClauseCardState,
   { label: string; tone: BadgeTone; icon?: string }
 > = {
-  UNREVIEWED: { label: "미검토", tone: "gray" },
-  ACCEPT_SELECTED: { label: "원안 수용 선택", tone: "amberSoft" },
-  COMPROMISE_SELECTED: { label: "절충안 선택", tone: "amberMid" },
-  REQUEST_SELECTED: { label: "요청안 선택", tone: "amberStrong" },
-  SENT_WAITING: { label: "발송됨 · 대기", tone: "gray" },
-  AGREED: { label: "합의", tone: "amberStrong", icon: "✓" },
-  COUNTER_RECEIVED: { label: "역제안 도착", tone: "amberMid", icon: "↩" },
-  KEPT_ORIGINAL: { label: "원안 유지", tone: "gray" },
+  UNREVIEWED: { label: "미검토", tone: "unseen" },
+  ACCEPT_SELECTED: { label: "원안 수용 선택", tone: "pick" },
+  COMPROMISE_SELECTED: { label: "절충안 선택", tone: "pick" },
+  REQUEST_SELECTED: { label: "요청안 선택", tone: "pickStrong" },
+  SENT_WAITING: { label: "발송됨 · 대기", tone: "waiting" },
+  AGREED: { label: "합의", tone: "done", icon: "✓" },
+  COUNTER_RECEIVED: { label: "역제안 도착", tone: "active", icon: "↩" },
+  KEPT_ORIGINAL: { label: "원안 유지", tone: "neutral" },
 };
 
 /* ------------------------- 확인 신호 유형 (§6.4) ------------------------- */

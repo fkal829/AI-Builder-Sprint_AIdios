@@ -24,18 +24,18 @@ export function EmptyState({
       {big && (
         <div
           className={`rounded-lg px-4 py-3.5 text-center text-3xl font-black ${
-            bigEmphasis ? "bg-amber50 text-amber700" : "bg-paper text-gray700"
+            bigEmphasis ? "bg-brand50 text-brand700" : "bg-subtle text-neutral700"
           }`}
         >
           {big}
         </div>
       )}
       {code && (
-        <div className="flex h-24 items-center justify-center rounded-lg border-2 border-dashed border-gray300 text-[11px] text-gray500">
+        <div className="flex h-24 items-center justify-center rounded-lg border-2 border-dashed border-neutral300 text-[11px] text-neutral500">
           {code}
         </div>
       )}
-      <p className="text-[13px] leading-relaxed text-gray700">{body}</p>
+      <p className="text-[13px] leading-relaxed text-neutral700">{body}</p>
       {actions && <div className="flex flex-col gap-2">{actions}</div>}
     </div>
   );

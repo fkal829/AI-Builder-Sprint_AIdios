@@ -63,23 +63,23 @@ export default function AgencyEvidencePage() {
             <h1 className="text-base font-black text-ink">
               제출 링크가 만료됐어요
             </h1>
-            <p className="mt-2 text-[13px] leading-relaxed text-gray700">
+            <p className="mt-2 text-[13px] leading-relaxed text-neutral700">
               계약 요청자에게 새 증빙 제출 링크를 요청해 주세요.
             </p>
           </>
         ) : submitted ? (
           <>
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber50 text-2xl text-amber700">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand50 text-2xl text-brand700">
               ✓
             </div>
             <h1 className="text-base font-black text-ink">
               증빙을 제출했어요
             </h1>
-            <p className="mt-2 text-[13px] leading-relaxed text-gray700">
+            <p className="mt-2 text-[13px] leading-relaxed text-neutral700">
               사장님이 승인하면 &lsquo;지급 조건 충족&rsquo;으로 표시돼요. 실제
               송금·결제는 이 화면에서 진행되지 않습니다.
             </p>
-            <div className="mt-3 break-all rounded-lg bg-paper px-3 py-2 text-[12px] text-gray700">
+            <div className="mt-3 break-all rounded-lg bg-subtle px-3 py-2 text-[12px] text-neutral700">
               {url}
             </div>
           </>
@@ -88,7 +88,7 @@ export default function AgencyEvidencePage() {
             <h1 className="text-base font-black text-ink">
               산출물 증빙을 등록해주세요
             </h1>
-            <p className="mt-1 text-[12px] text-gray500">
+            <p className="mt-1 text-[12px] text-neutral500">
               요청받은 대표 산출물의 증빙 URL을 등록해 주세요.
             </p>
             <input
@@ -101,7 +101,7 @@ export default function AgencyEvidencePage() {
                 setSubmitError(null);
               }}
               placeholder="증빙 URL 입력 (예: https://example.com/result)"
-              className="mt-3 w-full rounded-lg border border-gray300 px-3 py-2.5 text-[13px] outline-none focus:border-ink"
+              className="mt-3 w-full rounded-lg border border-neutral300 px-3 py-2.5 text-[13px] outline-none focus:border-ink"
             />
             <button
               type="submit"
@@ -111,7 +111,7 @@ export default function AgencyEvidencePage() {
               {submitting ? "제출 중…" : "제출하기"}
             </button>
             {submitError && (
-              <p className="mt-3 text-[12px] text-amber800" role="alert">
+              <p className="mt-3 text-[12px] text-brand800" role="alert">
                 {submitError}
               </p>
             )}

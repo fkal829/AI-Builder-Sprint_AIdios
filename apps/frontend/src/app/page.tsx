@@ -7,11 +7,11 @@ export default function Home() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
       <header className="border-b-2 border-ink pb-6">
-        <div className="text-[13px] font-medium text-gray500">
+        <div className="text-[13px] font-medium text-neutral500">
           부산 관광상권 소상공인용 AI 광고대행 계약 CLM
         </div>
         <h1 className="mt-1 text-3xl font-black text-ink">단디계약</h1>
-        <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-gray700">
+        <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-neutral700">
           읽지 못한 계약을 읽어주고, 하지 못한 말을 대신해준다. 내가 이해한 조건과
           실제 계약서를 AI가 비교하고, 조정 요청을 대신 작성해 전자서명으로
           확정합니다.
@@ -51,7 +51,7 @@ export default function Home() {
         />
       </div>
 
-      <p className="mt-10 text-[12px] leading-relaxed text-gray500">
+      <p className="mt-10 text-[12px] leading-relaxed text-neutral500">
         모든 데이터는 목업입니다(가상 데이터). 외부 API(Upstage·Solar·모두싸인)는
         Adapter 뒤에 두어 이후 실제 연동으로 전환합니다. &lsquo;지급 조건 충족&rsquo;은
         실제 송금이 아닙니다.
@@ -80,15 +80,15 @@ function LaunchCard({
       href={href}
       className={`group block rounded-2xl border-2 p-5 transition hover:-translate-y-0.5 hover:shadow-[0_10px_30px_rgba(42,42,42,0.1)] ${
         primary
-          ? "border-ink bg-amber50"
+          ? "border-ink bg-brand50"
           : subtle
-            ? "border-gray300 bg-white"
+            ? "border-neutral300 bg-white"
             : "border-ink bg-white"
       }`}
     >
       <span
         className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-bold ${
-          primary ? "bg-amber700 text-white" : "bg-gray100 text-gray700"
+          primary ? "bg-brand700 text-white" : "bg-neutral100 text-neutral700"
         }`}
       >
         {badge}
@@ -99,7 +99,7 @@ function LaunchCard({
           →
         </span>
       </h2>
-      <p className="mt-1.5 text-[13px] leading-relaxed text-gray500">{desc}</p>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-neutral500">{desc}</p>
     </Link>
   );
 }

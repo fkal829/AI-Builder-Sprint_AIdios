@@ -57,10 +57,10 @@ export default function ObligationsPage() {
       }
     >
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
       {state.status === "error" && (
-        <p className="py-10 text-center text-sm font-bold text-amber800">⚠ {state.error}</p>
+        <p className="py-10 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>
       )}
       {state.status === "ready" && !obligation && (
         <EmptyState
@@ -71,12 +71,12 @@ export default function ObligationsPage() {
       {obligation && (
         <div className="flex flex-col gap-4">
           <h2 className="text-base font-black text-ink">{obligation.title}</h2>
-          <div className="rounded-lg bg-paper p-3.5">
-            <div className="text-[11px] text-gray500">기한 {obligation.dueDate}</div>
-            <p className="mt-2 text-[12px] leading-relaxed text-gray700">
+          <div className="rounded-lg bg-subtle p-3.5">
+            <div className="text-[11px] text-neutral500">기한 {obligation.dueDate}</div>
+            <p className="mt-2 text-[12px] leading-relaxed text-neutral700">
               계약서 {obligation.sourcePage}쪽: “{obligation.sourceText}”
             </p>
-            <div className="mt-1 text-[10px] text-gray500">
+            <div className="mt-1 text-[10px] text-neutral500">
               원문 근거 확신도 {Math.round(obligation.confidence * 100)}%
             </div>
             {obligation.evidenceUrl && (
@@ -84,7 +84,7 @@ export default function ObligationsPage() {
                 href={obligation.evidenceUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-2 inline-block text-[11px] text-amber700 underline underline-offset-2"
+                className="mt-2 inline-block text-[11px] text-brand700 underline underline-offset-2"
               >
                 제출된 증빙 URL 보기 →
               </a>
@@ -92,17 +92,17 @@ export default function ObligationsPage() {
           </div>
 
           {obligation.status === "PENDING" && (
-            <div className="rounded-xl border border-gray200 bg-white p-4">
+            <div className="rounded-xl border border-neutral200 bg-white p-4">
               <h3 className="text-sm font-black text-ink">대행사 증빙 제출 링크</h3>
-              <p className="mt-1 text-[11px] leading-relaxed text-gray500">
+              <p className="mt-1 text-[11px] leading-relaxed text-neutral500">
                 링크를 만든 뒤 복사해 기존 이메일이나 메신저로 직접 전달해주세요.
               </p>
               {publicLink ? (
-                <div className="mt-3 rounded-lg bg-paper p-3">
-                  <a href={publicLink.url} className="break-all text-xs text-amber700 underline">
+                <div className="mt-3 rounded-lg bg-subtle p-3">
+                  <a href={publicLink.url} className="break-all text-xs text-brand700 underline">
                     {publicLink.url}
                   </a>
-                  <p className="mt-1 text-[10px] text-gray500">
+                  <p className="mt-1 text-[10px] text-neutral500">
                     {publicLink.expiresAt.slice(0, 16).replace("T", " ")}까지 유효
                   </p>
                 </div>
@@ -123,7 +123,7 @@ export default function ObligationsPage() {
                 type="button"
                 disabled={working}
                 onClick={() => review("DISPUTED")}
-                className="h-11 rounded-lg border border-gray300 bg-white text-[13px] font-bold text-gray500 disabled:opacity-40"
+                className="h-11 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral500 disabled:opacity-40"
               >
                 이의 있어요
               </button>
@@ -131,21 +131,21 @@ export default function ObligationsPage() {
           )}
 
           {obligation.status === "APPROVED" && (
-            <div className="rounded-lg border-2 border-amber700 bg-amber50 px-4 py-3 text-center">
-              <div className="text-sm font-black text-amber700">지급 조건 충족으로 표시됨</div>
+            <div className="rounded-lg border-2 border-brand700 bg-brand50 px-4 py-3 text-center">
+              <div className="text-sm font-black text-brand700">지급 조건 충족으로 표시됨</div>
             </div>
           )}
           {obligation.status === "DISPUTED" && (
-            <div className="rounded-lg border border-gray500 bg-gray100 px-4 py-3 text-center">
-              <div className="text-sm font-bold text-gray700">이의 있음으로 기록됐어요</div>
+            <div className="rounded-lg border border-neutral500 bg-neutral100 px-4 py-3 text-center">
+              <div className="text-sm font-bold text-neutral700">이의 있음으로 기록됐어요</div>
             </div>
           )}
 
           <a
             href={`/contracts/${id}/performance`}
-            className="flex items-center justify-between rounded-lg border border-gray300 bg-white px-3.5 py-3 text-[13px] font-bold text-ink hover:bg-paper"
+            className="flex items-center justify-between rounded-lg border border-neutral300 bg-white px-3.5 py-3 text-[13px] font-bold text-ink hover:bg-subtle"
           >
-            광고효과 관리 보기 <span className="text-gray500">›</span>
+            광고효과 관리 보기 <span className="text-neutral500">›</span>
           </a>
 
           {error && <p className="text-xs font-bold text-red-700">{error}</p>}

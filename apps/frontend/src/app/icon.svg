@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Dandi">
+  <defs><clipPath id="dandiIconClip"><circle cx="199" cy="256" r="80"></circle></clipPath></defs>
+  <rect width="512" height="512" rx="120" fill="#ffffff"></rect>
+  <circle cx="313" cy="256" r="80" fill="#4d9bdb"></circle>
+  <circle cx="199" cy="256" r="80" fill="#10365a"></circle>
+  <g clip-path="url(#dandiIconClip)"><circle cx="313" cy="256" r="80" fill="#9ed8f7"></circle></g>
+</svg>

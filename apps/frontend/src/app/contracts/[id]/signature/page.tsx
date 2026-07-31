@@ -106,14 +106,14 @@ export default function SignaturePage() {
         )}
 
         {editorUrl && (
-          <div className="rounded-xl border border-amber400 bg-amber50 p-4">
+          <div className="rounded-xl border border-brand400 bg-brand50 p-4">
             <h2 className="text-sm font-black text-ink">모두싸인 초안을 만들었습니다</h2>
-            <p className="mt-1.5 text-[12px] leading-relaxed text-gray700">
+            <p className="mt-1.5 text-[12px] leading-relaxed text-neutral700">
               아직 상대방에게 발송되지 않았습니다. 편집기에서 수정 계약서와 서명 위치를
               다시 확인한 뒤 직접 발송해주세요.
             </p>
             {isUsingMock ? (
-              <p className="mt-3 text-xs font-bold text-amber800">
+              <p className="mt-3 text-xs font-bold text-brand800">
                 목업 모드에서는 실제 모두싸인 편집기를 열지 않습니다.
               </p>
             ) : (
@@ -130,10 +130,10 @@ export default function SignaturePage() {
         {error && <p className="text-xs font-bold text-red-700">{error}</p>}
 
         {state.status === "loading" && (
-          <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+          <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
         )}
         {state.status === "error" && (
-          <p className="py-10 text-center text-sm font-bold text-amber800">⚠ {state.error}</p>
+          <p className="py-10 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>
         )}
 
         {state.status === "ready" && (
@@ -141,12 +141,12 @@ export default function SignaturePage() {
             {state.data.signature ? (
               <SignatureStatus sig={state.data.signature} />
             ) : (
-              <div className="rounded-xl border border-gray200 bg-white p-4 text-sm text-gray500">
+              <div className="rounded-xl border border-neutral200 bg-white p-4 text-sm text-neutral500">
                 아직 생성된 모두싸인 초안이 없습니다.
               </div>
             )}
             <div>
-              <h3 className="mb-3 text-[13px] font-bold text-gray700">감사 타임라인</h3>
+              <h3 className="mb-3 text-[13px] font-bold text-neutral700">감사 타임라인</h3>
               <Timeline events={state.data.timeline} />
             </div>
           </>
@@ -177,15 +177,15 @@ function SignatureDraftForm({
   ];
 
   return (
-    <section className="rounded-xl border border-gray200 bg-white p-4">
+    <section className="rounded-xl border border-neutral200 bg-white p-4">
       <h2 className="text-sm font-black text-ink">수정 계약서로 서명 준비</h2>
-      <p className="mt-1.5 text-[12px] leading-relaxed text-gray500">
+      <p className="mt-1.5 text-[12px] leading-relaxed text-neutral500">
         방금 확인한 수정 PDF 원본이 그대로 모두싸인 초안에 들어갑니다. 연락처는 초안 생성
         요청에만 사용하며 브라우저에 저장하지 않습니다.
       </p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {fields.map((field) => (
-          <label key={field.key} className="flex flex-col gap-1.5 text-xs font-bold text-gray700">
+          <label key={field.key} className="flex flex-col gap-1.5 text-xs font-bold text-neutral700">
             {field.label}
             <input
               type={field.type}
@@ -193,7 +193,7 @@ function SignatureDraftForm({
               onChange={(event) => onChange({ ...signers, [field.key]: event.target.value })}
               autoComplete="off"
               maxLength={field.type === "email" ? 254 : 30}
-              className="h-11 rounded-lg border border-gray300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
+              className="h-11 rounded-lg border border-neutral300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
             />
           </label>
         ))}
@@ -206,7 +206,7 @@ function SignatureDraftForm({
       >
         {creating ? "초안 만드는 중…" : "수정 계약서로 모두싸인 초안 만들기"}
       </button>
-      <p className="mt-2 text-[10px] leading-relaxed text-gray500">
+      <p className="mt-2 text-[10px] leading-relaxed text-neutral500">
         이 버튼은 서명 요청을 자동 발송하지 않습니다.
       </p>
     </section>
@@ -219,28 +219,28 @@ function SignatureStatus({ sig }: { sig: LiveSignature }) {
   const labels = ["처리 중", "서명 진행 중", "서명 완료"];
 
   return (
-    <div className="rounded-xl border border-gray200 bg-white p-4">
+    <div className="rounded-xl border border-neutral200 bg-white p-4">
       <div className="text-sm font-black text-ink">{MODUSIGN_STATUS_LABEL[externalStatus]}</div>
       <div className="mt-3 flex gap-1.5">
         {[0, 1, 2].map((index) => (
           <div
             key={index}
             className={`h-1.5 flex-1 rounded-full ${
-              index < step ? "bg-amber700" : index === step ? "bg-amber400" : "bg-gray200"
+              index < step ? "bg-brand700" : index === step ? "bg-brand400" : "bg-neutral200"
             }`}
           />
         ))}
       </div>
-      <div className="mt-1.5 flex justify-between text-[10px] text-gray500">
+      <div className="mt-1.5 flex justify-between text-[10px] text-neutral500">
         {labels.map((label, index) => (
-          <span key={label} className={index === step ? "font-bold text-amber700" : ""}>
+          <span key={label} className={index === step ? "font-bold text-brand700" : ""}>
             {label}
           </span>
         ))}
       </div>
-      <div className="mt-3 text-xs text-gray700">내부 처리 상태: {signatureStatusLabel(sig.status)}</div>
+      <div className="mt-3 text-xs text-neutral700">내부 처리 상태: {signatureStatusLabel(sig.status)}</div>
       {sig.documentId && (
-        <div className="mt-1 text-[10px] text-gray500">모두싸인 문서 ID: {sig.documentId}</div>
+        <div className="mt-1 text-[10px] text-neutral500">모두싸인 문서 ID: {sig.documentId}</div>
       )}
     </div>
   );

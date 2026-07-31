@@ -10,7 +10,7 @@ export function SourceLink({ source }: { source: SourceRef | null }) {
 
   if (!source) {
     return (
-      <p className="text-[11px] text-gray500">
+      <p className="text-[11px] text-neutral500">
         계약서에서 근거를 찾지 못했어요 — 확정된 내용으로 보지 마세요.
       </p>
     );
@@ -21,14 +21,14 @@ export function SourceLink({ source }: { source: SourceRef | null }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="text-[11px] font-medium text-amber700 underline underline-offset-2"
+        className="text-[11px] font-medium text-brand700 underline underline-offset-2"
       >
         원문 위치 보기 · {source.page}페이지 {open ? "▲" : "→"}
       </button>
       {open && (
-        <blockquote className="mt-1.5 rounded-md border-l-2 border-amber400 bg-white px-3 py-2 text-[13px] leading-relaxed text-gray700">
+        <blockquote className="mt-1.5 rounded-md border-l-2 border-brand400 bg-white px-3 py-2 text-[13px] leading-relaxed text-neutral700">
           “{source.text}”
-          <span className="mt-1 block text-[10px] text-gray500">
+          <span className="mt-1 block text-[10px] text-neutral500">
             계약서 {source.page}페이지
           </span>
         </blockquote>

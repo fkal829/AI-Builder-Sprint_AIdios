@@ -1,9 +1,12 @@
+"""Repository boundaries shared by the P2-B and P2-C performance work."""
+
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
 from app.core.enums import ContractStatus, PerformanceReportStatus
 from app.repositories.documents import DocumentRecord
+from app.schemas.performance import PerformanceReport, PerformanceReportRevision
 
 
 @dataclass(frozen=True)
@@ -69,3 +72,19 @@ class PerformanceAccessRepository(Protocol):
         contract_id: UUID,
         period: str,
     ) -> bool: ...
+
+
+class PerformanceReportRepository(Protocol):
+    """Append-only revision boundary owned by P2-C."""
+
+    async def get_report(self, *, report_id: UUID) -> PerformanceReport | None: ...
+
+    async def append_revision(
+        self,
+        *,
+        report_id: UUID,
+        revision: PerformanceReportRevision,
+    ) -> PerformanceReport:
+        """Append a validated revision and make it current without changing history."""
+
+        ...

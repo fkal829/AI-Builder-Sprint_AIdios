@@ -19,8 +19,8 @@ install_uvicorn_access_log_filter()
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.2.0",
-    description="P0 프런트엔드와 FastAPI가 공유하는 HTTP 계약",
+    version="0.3.0",
+    description="P0 활성 API와 P2 계획 API를 프런트엔드와 FastAPI가 공유하는 HTTP 계약",
     docs_url="/docs" if settings.app_env != "production" else None,
     generate_unique_id_function=canonical_operation_id,
 )

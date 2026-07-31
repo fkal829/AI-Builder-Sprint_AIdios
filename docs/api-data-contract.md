@@ -1,19 +1,24 @@
-# 단디계약 P0 API·데이터 계약
+# 단디계약 P0 및 6.14 P2-0 API·데이터 계약
 
 <!-- markdownlint-configure-file {"MD013": false} -->
 
 이 문서는 백엔드를 구현하는 B·C와 배포·E2E를 검증하는 D가 공유하는 데이터 경계와
-불변 규칙을 정리한다. 제품 범위와 사용자 흐름의 최상위 기준은 저장소 상위의
-최상위 제품 기준은 `docs/기획안.md`다. HTTP endpoint와 요청·응답 스키마의
+불변 규칙을 정리한다. 1~13절의 P0 제품 범위와 사용자 흐름은 `docs/기획안.md`,
+14절의 광고효과 P2-0 범위는 `docs/단디계약최종기획안.md` 6.14를 제품 기준으로 삼는다.
+HTTP endpoint와 요청·응답 스키마의
 기준은 `packages/contracts/openapi/openapi.yaml`이다. 모든 endpoint의 Base path는
 `/api/v1`이다. 이 문서의 파일 경로 표기는 모두 저장소 루트 기준이다.
+
+1~13절은 현재 P0 구현 계약이고 14절은 기획안 6.14의 P2-0 확정 설계다. 14절의
+runtime과 migration은 아직 구현되지 않았으며, 설계가 문서에 반영됐다는 사실을 구현
+완료로 해석하지 않는다.
 
 기획안의 제품 기능과 P0 범위는 유지하되, 구현 담당만 최신 팀 결정에 따라 D의 백엔드
 항목을 B·C로 재배정한다.
 
-문서와 코드가 충돌하면 기획안의 P0 범위를 먼저 적용하고 임의로 기능을 넓히지 않는다.
-그 범위 안에서 OpenAPI, 이 문서, `docs/api-명세서.md`, Pydantic 스키마,
-DB 마이그레이션과 테스트를 같은 변경 단위에서 함께 수정한다.
+문서와 코드가 충돌하면 변경 범위에 해당하는 위 제품 기준을 먼저 적용하고 임의로 기능을
+넓히지 않는다. 그 범위 안에서 OpenAPI, 이 문서, `docs/api-명세서.md`, Pydantic
+스키마, DB 마이그레이션과 테스트를 같은 변경 단위에서 함께 수정한다.
 
 ## 1. 명명과 기본 타입
 
@@ -655,3 +660,228 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 - [ ] 단위·통합·API 테스트
 - [ ] README와 `.env.example`
 - [ ] AI 변경이면 fixture, 프롬프트 버전, `AI_USAGE.md`
+
+## 14. 6.14 광고효과 P2-0 확정 데이터 계약
+
+이 절은 `docs/api-명세서.md` 16~17절의 확정값을 영속성·보안·상태 관점에서
+고정한다. 광고효과 기능은 P2이며 현재 백엔드 runtime과 migration에는 구현되지 않았다.
+기존 P0 API, 전역 `/dashboard` 응답과 계약 상태 머신을 이 설계만으로 변경하지 않는다.
+
+### 14.1 소유권·업무 범위
+
+- 광고효과 API 4개는 모두 소상공인 Bearer 인증을 사용하며 공개 토큰 API를 만들지
+  않는다. `contract_id`, `report_id`, `source_document_id`와 모든 revision·flag의
+  계약 소유권을 서버 인증 컨텍스트로 검증한다.
+- 쓰기는 Contract가 `SIGNED`, `IN_PROGRESS`, `RENEWAL_DUE`, `COMPLETED`일 때만
+  허용한다. 리포트 업로드·추출·확정·정정은 Contract 상태를 변경하지 않는다.
+- P2 광고효과 대시보드는 계약별 `GET /contracts/{contract_id}/performance`다. 기존
+  전역 `/dashboard` 응답에는 성과 지표를 추가하지 않는다.
+- AI `extracted_payload`는 소유자 확인 전 초안이다. 각 월의 최신 확정 revision만
+  집계·계약 대조·재계약 근거로 사용한다.
+- 서버는 성과·위법성·계약 위반·지급 여부를 판정하지 않고 문의 문안을 발송하지 않는다.
+  전환율·CPA·ROAS, 매출 기여도, 플랫폼 API 수집, 리포트 위·변조 결과는 저장하지 않는다.
+
+### 14.2 원본 Document·월별 고유성·업로드 원자성
+
+`PerformanceReport.source_document_id`는 같은 계약의 기존 `Document.id`를 참조하며
+해당 문서의 type은 `PERFORMANCE_REPORT`다. 이 type은 성과 리포트 전용 업로드 API에서만
+생성하고 기존 `/documents` 요청 enum에는 노출하지 않는다. 원본 열람은 기존 소유자 전용
+문서 접근 API와 `Cache-Control: no-store` 규칙을 재사용한다.
+
+`PerformanceReport`는 최소한 다음 값을 보존한다.
+
+- `id`, `contract_id`, `period`
+- `source_document_id`, `status`, `extracted_payload`
+- `current_revision_id`, `revision_count`
+- `extraction_attempt_id`, `extraction_started_at`
+- `created_at`, `updated_at`
+
+DB는 `(contract_id, period)`와 `source_document_id`를 각각 고유하게 한다. `period`는
+`Asia/Seoul` 달력월의 `YYYY-MM`이며 계약·월별 논리 리포트는 한 건이다. 채널별 여러
+리포트와 `channel_key`는 P2 범위에 포함하지 않는다. 다른 요청으로 같은 월을 다시
+생성하면 `409 REPORT_PERIOD_ALREADY_EXISTS`다. 정정은 두 번째 report가 아니라 같은
+report의 새 revision으로 남긴다.
+
+multipart 멱등 fingerprint는 정규화한 `period`, 파일 바이트 SHA-256, 검증한 MIME과
+파일 크기로 만든다. 같은 키와 같은 fingerprint는 최초 응답을 재생하고 같은 키에 다른
+fingerprint를 사용하면 `409 IDEMPOTENCY_CONFLICT`다.
+
+공통 `IdempotencyOperation`은 다음 세 값으로 고정한다.
+
+| 쓰기 | operation |
+| --- | --- |
+| 리포트 업로드 | `PERFORMANCE_REPORT_UPLOAD` |
+| 리포트 추출·stale 복구 | `PERFORMANCE_REPORT_EXTRACT` |
+| 최초 확정·append-only 정정 PATCH | `PERFORMANCE_REPORT_CONFIRM` |
+
+최초 확정과 정정은 같은 HTTP operation과 공통 enum을 사용하되 request fingerprint의
+`expected_revision`, 확정 payload, 사용자 이상 사유와 정정 사유가 다르면 같은 멱등
+키로 재생하지 않는다.
+
+Storage 업로드는 긴 DB 트랜잭션 밖에서 수행한다. DB RPC는 `Document` 메타데이터,
+`PerformanceReport=UPLOADED`, `PERFORMANCE_REPORT_UPLOADED` 감사 이벤트를 원자적으로
+저장한다. DB 저장 실패 시 업로드 객체를 삭제한다. 응답 유실 뒤 재시도는 서버가 미리
+만든 Document·report UUID와 멱등 예약으로 커밋 여부를 복구하며 중복 파일·행·이벤트를
+만들지 않는다. Storage 경로와 원본 파일명은 일반 응답이나 로그에 노출하지 않는다.
+
+### 14.3 추출 claim·실패·stale 복구
+
+추출은 `UPLOADED` report에서만 시작한다. 서비스는 완료된 같은 멱등 요청을 먼저 재생한
+뒤 report와 Document를 lock하고 `extraction_attempt_id`, `extraction_started_at`과
+Document의 기술 상태를 원자적으로 claim한다. 15분 미만의 활성 `PROCESSING`에는 다른
+키로 외부 AI를 다시 호출하지 않고 `409 REPORT_EXTRACTION_IN_PROGRESS`를 반환한다.
+
+15분 이상 지난 stale attempt만 소상공인의 새 `Idempotency-Key`를 사용한 명시적
+재시도로 원자 재점유한다. 이전 멱등 예약을 abandon하고
+`PERFORMANCE_REPORT_EXTRACTION_RECOVERED`를 기록한다. 현재 attempt ID와 일치하는 완료만
+상태와 payload를 저장할 수 있으며 이전 작업의 늦은 응답은 버린다. 서버는 stale 작업을
+자동 재개하거나 외부 AI를 자동 재호출하지 않는다.
+
+`Document.parse_status`는 파일 파싱 기술 상태이고 `PerformanceReport.status`는 사용자
+업무 상태다. 성공 시 Document를 `COMPLETED`, report를 `EXTRACTED`로 만들고 근거가 있는
+완전한 `extracted_payload`와 `PERFORMANCE_REPORT_EXTRACTED`를 원자 저장한다. Parse 실패는
+Document를 `FAILED`, report를 `UPLOADED`로 유지한다. Solar 매핑만 실패하면 Document의
+`COMPLETED`를 보존하고 report를 `UPLOADED`로 유지한다. P2는 Parse 결과를 별도 저장하지
+않으므로 명시적 재시도는 Document Parse부터 다시 실행한다.
+
+timeout·HTTP·Parse·AI 스키마 실패를 고정 샘플로 대체하지 않고
+`502 REPORT_EXTRACT_FAILED`를 반환한다. 추출 후보 각 필드는 `value`, `source_page`,
+`source_text`, `confidence`, `verification_status`를 가진다. 원문에서 찾지 못한
+`published_content_count`나 다른 지표를 행·URL 수로 추정하지 않고 `NOT_FOUND`로 둔다.
+
+### 14.4 확정 지표·반응률 결정 규칙
+
+확정 payload는 `additionalProperties=false`이며 다음 범위만 허용한다.
+
+| 구분 | 필드 | 규칙 |
+| --- | --- | --- |
+| 필수 | `impressions`, `likes`, `comments` | 0 이상 정수 |
+| 리포트 선택 | `reach`, `saves`, `shares` | nullable 0 이상 정수 |
+| 리포트 선택 | `follower_net_change` | nullable 정수, 음수 허용 |
+| 계약 대조 | `published_content_count` | nullable 0 이상 정수, `0`과 `null` 구분 |
+| 소유자 선택 | `inquiries`, `reservations`, `purchases` | nullable 0 이상 정수 |
+| 서버 파생 | `engagement_rate` | 클라이언트 입력 금지 |
+
+`published_content_count`는 리포트에 명시되었거나 소유자가 확인·입력한 값만 저장한다.
+AI 후보가 있더라도 소유자가 확정한 값만 비교한다. `null`이면 수량 신호를 만들지 않는다.
+
+반응률은 확정 원본 정수에서
+`(likes + comments + saves + shares) / impressions`로 계산한다. nullable `saves`와
+`shares`는 계산에서 0으로 보되 null과 명시적 0의 존재 정보는 보존한다.
+`impressions=0`이면 반응률은 `null`이다. 판정은 반올림 전 충분한 정밀도의 `Decimal`로
+수행하고 API 저장·반환용 소수 6자리 반올림값을 판정에 다시 사용하지 않는다.
+
+`ENGAGEMENT_RATE_DROP`은 다음 조건을 모두 만족할 때만 만든다.
+
+- 달력상 바로 전월과 현재 월에 각각 최신 확정 revision이 있다.
+- 두 달 모두 `impressions >= 1000`이고 이전 반응률이 0보다 크다.
+- 두 달의 `saves`·`shares` 포함 구성이 같다.
+- 절대 하락폭이 반올림 전 `1.0%p` 이상이고 상대 하락률이 `25%` 이상이다.
+
+첫 달, 전월 누락, 0 노출, 표본 미달, 이전 반응률 0, 선택 지표 구성 차이가 있으면 이
+신호를 만들지 않는다.
+
+### 14.5 append-only 확정·정정 revision
+
+`PerformanceReportRevision`은 최소한 `id`, `report_id`, `version`, `confirmed_payload`,
+`engagement_rate`, `status`, nullable `corrected_from_revision_id`, nullable
+`correction_reason`, `confirmed_at`을 보존한다. `(report_id, version)`은 고유하고 version은
+1부터 시작한다.
+
+- `EXTRACTED`에서 `expected_revision=0`, `correction_reason=null`이면 version 1을 만든다.
+- `CONFIRMED`·`FLAGGED`에서는 `expected_revision`이 현재 version과 같고 1~500자의
+  비어 있지 않은 정정 사유가 있을 때 version N+1을 만든다.
+- version 2 이상은 같은 report의 바로 전 revision을 `corrected_from_revision_id`로
+  참조한다. 기존 revision·flag·문의 문안을 UPDATE·DELETE하지 않는다.
+- 가장 최근에 확정된 월만 정정한다. 더 뒤의 확정 report가 있으면
+  `409 REPORT_CORRECTION_DEPENDENCY_EXISTS`이며 연쇄 재계산하지 않는다.
+- `expected_revision`이 다르면 `409 REPORT_REVISION_CONFLICT`이고 새 revision을 만들지
+  않는다.
+
+PATCH 서비스는 같은 멱등 요청 재생을 상태·revision 검사보다 먼저 수행한다. 새 요청은
+report 행을 `FOR UPDATE`로 lock한 뒤 상태, 현재 version과 후속 확정 월을 다시 검사한다.
+`PerformanceReportRevision`, revision별 flag·문의 snapshot, report의
+`current_revision_id`·`revision_count`·현재 표시 상태와 감사 이벤트를 한 트랜잭션에
+저장한다.
+
+`CONFIRMED`·`FLAGGED`는 과거 revision이 immutable이라는 의미에서 terminal이다. 정정은
+terminal 값을 전이하거나 덮어쓰지 않고 새 revision을 추가한다. report의 현재 projection은
+최신 revision에 따라 `CONFIRMED`와 `FLAGGED` 사이에서 바뀔 수 있다. 조회·집계·대조에는
+각 월의 최신 non-superseded revision만 한 번 포함하고 과거 revision은 감사 이력으로
+보존한다.
+
+공통 코드에는 `PerformanceReportStatus`와 별도 계획값
+`PerformanceStateEntityType.PERFORMANCE_REPORT`를 선언하지만 P2 runtime·migration
+전에는 기존 `StateEntityType`과 `packages/contracts/state-machines.json`에 report 전이를
+병합하지 않는다. 현재 state transition RPC가 지원하지 않는 값을 실행 가능 enum처럼
+노출하지 않기 위함이며, 후속 migration에서 revision의 terminal 상태와 report 현재
+projection 갱신을 분리한 저장 규칙을 구현할 때 함께 추가한다.
+
+### 14.6 revision별 flag·계약 근거·문의 snapshot
+
+`PerformanceFlag`는 report가 아니라 `report_revision_id`에 속하며 flag type은 다음 세
+값만 허용한다.
+
+- `DELIVERABLE_COUNT_SHORTFALL`
+- `ENGAGEMENT_RATE_DROP`
+- `OWNER_REPORTED_ISSUE`
+
+수량 신호는 계약 원문의 `CONTENT_QUANTITY`와 월 단위 `POSTING_FREQUENCY`가 모두
+`source_type=CONTRACT_DOCUMENT`, `verification_status=VERIFIED`이고 페이지·문장 근거가
+있으며, `published_content_count < expected_count`일 때만 만든다. 실제 게시 수가 같거나
+많으면 신호를 만들지 않는다.
+
+별도의 가상 Clause를 만들지 않는다. DB의
+`PerformanceFlagBasisTerm(flag_id, extracted_term_id)`이 같은 계약의 검증된
+`ExtractedTerm.id`를 연결하고 공개 응답은 중복 없는 `basis_extracted_term_ids`를
+반환한다. flag에는 문서 ID·페이지·문장·confidence·기대 수량·단위의 immutable basis
+snapshot도 보존한다. 사용자 이상 기록과 반응률 하락은 적절한 계약 원문 근거가 없으면
+빈 근거 목록을 허용한다. 반응률 하락은 바로 전월의
+`comparison_report_revision_id`를 보존한다.
+
+문의 문안은 Solar가 아니라 `performance-inquiry-copy-v1` 결정적 템플릿으로 확정·정정
+시 생성한다. `PerformanceInquiryDraft`는 고유한 `flag_id`, `text`, `template_version`,
+`created_at`을 revision별 snapshot으로 보존한다. 조회 시 다시 생성하거나 AI를 호출하지
+않고 저장된 문안만 반환한다. 외부 발송은 하지 않는다.
+
+### 14.7 감사·보안·무부작용 조회
+
+계획한 P2 감사 이벤트는 다음과 같다.
+
+```text
+PERFORMANCE_REPORT_UPLOADED, PERFORMANCE_REPORT_EXTRACTED,
+PERFORMANCE_REPORT_CONFIRMED, PERFORMANCE_REPORT_FLAGGED,
+PERFORMANCE_REPORT_CORRECTED, PERFORMANCE_REPORT_EXTRACTION_RECOVERED
+```
+
+현재 DB `audit_events.event_type` CHECK는 P0 값만 허용하므로 위 6개는 공통 코드와
+OpenAPI의 별도 `PerformanceAuditEventType`에 계획값으로 둔다. 후속 P2 migration에서
+DB CHECK를 확장할 때 기존 `AuditEventType`에 병합하며, 그 전에는 runtime이 이 값을
+저장하지 않는다.
+
+업로드는 Document·report·감사 이벤트, 추출은 현재 attempt의 payload·상태·감사 이벤트,
+확정·정정은 revision·flag·문의 snapshot·현재 projection·감사 이벤트를 각각 원자적으로
+저장한다. 멱등 재생은 revision·flag·문안·감사 이벤트를 중복 생성하지 않는다.
+
+원본 리포트, 전체 OCR 텍스트, AI 입출력, 확정 지표, 정정 사유, 사용자 이상 사유와 문의
+문안을 로그에 남기지 않는다. Storage 경로·서명 URL·개인 연락처에 적용하던 기존 마스킹과
+private 접근 규칙을 그대로 적용한다. Upstage·Solar는 추출에서만 Adapter의 `mock`·`live`
+모드를 사용하며 일반 테스트는 외부 네트워크를 호출하지 않는다.
+
+GET은 상태·revision·flag·감사 이벤트를 변경하지 않고 AI나 문의 문안 생성기를 실행하지
+않는다. 확정되지 않은 `UPLOADED`·`EXTRACTED` payload는 확인 화면에서만 보일 수 있고
+집계·계약 대조·재계약 근거에는 사용하지 않는다.
+
+### 14.8 구현 상태
+
+이 절은 P2-0 공개·영속 계약을 확정한 문서 변경이다. 현재 FastAPI endpoint, service,
+repository와 Supabase migration은 구현되지 않았다. 구현 전 OpenAPI·Pydantic·공통 enum과
+오류를 같은 값으로 맞추고, 구현 뒤 다음을 검증하기 전 P2 완료로 표시하지 않는다.
+
+- 계약·월·source Document 고유성, 소유권과 private 접근
+- 업로드 응답 유실·롤백과 추출 claim·15분 stale 복구
+- 0/null·첫 달·전월 누락·999/1000 노출·1.0%p·25% 경계
+- 수량 부족만 flag하고 같거나 초과한 게시 수에는 flag하지 않음
+- 최신 월 append-only 정정, revision conflict와 후속 월 dependency 거부
+- 과거 revision·flag·문의 snapshot 불변성과 최신 revision 단일 집계
+- GET 무부작용·문안 미발송·일반 테스트 무네트워크

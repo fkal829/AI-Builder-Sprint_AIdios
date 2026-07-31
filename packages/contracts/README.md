@@ -4,7 +4,7 @@
 
 - `schemas/`: AI 구조화 결과와 외부 공개 payload의 JSON Schema
 - `state-machines.json`: 내부 enum과 허용 상태 전환
-- `openapi/`: 합의된 P0 OpenAPI 명세와 생성된 TypeScript 타입의 출력 위치
+- `openapi/`: 구현된 P0와 `planned` P2를 구분한 OpenAPI 명세 및 생성 TypeScript 타입 출력 위치
 
 Python이나 TypeScript 런타임 비즈니스 로직은 두지 않습니다. 스키마를 변경하면 API 테스트와 프런트 타입을 같은 변경에서 갱신합니다.
 

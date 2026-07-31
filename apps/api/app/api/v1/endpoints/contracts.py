@@ -53,7 +53,12 @@ from app.schemas.contracts import (
     RenewalDecision,
     RenewalDecisionRequest,
 )
-from app.schemas.documents import Document, DocumentAccess, DocumentType
+from app.schemas.documents import (
+    ContractDocumentUploadType,
+    Document,
+    DocumentAccess,
+    DocumentType,
+)
 from app.schemas.obligations import (
     EvidenceReviewRequest,
     Obligation,
@@ -619,7 +624,7 @@ async def upload_contract_document(
     request: Request,
     contract_id: UUID,
     file: Annotated[UploadFile, File()],
-    document_type: Annotated[DocumentType, Form(alias="type")],
+    document_type: Annotated[ContractDocumentUploadType, Form(alias="type")],
     owner_id: Annotated[UUID, Depends(get_current_owner_id)],
     service: Annotated[
         DocumentUploadService,
@@ -638,7 +643,7 @@ async def upload_contract_document(
         document = await service.upload(
             owner_id=owner_id,
             contract_id=contract_id,
-            document_type=document_type,
+            document_type=DocumentType(document_type),
             declared_content_type=file.content_type,
             content=content,
         )

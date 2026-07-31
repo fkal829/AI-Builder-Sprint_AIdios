@@ -3,6 +3,7 @@
    데스크탑·모바일 양쪽 지원(반응형 중앙 카드). 계정 유도 없음.
    =========================================================================== */
 import type { ReactNode } from "react";
+import { Logo } from "./Logo";
 
 export function AgencyShell({
   ownerLabel,
@@ -15,12 +16,12 @@ export function AgencyShell({
   children: ReactNode;
 }) {
   return (
-    <div className="min-h-dvh bg-paper">
+    <div className="min-h-dvh bg-white">
       {/* 무가입 안내 바 */}
-      <div className="border-b border-gray200 bg-white">
+      <div className="border-b border-neutral200 bg-white">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-5 py-3">
-          <span className="text-sm font-black text-ink">단디계약</span>
-          <span className="rounded-full bg-gray100 px-2.5 py-1 text-[11px] font-medium text-gray700">
+          <Logo size={20} />
+          <span className="rounded-full bg-neutral100 px-2.5 py-1 text-[11px] font-medium text-neutral700">
             회원가입 없이 · 토큰 접근
           </span>
         </div>
@@ -33,7 +34,7 @@ export function AgencyShell({
               <h1 className="text-lg font-black text-ink">{ownerLabel}</h1>
             )}
             {subtitle && (
-              <p className="mt-1 text-[13px] text-gray500">{subtitle}</p>
+              <p className="mt-1 text-[13px] text-neutral500">{subtitle}</p>
             )}
           </div>
         )}

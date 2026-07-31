@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 73.6 46" width="73.6" height="46" role="img" aria-label="Dandi">
+  <defs><clipPath id="dandiClipMono"><circle cx="23" cy="23" r="23"></circle></clipPath></defs>
+  <circle cx="50.6" cy="23" r="23" fill="currentColor" opacity="0.55"></circle>
+  <circle cx="23" cy="23" r="23" fill="currentColor"></circle>
+  <g clip-path="url(#dandiClipMono)"><circle cx="50.6" cy="23" r="23" fill="currentColor" opacity="0.28"></circle></g>
+</svg>

@@ -13,32 +13,32 @@ const LAYER_STYLE: Record<
 > = {
   // 원문(사실) — 흰 배경, 회색 테두리
   original: {
-    wrap: "bg-white border border-gray300",
-    label: "text-gray500",
+    wrap: "bg-white border border-neutral300",
+    label: "text-neutral500",
     defaultLabel: "원문",
   },
   // 내가 이해한 조건 — 회색톤(paper), 라벨로만 구분
   understood: {
-    wrap: "bg-paper",
-    label: "text-gray700",
+    wrap: "bg-subtle",
+    label: "text-neutral700",
     defaultLabel: "내가 이해한 조건",
   },
   // AI 해석(추정) — amber50 점선. 확신도 병기.
   ai: {
-    wrap: "bg-amber50 border border-dashed border-amber400",
-    label: "text-amber700",
+    wrap: "bg-brand50 border border-dashed border-brand400",
+    label: "text-brand700",
     defaultLabel: "AI가 본 차이 · 추정",
   },
   // 공식 기준·근거 — 회색톤(paper), 라벨로만 구분(제3의 참고정보)
   official: {
-    wrap: "bg-paper",
-    label: "text-gray700",
+    wrap: "bg-subtle",
+    label: "text-neutral700",
     defaultLabel: "공식 기준 · 내부 검토 규칙",
   },
   // 조정 요청안(미확정) — amber100, 아직 확정 아님을 라벨로 명시
   request: {
-    wrap: "bg-amber100 border border-amber600",
-    label: "text-amber800",
+    wrap: "bg-brand100 border border-brand600",
+    label: "text-brand800",
     defaultLabel: "조정 요청안 · 미확정",
   },
 };
@@ -63,7 +63,7 @@ export function LayerBlock({
         <span className={`text-[10px] font-bold ${s.label}`}>
           {label ?? s.defaultLabel}
         </span>
-        {meta && <span className="text-[10px] font-bold text-amber700">{meta}</span>}
+        {meta && <span className="text-[10px] font-bold text-brand700">{meta}</span>}
       </div>
       <div className="text-sm leading-relaxed text-ink">{children}</div>
     </div>

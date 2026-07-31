@@ -110,7 +110,7 @@ export default function RequestPreviewPage() {
       }
     >
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
 
       {state.status === "ready" && (
@@ -123,18 +123,18 @@ export default function RequestPreviewPage() {
             {items.map((it) => (
               <div
                 key={it.id}
-                className="flex items-start justify-between gap-2 rounded-lg bg-paper px-3.5 py-3 text-[13px]"
+                className="flex items-start justify-between gap-2 rounded-lg bg-subtle px-3.5 py-3 text-[13px]"
               >
                 <div>
                   <span className="font-bold text-ink">{it.title}</span>
-                  <span className="text-gray500"> → </span>
-                  <span className="text-gray700">“{it.text}”</span>
+                  <span className="text-neutral500"> → </span>
+                  <span className="text-neutral700">“{it.text}”</span>
                 </div>
                 {it.manual && (
                   <button
                     type="button"
                     onClick={() => removeManualItem(it.id)}
-                    className="flex-none text-[11px] font-bold text-gray500 hover:text-amber700"
+                    className="flex-none text-[11px] font-bold text-neutral500 hover:text-brand700"
                   >
                     ✕ 삭제
                   </button>
@@ -146,23 +146,23 @@ export default function RequestPreviewPage() {
           {/* 톤 완충기 — P1 부가 경로 (접힘) */}
           {isUsingMock && <ToneBuffer />}
 
-          <p className="text-[11px] leading-relaxed text-gray500">
+          <p className="text-[11px] leading-relaxed text-neutral500">
             링크 생성 전 미리보기예요. 링크를 만든 뒤 기존 이메일이나 메신저로 직접
             전달해주세요. 대행사는 회원가입 없이 요청서를 열람합니다.
           </p>
           {sentLink && (
-            <div className="rounded-xl border-2 border-amber700 bg-amber50 p-4">
+            <div className="rounded-xl border-2 border-brand700 bg-brand50 p-4">
               <h2 className="text-sm font-black text-ink">대행사 전달 링크가 준비됐어요</h2>
-              <p className="mt-1 text-[11px] leading-relaxed text-gray700">
+              <p className="mt-1 text-[11px] leading-relaxed text-neutral700">
                 아직 자동 발송되지 않았습니다. 아래 링크를 복사해 대행사에 직접 보내주세요.
               </p>
               <a
                 href={sentLink.publicUrl}
-                className="mt-3 block break-all rounded-lg bg-white p-3 text-xs text-amber700 underline"
+                className="mt-3 block break-all rounded-lg bg-white p-3 text-xs text-brand700 underline"
               >
                 {sentLink.publicUrl}
               </a>
-              <p className="mt-1 text-[10px] text-gray500">
+              <p className="mt-1 text-[10px] text-neutral500">
                 {sentLink.expiresAt.slice(0, 16).replace("T", " ")}까지 유효
               </p>
             </div>
@@ -203,18 +203,18 @@ function ToneBuffer() {
   };
 
   return (
-    <details className="rounded-lg border border-gray200 bg-white">
-      <summary className="flex cursor-pointer items-center justify-between px-3.5 py-3 text-xs text-gray500">
+    <details className="rounded-lg border border-neutral200 bg-white">
+      <summary className="flex cursor-pointer items-center justify-between px-3.5 py-3 text-xs text-neutral500">
         <span>
           직접 문장을 써서 요청하고 싶다면
-          <span className="ml-1.5 rounded bg-amber200 px-1.5 py-0.5 text-[10px] font-bold text-amber800">
+          <span className="ml-1.5 rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
             P1
           </span>
         </span>
         <span>펼치기</span>
       </summary>
-      <div className="flex flex-col gap-2.5 border-t border-gray200 px-3.5 py-3">
-        <div className="rounded-md bg-gray100 px-2.5 py-2 text-[12px] text-gray700">
+      <div className="flex flex-col gap-2.5 border-t border-neutral200 px-3.5 py-3">
+        <div className="rounded-md bg-neutral100 px-2.5 py-2 text-[12px] text-neutral700">
           직접 써주셔도 좋아요 (선택). 그대로 보내지 않고 정중하게 바꿔드려요.
         </div>
         <textarea
@@ -231,13 +231,13 @@ function ToneBuffer() {
         </button>
         {converted && (
           <>
-            <div className="rounded-lg border-2 border-amber700 bg-amber50 px-3 py-2.5 text-[13px] leading-relaxed text-ink">
+            <div className="rounded-lg border-2 border-brand700 bg-brand50 px-3 py-2.5 text-[13px] leading-relaxed text-ink">
               “{converted}”
             </div>
             <div className="flex gap-2">
               <button
                 onClick={() => setConverted(null)}
-                className="h-10 flex-1 rounded-lg border border-gray300 bg-white text-[12px] font-bold text-gray700"
+                className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[12px] font-bold text-neutral700"
               >
                 다시 쓸게요
               </button>

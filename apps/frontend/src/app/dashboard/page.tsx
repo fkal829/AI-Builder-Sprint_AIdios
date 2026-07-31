@@ -22,23 +22,23 @@ export default function DashboardPage() {
     <AppScreen wide>
       {/* 히어로 */}
       <header className="mb-8">
-        <p className="text-[13px] font-bold text-amber700">
+        <p className="text-[13px] font-bold text-brand700">
           계약을 읽고, 말하기 어려운 조건을 대신 정리해드려요
         </p>
         <h1 className="mt-1.5 text-3xl font-black tracking-tight text-ink lg:text-4xl">
           안녕하세요, 사장님
         </h1>
-        <p className="mt-2 text-[15px] text-gray500">
+        <p className="mt-2 text-[15px] text-neutral500">
           계약서의 조건을 함께 확인하고, 필요한 조정 요청을 문서로 남길 수 있어요.
         </p>
       </header>
 
       {state.status === "loading" && (
-        <p className="py-16 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-16 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
 
       {state.status === "ready" && state.data.contracts.length === 0 && (
-        <div className="mx-auto max-w-md rounded-2xl bg-white p-8 ring-1 ring-gray200">
+        <div className="mx-auto max-w-md rounded-2xl bg-white p-8 ring-1 ring-neutral200">
           <EmptyState
             title="아직 등록한 계약이 없어요"
             code="첫 계약서 PDF를 올려보세요"
@@ -91,11 +91,11 @@ export default function DashboardPage() {
 
           {/* 내 계약 목록 */}
           <section>
-            <div className="mb-1 flex items-center justify-between border-b border-gray200 pb-3">
+            <div className="mb-1 flex items-center justify-between border-b border-neutral200 pb-3">
               <h2 className="text-lg font-black text-ink">내 계약</h2>
               <Link
                 href="/contracts/new"
-                className="text-[13px] font-bold text-amber700 hover:underline"
+                className="text-[13px] font-bold text-brand700 hover:underline"
               >
                 + 새 계약서 올리기
               </Link>
@@ -113,7 +113,7 @@ export default function DashboardPage() {
             {attentionContract && (
               <Link
                 href={contractHref(attentionContract)}
-                className="flex items-center justify-center rounded-2xl border border-dashed border-gray300 bg-white/50 px-6 py-10 text-center text-sm text-gray500 transition hover:border-amber400 hover:bg-white"
+                className="flex items-center justify-center rounded-2xl border border-dashed border-neutral300 bg-white/50 px-6 py-10 text-center text-sm text-neutral500 transition hover:border-brand400 hover:bg-white"
               >
                 계약서의 기간과 금액을 함께 확인하고, 필요하면 조정 요청 문구를 선택할
                 수 있어요.
@@ -134,11 +134,13 @@ export default function DashboardPage() {
 }
 
 function statusBadge(c: ContractSummary): { label: string; tone: BadgeTone } {
+  // 만료 임박은 내가 볼 차례 → 목록에서 유일하게 채워진 배지
   if (c.status === "RENEWAL_DUE")
-    return { label: c.hint ?? `만료 D-${c.dDay}`, tone: "amberMid" };
+    return { label: c.hint ?? `만료 D-${c.dDay}`, tone: "active" };
+  // 응답 대기는 공이 상대에게 → 윤곽
   if (c.status === "NEGOTIATING")
-    return { label: c.hint ?? "응답 대기", tone: "amberSoft" };
-  return { label: c.hint ?? "진행 중", tone: "gray" };
+    return { label: c.hint ?? "응답 대기", tone: "waiting" };
+  return { label: c.hint ?? "진행 중", tone: "neutral" };
 }
 
 function ContractRow({ contract }: { contract: ContractSummary }) {
@@ -148,20 +150,20 @@ function ContractRow({ contract }: { contract: ContractSummary }) {
   return (
     <Link
       href={href}
-      className="grid grid-cols-[minmax(0,1.4fr)_1fr_auto_auto] items-center gap-4 border-b border-gray200 px-2 py-5 transition hover:bg-white/60"
+      className="grid grid-cols-[minmax(0,1.4fr)_1fr_auto_auto] items-center gap-4 border-b border-neutral200 px-2 py-5 transition hover:bg-white/60"
     >
       <div className="min-w-0">
         <div className="truncate text-[15px] font-bold text-ink">
           {contract.title}
         </div>
-        <div className="mt-0.5 text-[12px] text-gray500">
+        <div className="mt-0.5 text-[12px] text-neutral500">
           {contract.counterpartyName}
           {contract.date && ` · ${contract.date}`}
         </div>
       </div>
-      <div className="text-sm text-gray700">{contract.stage ?? ""}</div>
+      <div className="text-sm text-neutral700">{contract.stage ?? ""}</div>
       <Badge label={badge.label} tone={badge.tone} size="sm" />
-      <span className="text-gray400">→</span>
+      <span className="text-neutral400">→</span>
     </Link>
   );
 }

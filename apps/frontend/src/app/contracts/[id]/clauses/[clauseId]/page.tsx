@@ -45,10 +45,10 @@ function MockClauseDetail({ contractId, clauseId }: { contractId: string; clause
       }
     >
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
       {state.status === "ready" && !clause && (
-        <p className="py-10 text-center text-sm text-gray500">
+        <p className="py-10 text-center text-sm text-neutral500">
           조항을 찾을 수 없어요.
         </p>
       )}
@@ -103,19 +103,19 @@ function LiveClauseDetail({ contractId, clauseId }: { contractId: string; clause
       }
     >
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
       {state.status === "error" && (
-        <p className="py-10 text-center text-sm font-bold text-amber800">⚠ {state.error}</p>
+        <p className="py-10 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>
       )}
       {state.status === "ready" && !item && (
-        <p className="py-10 text-center text-sm text-gray500">조항을 찾을 수 없어요.</p>
+        <p className="py-10 text-center text-sm text-neutral500">조항을 찾을 수 없어요.</p>
       )}
       {item && (
         <div className="flex flex-col gap-3">
-          <div className="rounded-xl border border-gray200 bg-white p-4">
+          <div className="rounded-xl border border-neutral200 bg-white p-4">
             <h2 className="text-sm font-black text-ink">{item.plainExplanation}</h2>
-            <p className="mt-3 rounded-lg bg-paper p-3 text-[12px] leading-relaxed text-gray700">
+            <p className="mt-3 rounded-lg bg-subtle p-3 text-[12px] leading-relaxed text-neutral700">
               {item.sourcePage ? `계약서 ${item.sourcePage}쪽: ` : "원문 근거 없음: "}
               {item.sourceText ?? "직접 확인이 필요합니다."}
             </p>
@@ -130,10 +130,10 @@ function LiveClauseDetail({ contractId, clauseId }: { contractId: string; clause
               type="button"
               onClick={() => setChoice(value)}
               className={`rounded-xl border p-4 text-left ${
-                selected === value ? "border-amber700 bg-amber50" : "border-gray300 bg-white"
+                selected === value ? "border-brand700 bg-brand50" : "border-neutral300 bg-white"
               }`}
             >
-              <span className="text-[11px] font-bold text-gray500">{label}</span>
+              <span className="text-[11px] font-bold text-neutral500">{label}</span>
               <span className="mt-1 block text-[13px] font-bold leading-relaxed text-ink">{text}</span>
             </button>
           ))}

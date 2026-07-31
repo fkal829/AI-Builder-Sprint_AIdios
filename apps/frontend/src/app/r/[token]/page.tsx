@@ -33,7 +33,7 @@ export default function AgencyRequestPage() {
   if (state.status === "loading")
     return (
       <AgencyShell>
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
       </AgencyShell>
     );
 
@@ -59,7 +59,7 @@ export default function AgencyRequestPage() {
           <h1 className="text-base font-black text-ink">
             {req.ownerLabel ? `${req.ownerLabel}이 조건 조정을 요청했어요` : "계약 조건 조정 요청이 도착했어요"}
           </h1>
-          <p className="mt-1 text-[12px] text-gray500">
+          <p className="mt-1 text-[12px] text-neutral500">
             {req.contractTitle} · 조항 {req.items.length}건
           </p>
         </div>
@@ -71,8 +71,8 @@ export default function AgencyRequestPage() {
           >
             {opening ? "검토 화면을 여는 중…" : "회원가입 없이 검토 시작"}
           </button>
-          {openError && <p className="mt-3 text-[12px] text-amber800">{openError}</p>}
-          <p className="mt-3 text-[11px] leading-relaxed text-gray500">
+          {openError && <p className="mt-3 text-[12px] text-brand800">{openError}</p>}
+          <p className="mt-3 text-[11px] leading-relaxed text-neutral500">
             수락·거절·역제안한 내용과 사유는 기록으로 남아 사후 분쟁을 줄이는 데
             쓰여요. 별도 가입은 필요하지 않아요.
           </p>

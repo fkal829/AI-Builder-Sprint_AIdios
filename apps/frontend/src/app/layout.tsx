@@ -22,11 +22,13 @@ export const metadata: Metadata = {
   description:
     "읽지 못한 계약을 읽어주고, 하지 못한 말을 대신해준다 — 소상공인용 광고대행 계약 CLM",
 };
+// 파비콘은 src/app/icon.svg 파일 규약으로 자동 등록된다.
+// iOS 홈 화면용 apple-icon은 PNG가 필요해 아직 없음(dandi-app-icon.png 미제공).
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#f6f4ef",
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({

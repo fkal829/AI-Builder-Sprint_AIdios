@@ -79,7 +79,7 @@ export default function AgencyRespondPage() {
       subtitle="조항마다 수락·거절·역제안 중 하나를 선택해주세요"
     >
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
 
       {state.status === "ready" && (
@@ -89,20 +89,20 @@ export default function AgencyRespondPage() {
             return (
               <div
                 key={it.clauseId}
-                className="rounded-xl border border-gray200 bg-white p-4"
+                className="rounded-xl border border-neutral200 bg-white p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <p className="text-[13px] font-bold text-ink">
                     “{it.requestText}”
                   </p>
                   {it.officialBasis && (
-                    <span className="flex-none rounded-full bg-gray100 px-2 py-1 text-[10px] text-gray700">
+                    <span className="flex-none rounded-full bg-neutral100 px-2 py-1 text-[10px] text-neutral700">
                       근거 있음
                     </span>
                   )}
                 </div>
                 {it.officialBasis && (
-                  <p className="mt-1.5 text-[11px] text-gray500">
+                  <p className="mt-1.5 text-[11px] text-neutral500">
                     {it.officialBasis}
                   </p>
                 )}
@@ -123,8 +123,8 @@ export default function AgencyRespondPage() {
                           onClick={() => setItem(it.clauseId, { decision: d })}
                           className={`h-9 flex-1 rounded-lg border text-[12px] font-bold transition ${
                             active
-                              ? "border-2 border-amber700 bg-amber50 text-ink"
-                              : "border-gray300 bg-white text-gray700 hover:bg-paper"
+                              ? "border-2 border-brand700 bg-brand50 text-ink"
+                              : "border-neutral300 bg-white text-neutral700 hover:bg-subtle"
                           }`}
                         >
                           {label}
@@ -152,15 +152,15 @@ export default function AgencyRespondPage() {
                       setItem(it.clauseId, { reason: e.target.value })
                     }
                     placeholder="한 줄 사유 (예: 사내 규정상 조정 어려움)"
-                    className="mt-2 w-full rounded-lg border border-gray300 px-3 py-2 text-[13px] outline-none"
+                    className="mt-2 w-full rounded-lg border border-neutral300 px-3 py-2 text-[13px] outline-none"
                   />
                 )}
               </div>
             );
           })}
 
-          <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-gray200 bg-paper/95 py-3 backdrop-blur">
-            <span className="text-[12px] text-gray500">
+          <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-neutral200 bg-white py-3">
+            <span className="text-[12px] text-neutral500">
               {answeredCount} / {items.length}건 응답 완료
             </span>
             <button
@@ -171,7 +171,7 @@ export default function AgencyRespondPage() {
               {submitting ? "제출 중…" : "응답 제출하기"}
             </button>
           </div>
-          {submitError && <p className="text-[12px] text-amber800">{submitError}</p>}
+          {submitError && <p className="text-[12px] text-brand800">{submitError}</p>}
         </div>
       )}
     </AgencyShell>

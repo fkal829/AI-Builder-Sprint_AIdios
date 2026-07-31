@@ -182,7 +182,10 @@ AUDIT_RULES: dict[tuple[StateEntityType, StrEnum, StrEnum], AuditRule] = {
         StateEntityType.CONTRACT,
         ContractStatus.NEGOTIATING,
         ContractStatus.READY_TO_SIGN,
-    ): _audit_rule(AuditEventType.ADJUSTMENT_CONFIRMED, actors=(AuditActorType.OWNER,)),
+    ): _audit_rule(
+        AuditEventType.REVISED_CONTRACT_CONFIRMED,
+        actors=(AuditActorType.OWNER,),
+    ),
     (
         StateEntityType.CONTRACT,
         ContractStatus.READY_TO_SIGN,

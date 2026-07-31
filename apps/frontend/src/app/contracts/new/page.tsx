@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ProgressDots } from "@/components/Bits";
-import { DEMO_CONTRACT_ID, UNDERSTOOD_QUESTIONS } from "@/lib/mock";
+import { UNDERSTOOD_QUESTIONS } from "@/lib/mock";
+import { adapter } from "@/lib/adapter";
 import { saveUnderstood, type UnderstoodKey } from "@/lib/understood";
 
 /** 바이트를 사람이 읽기 쉬운 크기로 변환 */
@@ -19,12 +20,15 @@ export default function NewContractPage() {
   const router = useRouter();
   const [phase, setPhase] = useState<"upload" | "questions">("upload");
   const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [counterpartyName, setCounterpartyName] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [qIndex, setQIndex] = useState(0);
   const [answers, setAnswers] = useState<Partial<Record<UnderstoodKey, string>>>({});
   const [customText, setCustomText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const uploaded = !!file;
 
@@ -47,6 +51,7 @@ export default function NewContractPage() {
     }
     setError(null);
     setFile(f);
+    setTitle((current) => current || f.name.replace(/\.pdf$/i, ""));
   };
 
   const onDrop = (e: React.DragEvent<HTMLElement>) => {
@@ -64,7 +69,7 @@ export default function NewContractPage() {
         backHref="/dashboard"
         footer={
           <CTAButton
-            disabled={!uploaded}
+            disabled={!uploaded || !title.trim() || !counterpartyName.trim()}
             onClick={() => setPhase("questions")}
           >
             다음
@@ -134,6 +139,27 @@ export default function NewContractPage() {
             <p className="text-[12px] font-bold text-amber800">⚠ {error}</p>
           )}
 
+          <label className="flex flex-col gap-1.5 text-xs font-bold text-gray700">
+            계약 이름
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={120}
+              placeholder="예: SNS 광고대행 계약"
+              className="h-11 rounded-lg border border-gray300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-bold text-gray700">
+            대행사 이름
+            <input
+              value={counterpartyName}
+              onChange={(e) => setCounterpartyName(e.target.value)}
+              maxLength={120}
+              placeholder="계약 상대방 또는 대행사명"
+              className="h-11 rounded-lg border border-gray300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
+            />
+          </label>
+
           <a
             href="/sample-contract.pdf"
             target="_blank"
@@ -171,12 +197,34 @@ export default function NewContractPage() {
     const next = { ...answers, [q.key]: opt };
     setAnswers(next);
     if (isLast) {
-      // 설문 응답 저장 → 분석 결과의 '내가 이해한 조건 요약'에서 사용
-      saveUnderstood(DEMO_CONTRACT_ID, next);
-      router.push(`/contracts/${DEMO_CONTRACT_ID}/analysis`);
+      void submitContract(next);
     } else {
       setQIndex(qIndex + 1);
       setCustomText(prefillFor(qIndex + 1));
+    }
+  };
+
+  const submitContract = async (next: Partial<Record<UnderstoodKey, string>>) => {
+    if (!file || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const contract = await adapter.createContract({ title, counterpartyName });
+      const document = await adapter.uploadContractDocument(contract.id, file);
+      await adapter.saveUnderstoodTerms(contract.id, {
+        durationText: answer(next.durationText),
+        monthlyAmount: parseKrw(answer(next.monthlyAmount)),
+        totalAmount: parseKrw(answer(next.totalAmount)),
+        refundText: answer(next.refundText),
+        terminationText: answer(next.terminationText),
+      });
+      await adapter.startContractAnalysis(contract.id, document.id);
+      // 목업 상세 화면의 기존 설문 요약도 계속 지원한다.
+      saveUnderstood(contract.id, next);
+      router.push(`/contracts/${contract.id}/analysis`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "계약서 등록을 완료하지 못했습니다.");
+      setSubmitting(false);
     }
   };
 
@@ -214,6 +262,7 @@ export default function NewContractPage() {
               <button
                 key={opt}
                 onClick={() => choose(opt)}
+                disabled={submitting}
                 className={`min-h-[52px] rounded-lg px-4 text-left text-sm font-bold transition ${
                   selected
                     ? "border-2 border-amber700 bg-amber200"
@@ -251,7 +300,7 @@ export default function NewContractPage() {
                 <button
                   type="button"
                   onClick={submitCustom}
-                  disabled={!customText.trim()}
+                  disabled={!customText.trim() || submitting}
                   className="ml-2 flex-none rounded-md bg-ink px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-30"
                 >
                   {isLast ? "완료" : "다음"}
@@ -267,7 +316,23 @@ export default function NewContractPage() {
           여기 답하신 내용은 &lsquo;사용자가 기억하고 이해한 설명&rsquo;으로만 쓰여요.
           대행사가 다르게 말했다고 단정하지 않아요.
         </p>
+        {error && <p className="text-center text-xs font-bold text-amber800">⚠ {error}</p>}
+        {submitting && <p className="text-center text-xs text-gray500">계약서를 등록하고 있어요…</p>}
       </div>
     </AppScreen>
   );
+}
+
+function answer(value: string | undefined): string {
+  return value?.trim() || "잘 기억 안 나요";
+}
+
+function parseKrw(value: string): number | null {
+  const normalized = value.replace(/[\s,]/g, "");
+  if (/기억 안 나요|따로 안 들었어요/.test(normalized)) return null;
+  const direct = Number(normalized);
+  if (Number.isSafeInteger(direct) && direct >= 0) return direct;
+  const match = normalized.match(/(\d+(?:\.\d+)?)만원/);
+  if (match) return Math.round(Number(match[1]) * 10_000);
+  return null;
 }

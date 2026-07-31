@@ -2,7 +2,7 @@
 
 ## Product
 
-안심홍보계약 is a mobile-first contract lifecycle management service for small tourism businesses in Busan. The P0 demo path is upload, extraction, evidence-backed review, one structured adjustment round, Modusign signing, one obligation check, and renewal timing.
+단디계약 is a mobile-first contract lifecycle management service for small tourism businesses in Busan. The P0 demo path is upload, extraction, evidence-backed review, one structured adjustment round, revised-contract verification, Modusign signing, one obligation check, and renewal timing.
 
 ## Boundaries
 

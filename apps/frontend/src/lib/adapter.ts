@@ -10,11 +10,13 @@ import {
   DASHBOARD_STATS,
 } from "./mock";
 import type {
+  AuditEvent,
   AgencyDecision,
   AdjustmentRequestPublic,
   ContractDetail,
   ContractSummary,
   DashboardStats,
+  SuggestionChoice,
 } from "./types";
 
 type PublicResponseInput = {
@@ -34,6 +36,267 @@ type ApiPublicAdjustment = {
   contract_title: string;
   status: AdjustmentRequestPublic["status"];
   items: { item_id: string; request_text: string }[];
+};
+
+type ApiOwnerAdjustmentDetail = {
+  request: {
+    id: string;
+    status: AdjustmentRequestPublic["status"];
+    expires_at: string | null;
+    items: {
+      review_item_id: string;
+      request_text: string;
+    }[];
+  };
+  responses: {
+    review_item_id: string;
+    decision: AgencyDecision;
+    counter_text: string | null;
+    reason: string | null;
+  }[];
+  comparisons: {
+    review_item_id: string;
+    changed_summary: string;
+    remaining_checks: string[];
+    final_confirmation: string;
+  }[];
+};
+
+type ApiDashboard = {
+  total: number;
+  signing: number;
+  in_progress: number;
+  completed: number;
+  expiring_soon: number;
+  unresolved_signals: number;
+  obligation_pending: number;
+  obligation_submitted: number;
+  obligation_approved: number;
+  total_committed: number;
+  payment_condition_met_amount: number;
+  most_common_signal: string | null;
+};
+
+type ApiContractListItem = {
+  id: string;
+  title: string;
+  counterparty_name: string;
+  status: ContractSummary["status"];
+  total_amount: number | null;
+  end_date: string | null;
+  expiry_d_day: number | null;
+  termination_notice_d_day: number | null;
+  auto_renewal_d_day: number | null;
+};
+
+type ContractCreateInput = {
+  title: string;
+  counterpartyName: string;
+};
+
+type UnderstoodTermInput = {
+  durationText: string;
+  monthlyAmount: number | null;
+  totalAmount: number | null;
+  refundText: string;
+  terminationText: string;
+};
+
+export type SignatureSignerInput = {
+  role: "OWNER" | "AGENCY";
+  name: string;
+  email: string;
+};
+
+type ApiContract = {
+  id: string;
+  title: string;
+  counterparty_name: string;
+  status: ContractSummary["status"];
+  signed_date: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  termination_notice_date: string | null;
+  renewal_type: string | null;
+  total_amount: number | null;
+  modusign_document_id: string | null;
+  renewal_decision: {
+    decision: LiveRenewalView["currentDecision"];
+    revisit_review_item_ids: string[];
+  } | null;
+};
+type ApiDocument = { id: string };
+type ApiAuditEvent = {
+  id: string;
+  event_type: string;
+  summary: string | null;
+  created_at: string;
+};
+type ApiSignature = {
+  status: LiveSignature["status"];
+  modusign_status: LiveSignature["modusignStatus"];
+  modusign_document_id: string | null;
+};
+type ApiObligation = {
+  id: string;
+  title: string;
+  due_date: string;
+  source_page: number;
+  source_text: string;
+  confidence: number;
+  evidence_url: string | null;
+  status: LiveObligation["status"];
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  payment_condition_met: boolean;
+};
+type ApiRevisedContractReview = {
+  id: string;
+  document_id: string;
+  status: RevisedContractReview["status"];
+  items: {
+    review_item_id: string;
+    expected_text: string;
+    match_status: RevisedContractReview["items"][number]["matchStatus"];
+    source_page: number | null;
+    source_text: string | null;
+    confidence: number | null;
+    owner_confirmed: boolean;
+  }[];
+};
+type ApiReviewItem = {
+  id: string; type: LiveReviewItem["type"]; plain_explanation: string; source_page: number | null;
+  source_text: string | null; source_confidence: number | null; basis_text: string;
+  suggestion_accept: string; suggestion_compromise: string; suggestion_request: string;
+  user_choice: SuggestionChoice | null;
+};
+
+type ApiAnalysisTask = {
+  status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+  error_code: string | null;
+  result: { review_items: ApiReviewItem[] } | null;
+};
+
+export type LiveReviewItem = {
+  id: string;
+  type: "MISMATCH" | "NO_BASIS" | "UNCLEAR" | "MISSING" | "NEEDS_CHECK";
+  plainExplanation: string;
+  sourcePage: number | null;
+  sourceText: string | null;
+  sourceConfidence: number | null;
+  basisText: string;
+  suggestionAccept: string;
+  suggestionCompromise: string;
+  suggestionRequest: string;
+  userChoice: SuggestionChoice | null;
+};
+
+export type LiveContractReview = {
+  title: string;
+  counterpartyName: string;
+  status: ContractSummary["status"];
+  understood: UnderstoodTermInput | null;
+  items: LiveReviewItem[];
+};
+
+export type LiveAdjustmentDraft = {
+  id: string;
+  items: { reviewItemId: string; requestText: string }[];
+};
+
+export type RevisedContractReview = {
+  id: string;
+  documentId: string;
+  status: "REVIEW_REQUIRED" | "CONFIRMED";
+  items: {
+    reviewItemId: string;
+    expectedText: string;
+    matchStatus: "MATCHED" | "NEEDS_CONFIRMATION";
+    sourcePage: number | null;
+    sourceText: string | null;
+    confidence: number | null;
+    ownerConfirmed: boolean;
+  }[];
+};
+
+export type LiveAdjustmentDetail = {
+  id: string;
+  status: AdjustmentRequestPublic["status"];
+  expiresAt: string | null;
+  items: {
+    reviewItemId: string;
+    requestText: string;
+    decision: AgencyDecision | null;
+    counterText: string | null;
+    reason: string | null;
+    comparison: {
+      changedSummary: string;
+      remainingChecks: string[];
+      finalConfirmation: string;
+    } | null;
+  }[];
+};
+
+export type AdjustmentPreview = {
+  items: {
+    id: string;
+    title: string;
+    text: string;
+  }[];
+};
+
+export type AdjustmentResolutionInput = {
+  reviewItemId: string;
+  resolution: "ACCEPT_REQUEST" | "ACCEPT_COUNTERPROPOSAL" | "KEEP_ORIGINAL";
+};
+
+export type LiveSignature = {
+  status:
+    | "REQUEST_READY"
+    | "REQUESTING"
+    | "EDITING"
+    | "SIGNING"
+    | "COMPLETED"
+    | "ABORTED"
+    | "FAILED";
+  modusignStatus:
+    | "DRAFT"
+    | "SCHEDULED"
+    | "ON_PROCESSING"
+    | "ON_GOING"
+    | "COMPLETED"
+    | "ABORTED"
+    | "PROCESSING_FAILED"
+    | null;
+  documentId: string | null;
+};
+
+export type LiveSignatureView = {
+  signature: LiveSignature | null;
+  timeline: AuditEvent[];
+};
+
+export type LiveObligation = {
+  id: string;
+  title: string;
+  dueDate: string;
+  sourcePage: number;
+  sourceText: string;
+  confidence: number;
+  evidenceUrl: string | null;
+  status: "PENDING" | "SUBMITTED" | "APPROVED" | "DISPUTED";
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  paymentConditionMet: boolean;
+};
+
+export type LiveRenewalView = {
+  title: string;
+  expiryDday: number | null;
+  noticeDday: number | null;
+  autoRenewalDday: number | null;
+  currentDecision: "RENEW_SAME_TERMS" | "RENEW_WITH_CHANGES" | "TERMINATE" | null;
+  revisitReviewItemIds: string[];
 };
 
 export class PublicApiError extends Error {
@@ -58,6 +321,61 @@ export interface DataAdapter {
   getDashboard(): Promise<{ stats: DashboardStats; contracts: ContractSummary[] }>;
   /** GET /api/v1/contracts/{contractId} (+ analysis). 미존재 시 reject(404). */
   getContract(contractId: string): Promise<ContractDetail>;
+  createContract(input: ContractCreateInput): Promise<{ id: string }>;
+  uploadContractDocument(contractId: string, file: File): Promise<{ id: string }>;
+  uploadRevisedContract(contractId: string, file: File): Promise<{ id: string }>;
+  saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput): Promise<void>;
+  startContractAnalysis(contractId: string, documentId: string): Promise<void>;
+  getContractAnalysis(contractId: string): Promise<ApiAnalysisTask>;
+  getLiveContractReview(contractId: string): Promise<LiveContractReview>;
+  selectReviewItem(contractId: string, itemId: string, choice: SuggestionChoice): Promise<void>;
+  createAdjustmentDraft(contractId: string, reviewItemIds: string[]): Promise<LiveAdjustmentDraft>;
+  getAdjustmentPreview(contractId: string): Promise<AdjustmentPreview>;
+  sendAdjustmentDraft(
+    contractId: string,
+    adjustmentId: string,
+  ): Promise<{ publicUrl: string; expiresAt: string }>;
+  getAdjustmentDetail(
+    contractId: string,
+    adjustmentId: string,
+  ): Promise<LiveAdjustmentDetail>;
+  confirmAdjustmentResult(
+    contractId: string,
+    adjustmentId: string,
+    resolutions: AdjustmentResolutionInput[],
+  ): Promise<void>;
+  createRevisedContractReview(
+    contractId: string,
+    adjustmentId: string,
+    documentId: string,
+  ): Promise<RevisedContractReview>;
+  getLatestRevisedContractReview(contractId: string): Promise<RevisedContractReview>;
+  confirmRevisedContractReview(
+    contractId: string,
+    reviewId: string,
+    reviewItemIds: string[],
+  ): Promise<RevisedContractReview>;
+  createSignatureDraft(
+    contractId: string,
+    reviewId: string,
+    signers: SignatureSignerInput[],
+  ): Promise<{ editorUrl: string; expiresAt: string }>;
+  getSignatureView(contractId: string): Promise<LiveSignatureView>;
+  getObligation(contractId: string): Promise<LiveObligation | null>;
+  createObligationEvidenceLink(
+    contractId: string,
+    obligationId: string,
+  ): Promise<{ publicUrl: string; expiresAt: string }>;
+  reviewObligation(
+    contractId: string,
+    obligationId: string,
+    decision: "APPROVED" | "DISPUTED",
+  ): Promise<LiveObligation>;
+  getRenewalView(contractId: string): Promise<LiveRenewalView>;
+  saveRenewalDecision(
+    contractId: string,
+    decision: "RENEW_SAME_TERMS" | "RENEW_WITH_CHANGES" | "TERMINATE",
+  ): Promise<LiveRenewalView>;
   /** GET /api/v1/public/adjustment-requests/{token} */
   getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic | null>;
   /** POST /api/v1/public/adjustment-requests/{token}/open */
@@ -73,6 +391,91 @@ export interface DataAdapter {
 /** 네트워크 지연 흉내 (분석 진행 화면 등에서 사용) */
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function mockRevisedContractReview(documentId: string): RevisedContractReview {
+  const requested = DEMO_CONTRACT.clauses
+    .filter((clause) => clause.userChoice === "REQUEST" || clause.userChoice === "COMPROMISE")
+    .slice(0, 4);
+  return {
+    id: "mock-revised-contract-review",
+    documentId,
+    status: "REVIEW_REQUIRED",
+    items: requested.map((clause, index) => ({
+      reviewItemId: clause.id,
+      expectedText: clause.agencyResponse?.counterText ?? clause.understood ?? clause.title,
+      matchStatus: index === requested.length - 1 ? "NEEDS_CONFIRMATION" : "MATCHED",
+      sourcePage: index === requested.length - 1 ? null : 1,
+      sourceText: index === requested.length - 1 ? null : clause.understood,
+      confidence: index === requested.length - 1 ? null : 1,
+      ownerConfirmed: false,
+    })),
+  };
+}
+
+function mapRevisedContractReview(data: ApiRevisedContractReview): RevisedContractReview {
+  return {
+    id: data.id,
+    documentId: data.document_id,
+    status: data.status,
+    items: data.items.map((item) => ({
+      reviewItemId: item.review_item_id,
+      expectedText: item.expected_text,
+      matchStatus: item.match_status,
+      sourcePage: item.source_page,
+      sourceText: item.source_text,
+      confidence: item.confidence,
+      ownerConfirmed: item.owner_confirmed,
+    })),
+  };
+}
+
+function mapObligation(data: ApiObligation): LiveObligation {
+  return {
+    id: data.id,
+    title: data.title,
+    dueDate: data.due_date,
+    sourcePage: data.source_page,
+    sourceText: data.source_text,
+    confidence: data.confidence,
+    evidenceUrl: data.evidence_url,
+    status: data.status,
+    submittedAt: data.submitted_at,
+    reviewedAt: data.reviewed_at,
+    paymentConditionMet: data.payment_condition_met,
+  };
+}
+
+function mapTimeline(events: ApiAuditEvent[]): AuditEvent[] {
+  return events.map((event, index) => ({
+    id: event.id,
+    label: event.summary?.trim() || auditEventLabel(event.event_type),
+    date: event.created_at.slice(5, 10).replace("-", "/"),
+    state: index === events.length - 1 ? "current" : "done",
+  }));
+}
+
+function auditEventLabel(eventType: string): string {
+  const labels: Record<string, string> = {
+    CONTRACT_CREATED: "계약 등록",
+    DOCUMENT_UPLOADED: "계약 문서 업로드",
+    UNDERSTOOD_TERMS_SAVED: "이해조건 저장",
+    ANALYSIS_STARTED: "계약 분석 시작",
+    ANALYSIS_COMPLETED: "계약 분석 완료",
+    ADJUSTMENT_SENT: "조정 요청 발송",
+    ADJUSTMENT_RESPONDED: "대행사 응답",
+    ADJUSTMENT_CONFIRMED: "조정 결과 확정",
+    REVISED_CONTRACT_REVIEW_CREATED: "수정 계약서 대조",
+    REVISED_CONTRACT_CONFIRMED: "수정 계약서 확인",
+    SIGNATURE_DRAFT_CREATED: "모두싸인 초안 생성",
+    SIGNATURE_STARTED: "서명 시작",
+    SIGNATURE_COMPLETED: "서명 완료",
+    EVIDENCE_SUBMITTED: "산출물 증빙 제출",
+    EVIDENCE_APPROVED: "산출물 증빙 승인",
+    EVIDENCE_DISPUTED: "산출물 증빙 이의",
+    RENEWAL_DECISION_SAVED: "재계약 결정 저장",
+  };
+  return labels[eventType] ?? eventType;
+}
+
 class MockAdapter implements DataAdapter {
   async getDashboard() {
     await delay(120);
@@ -84,6 +487,276 @@ class MockAdapter implements DataAdapter {
     // 데모: 어떤 id로 진입해도 대표 계약(광안리 카페)을 보여줌.
     // 실 API에서는 미존재 시 reject 해 error 상태로 처리.
     return DEMO_CONTRACT;
+  }
+
+  async createContract(input: ContractCreateInput) {
+    void input;
+    await delay(120);
+    return { id: DEMO_CONTRACT.summary.id };
+  }
+
+  async uploadContractDocument(contractId: string, file: File) {
+    void contractId;
+    void file;
+    await delay(240);
+    return { id: "mock-contract-document" };
+  }
+
+  async uploadRevisedContract(contractId: string, file: File) {
+    void contractId;
+    void file;
+    await delay(240);
+    return { id: "mock-revised-contract-document" };
+  }
+
+  async saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput) {
+    void contractId;
+    void input;
+    await delay(120);
+  }
+
+  async startContractAnalysis(contractId: string, documentId: string) {
+    void contractId;
+    void documentId;
+    await delay(240);
+  }
+
+  async getContractAnalysis(_contractId: string): Promise<ApiAnalysisTask> {
+    void _contractId;
+    await delay(120);
+    return { status: "COMPLETED", error_code: null, result: { review_items: [] } };
+  }
+
+  async getLiveContractReview(_contractId: string): Promise<LiveContractReview> {
+    void _contractId;
+    return {
+      title: DEMO_CONTRACT.summary.title,
+      counterpartyName: DEMO_CONTRACT.summary.counterpartyName,
+      status: DEMO_CONTRACT.summary.status,
+      understood: null,
+      items: [],
+    };
+  }
+
+  async selectReviewItem(_contractId: string, _itemId: string, _choice: SuggestionChoice) {
+    void _contractId;
+    void _itemId;
+    void _choice;
+    await delay(120);
+  }
+  async createAdjustmentDraft(
+    _contractId: string,
+    _reviewItemIds: string[],
+  ): Promise<LiveAdjustmentDraft> {
+    void _contractId;
+    await delay(120);
+    return {
+      id: "mock-adjustment",
+      items: _reviewItemIds.map((reviewItemId) => ({ reviewItemId, requestText: "조정 요청" })),
+    };
+  }
+
+  async getAdjustmentPreview(_contractId: string): Promise<AdjustmentPreview> {
+    void _contractId;
+    await delay(120);
+    return {
+      items: DEMO_CONTRACT.clauses
+        .filter((clause) => clause.userChoice === "REQUEST" || clause.userChoice === "COMPROMISE")
+        .map((clause) => ({
+          id: clause.id,
+          title: clause.title,
+          text: clause.suggestions.find((item) => item.choice === clause.userChoice)?.text
+            ?? clause.understood
+            ?? clause.title,
+        })),
+    };
+  }
+
+  async sendAdjustmentDraft(
+    _contractId: string,
+    _adjustmentId: string,
+  ): Promise<{ publicUrl: string; expiresAt: string }> {
+    void _contractId;
+    void _adjustmentId;
+    await delay(120);
+    return {
+      publicUrl: "/r/demo-adjustment-token",
+      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+    };
+  }
+
+  async getAdjustmentDetail(
+    _contractId: string,
+    adjustmentId: string,
+  ): Promise<LiveAdjustmentDetail> {
+    void _contractId;
+    await delay(120);
+    return {
+      id: adjustmentId,
+      status: "RESPONDED",
+      expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+      items: DEMO_CONTRACT.clauses
+        .filter((clause) => clause.userChoice === "REQUEST" || clause.userChoice === "COMPROMISE")
+        .map((clause) => ({
+          reviewItemId: clause.id,
+          requestText: clause.suggestions.find((item) => item.choice === clause.userChoice)?.text
+            ?? clause.understood
+            ?? clause.title,
+          decision: clause.agencyResponse?.decision ?? null,
+          counterText: clause.agencyResponse?.counterText ?? null,
+          reason: clause.agencyResponse?.reason ?? null,
+          comparison:
+            clause.agencyResponse?.decision === "COUNTER"
+              ? {
+                  changedSummary: "요청안과 대행사 역제안의 조건이 달라졌습니다.",
+                  remainingChecks: ["수정 계약서에 역제안 문구가 그대로 반영됐는지 확인하세요."],
+                  finalConfirmation: "역제안을 수락할지 직접 확인해주세요.",
+                }
+              : null,
+        })),
+    };
+  }
+
+  async confirmAdjustmentResult(
+    _contractId: string,
+    _adjustmentId: string,
+    _resolutions: AdjustmentResolutionInput[],
+  ): Promise<void> {
+    void _contractId;
+    void _adjustmentId;
+    void _resolutions;
+    await delay(120);
+  }
+
+  async createRevisedContractReview(
+    _contractId: string,
+    _adjustmentId: string,
+    documentId: string,
+  ): Promise<RevisedContractReview> {
+    void _contractId;
+    void _adjustmentId;
+    await delay(240);
+    return mockRevisedContractReview(documentId);
+  }
+
+  async getLatestRevisedContractReview(_contractId: string): Promise<RevisedContractReview> {
+    void _contractId;
+    await delay(120);
+    return mockRevisedContractReview("mock-revised-contract-document");
+  }
+
+  async confirmRevisedContractReview(
+    _contractId: string,
+    _reviewId: string,
+    _reviewItemIds: string[],
+  ): Promise<RevisedContractReview> {
+    void _contractId;
+    void _reviewId;
+    void _reviewItemIds;
+    await delay(120);
+    const review = mockRevisedContractReview("mock-revised-contract-document");
+    return {
+      ...review,
+      status: "CONFIRMED",
+      items: review.items.map((item) => ({ ...item, ownerConfirmed: true })),
+    };
+  }
+
+  async createSignatureDraft(
+    _contractId: string,
+    _reviewId: string,
+    _signers: SignatureSignerInput[],
+  ): Promise<{ editorUrl: string; expiresAt: string }> {
+    void _contractId;
+    void _reviewId;
+    void _signers;
+    await delay(240);
+    return {
+      editorUrl: "https://mock.modusign.example/embedded-draft",
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    };
+  }
+
+  async getSignatureView(_contractId: string): Promise<LiveSignatureView> {
+    void _contractId;
+    await delay(120);
+    return {
+      signature: {
+        status: DEMO_CONTRACT.signature.modusign === "COMPLETED" ? "COMPLETED" : "SIGNING",
+        modusignStatus: DEMO_CONTRACT.signature.modusign,
+        documentId: DEMO_CONTRACT.signature.documentId,
+      },
+      timeline: DEMO_CONTRACT.timeline,
+    };
+  }
+
+  async getObligation(_contractId: string): Promise<LiveObligation | null> {
+    void _contractId;
+    await delay(120);
+    return {
+      id: DEMO_CONTRACT.obligation.id,
+      title: DEMO_CONTRACT.obligation.title,
+      dueDate: DEMO_CONTRACT.obligation.dueDate,
+      sourcePage: 4,
+      sourceText: "인스타그램 게시물 4건을 제출한다.",
+      confidence: 0.95,
+      evidenceUrl: DEMO_CONTRACT.obligation.evidenceUrl,
+      status: DEMO_CONTRACT.obligation.status,
+      submittedAt: DEMO_CONTRACT.obligation.submittedAt,
+      reviewedAt: null,
+      paymentConditionMet: false,
+    };
+  }
+
+  async createObligationEvidenceLink(
+    _contractId: string,
+    _obligationId: string,
+  ): Promise<{ publicUrl: string; expiresAt: string }> {
+    void _contractId;
+    void _obligationId;
+    await delay(120);
+    return {
+      publicUrl: "/r/mock-obligation/evidence",
+      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+    };
+  }
+
+  async reviewObligation(
+    _contractId: string,
+    _obligationId: string,
+    decision: "APPROVED" | "DISPUTED",
+  ): Promise<LiveObligation> {
+    const current = await this.getObligation(_contractId);
+    if (!current) {
+      throw new PublicApiError(404, "NOT_FOUND", "대표 산출물을 찾을 수 없습니다.");
+    }
+    return {
+      ...current,
+      status: decision,
+      reviewedAt: new Date().toISOString(),
+      paymentConditionMet: decision === "APPROVED",
+    };
+  }
+
+  async getRenewalView(_contractId: string): Promise<LiveRenewalView> {
+    void _contractId;
+    await delay(120);
+    return {
+      title: DEMO_CONTRACT.summary.title,
+      expiryDday: DEMO_CONTRACT.renewal.expiryDday,
+      noticeDday: DEMO_CONTRACT.renewal.noticeDday,
+      autoRenewalDday: DEMO_CONTRACT.renewal.autoRenewDday,
+      currentDecision: null,
+      revisitReviewItemIds: [],
+    };
+  }
+
+  async saveRenewalDecision(
+    contractId: string,
+    decision: "RENEW_SAME_TERMS" | "RENEW_WITH_CHANGES" | "TERMINATE",
+  ): Promise<LiveRenewalView> {
+    const current = await this.getRenewalView(contractId);
+    return { ...current, currentDecision: decision };
   }
 
   async getAdjustmentRequest(token: string) {
@@ -130,9 +803,449 @@ class MockAdapter implements DataAdapter {
   }
 }
 
-class PublicApiAdapter extends MockAdapter {
-  constructor(private readonly apiBaseUrl: string) {
+class ApiAdapter extends MockAdapter {
+  constructor(
+    private readonly apiBaseUrl: string,
+    private readonly demoBearerToken?: string,
+  ) {
     super();
+  }
+
+  async getDashboard(): Promise<{ stats: DashboardStats; contracts: ContractSummary[] }> {
+    const ownerHeaders = this.ownerHeaders();
+    const [dashboard, contracts] = await Promise.all([
+      this.request<ApiDashboard>("/api/v1/dashboard", { headers: ownerHeaders }),
+      this.request<ApiContractListItem[]>("/api/v1/contracts", { headers: ownerHeaders }),
+    ]);
+
+    return {
+      stats: {
+        total: dashboard.total,
+        signing: dashboard.signing,
+        inProgress: dashboard.in_progress,
+        completed: dashboard.completed,
+        expiringSoon: dashboard.expiring_soon,
+        unresolvedSignals: dashboard.unresolved_signals,
+        obligationPending: dashboard.obligation_pending,
+        obligationSubmitted: dashboard.obligation_submitted,
+        obligationApproved: dashboard.obligation_approved,
+        totalCommitted: dashboard.total_committed,
+        paymentConditionMet: dashboard.payment_condition_met_amount,
+        mostCommonSignalLabel: dashboard.most_common_signal ?? "없음",
+      },
+      contracts: contracts.map((contract) => ({
+        id: contract.id,
+        title: contract.title,
+        counterpartyName: contract.counterparty_name,
+        status: contract.status,
+        totalAmount: contract.total_amount,
+        date: contract.end_date ? `만료 ${contract.end_date}` : undefined,
+        stage: contractStage(contract.status),
+        hint: contract.expiry_d_day === null ? undefined : dDayLabel(contract.expiry_d_day),
+        dDay: contract.expiry_d_day ?? undefined,
+      })),
+    };
+  }
+
+  async createContract(input: ContractCreateInput): Promise<{ id: string }> {
+    const contract = await this.request<ApiContract>("/api/v1/contracts", {
+      method: "POST",
+      headers: this.ownerHeaders(),
+      body: JSON.stringify({
+        title: input.title.trim(),
+        counterparty_name: input.counterpartyName.trim(),
+      }),
+    });
+    return { id: contract.id };
+  }
+
+  async uploadContractDocument(contractId: string, file: File): Promise<{ id: string }> {
+    const formData = new FormData();
+    formData.set("file", file);
+    formData.set("type", "CONTRACT");
+    const document = await this.request<ApiDocument>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/documents`,
+      { method: "POST", headers: this.ownerHeaders(), body: formData },
+    );
+    return { id: document.id };
+  }
+
+  async uploadRevisedContract(contractId: string, file: File): Promise<{ id: string }> {
+    const formData = new FormData();
+    formData.set("file", file);
+    formData.set("type", "REVISED_CONTRACT");
+    const document = await this.request<ApiDocument>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/documents`,
+      { method: "POST", headers: this.ownerHeaders(), body: formData },
+    );
+    return { id: document.id };
+  }
+
+  async saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput): Promise<void> {
+    await this.request(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/understood-terms`,
+      {
+        method: "PUT",
+        headers: this.ownerHeaders(),
+        body: JSON.stringify({
+          duration_text: input.durationText,
+          monthly_amount: input.monthlyAmount,
+          total_amount: input.totalAmount,
+          refund_text: input.refundText,
+          termination_text: input.terminationText,
+          source_type: "USER_MEMORY",
+        }),
+      },
+    );
+  }
+
+  async startContractAnalysis(contractId: string, documentId: string): Promise<void> {
+    await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`, {
+      method: "POST",
+      headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ document_id: documentId, supporting_document_ids: [] }),
+    });
+  }
+
+  async getContractAnalysis(contractId: string): Promise<ApiAnalysisTask> {
+    return this.request<ApiAnalysisTask>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`,
+      { headers: this.ownerHeaders() },
+    );
+  }
+
+  async getLiveContractReview(contractId: string): Promise<LiveContractReview> {
+    const [contract, task] = await Promise.all([
+      this.request<{
+        title: string;
+        counterparty_name: string;
+        status: ContractSummary["status"];
+        understood_term: {
+          duration_text: string;
+          monthly_amount: number | null;
+          total_amount: number | null;
+          refund_text: string;
+          termination_text: string;
+        } | null;
+      }>(
+        `/api/v1/contracts/${encodeURIComponent(contractId)}`,
+        { headers: this.ownerHeaders() },
+      ),
+      this.getContractAnalysis(contractId),
+    ]);
+    if (task.status !== "COMPLETED" || !task.result) {
+      throw new PublicApiError(409, "ANALYSIS_NOT_COMPLETED", "분석이 아직 완료되지 않았습니다.");
+    }
+    return {
+      title: contract.title,
+      counterpartyName: contract.counterparty_name,
+      status: contract.status,
+      understood: contract.understood_term
+        ? {
+            durationText: contract.understood_term.duration_text,
+            monthlyAmount: contract.understood_term.monthly_amount,
+            totalAmount: contract.understood_term.total_amount,
+            refundText: contract.understood_term.refund_text,
+            terminationText: contract.understood_term.termination_text,
+          }
+        : null,
+      items: task.result.review_items.map((item) => ({
+        id: item.id, type: item.type, plainExplanation: item.plain_explanation,
+        sourcePage: item.source_page, sourceText: item.source_text, sourceConfidence: item.source_confidence,
+        basisText: item.basis_text, suggestionAccept: item.suggestion_accept,
+        suggestionCompromise: item.suggestion_compromise, suggestionRequest: item.suggestion_request,
+        userChoice: item.user_choice,
+      })),
+    };
+  }
+
+  async selectReviewItem(contractId: string, itemId: string, choice: SuggestionChoice): Promise<void> {
+    await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/review-items/${encodeURIComponent(itemId)}`, {
+      method: "PATCH", headers: this.ownerHeaders(), body: JSON.stringify({ user_choice: choice }),
+    });
+  }
+
+  async createAdjustmentDraft(contractId: string, reviewItemIds: string[]): Promise<LiveAdjustmentDraft> {
+    const data = await this.request<{ id: string; items: { review_item_id: string; request_text: string }[] }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests`, { method: "POST", headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ review_item_ids: reviewItemIds, expires_in_hours: 72 }) });
+    return { id: data.id, items: data.items.map((item) => ({ reviewItemId: item.review_item_id, requestText: item.request_text })) };
+  }
+
+  async getAdjustmentPreview(contractId: string): Promise<AdjustmentPreview> {
+    const review = await this.getLiveContractReview(contractId);
+    return {
+      items: review.items
+        .filter((item) => item.userChoice === "REQUEST" || item.userChoice === "COMPROMISE")
+        .map((item) => ({
+          id: item.id,
+          title: item.plainExplanation,
+          text:
+            item.userChoice === "REQUEST"
+              ? item.suggestionRequest
+              : item.suggestionCompromise,
+        })),
+    };
+  }
+
+  async sendAdjustmentDraft(
+    contractId: string,
+    adjustmentId: string,
+  ): Promise<{ publicUrl: string; expiresAt: string }> {
+    const sent = await this.request<{ public_url: string; expires_at: string }>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests/`
+        + `${encodeURIComponent(adjustmentId)}/send`,
+      {
+        method: "POST",
+        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ confirmed: true }),
+      },
+    );
+    return { publicUrl: sent.public_url, expiresAt: sent.expires_at };
+  }
+
+  async getAdjustmentDetail(
+    contractId: string,
+    adjustmentId: string,
+  ): Promise<LiveAdjustmentDetail> {
+    const detail = await this.request<ApiOwnerAdjustmentDetail>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests/`
+        + encodeURIComponent(adjustmentId),
+      { headers: this.ownerHeaders() },
+    );
+    const responseById = new Map(
+      detail.responses.map((response) => [response.review_item_id, response]),
+    );
+    const comparisonById = new Map(
+      detail.comparisons.map((comparison) => [comparison.review_item_id, comparison]),
+    );
+    return {
+      id: detail.request.id,
+      status: detail.request.status,
+      expiresAt: detail.request.expires_at,
+      items: detail.request.items.map((item) => {
+        const response = responseById.get(item.review_item_id);
+        const comparison = comparisonById.get(item.review_item_id);
+        return {
+          reviewItemId: item.review_item_id,
+          requestText: item.request_text,
+          decision: response?.decision ?? null,
+          counterText: response?.counter_text ?? null,
+          reason: response?.reason ?? null,
+          comparison: comparison
+            ? {
+                changedSummary: comparison.changed_summary,
+                remainingChecks: comparison.remaining_checks,
+                finalConfirmation: comparison.final_confirmation,
+              }
+            : null,
+        };
+      }),
+    };
+  }
+
+  async confirmAdjustmentResult(
+    contractId: string,
+    adjustmentId: string,
+    resolutions: AdjustmentResolutionInput[],
+  ): Promise<void> {
+    await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-confirmation`, {
+      method: "POST",
+      headers: this.ownerHeaders(),
+      body: JSON.stringify({
+        adjustment_request_id: adjustmentId,
+        confirmed_items: resolutions.map((item) => ({
+          review_item_id: item.reviewItemId,
+          resolution: item.resolution,
+        })),
+        confirmed: true,
+      }),
+    });
+  }
+
+  async createRevisedContractReview(
+    contractId: string,
+    adjustmentId: string,
+    documentId: string,
+  ): Promise<RevisedContractReview> {
+    const data = await this.request<ApiRevisedContractReview>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/revised-contract-reviews`,
+      {
+        method: "POST",
+        headers: this.ownerHeaders(),
+        body: JSON.stringify({
+          adjustment_request_id: adjustmentId,
+          document_id: documentId,
+        }),
+      },
+    );
+    return mapRevisedContractReview(data);
+  }
+
+  async getLatestRevisedContractReview(contractId: string): Promise<RevisedContractReview> {
+    const data = await this.request<ApiRevisedContractReview>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/revised-contract-reviews/latest`,
+      { headers: this.ownerHeaders() },
+    );
+    return mapRevisedContractReview(data);
+  }
+
+  async confirmRevisedContractReview(
+    contractId: string,
+    reviewId: string,
+    reviewItemIds: string[],
+  ): Promise<RevisedContractReview> {
+    const data = await this.request<ApiRevisedContractReview>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/revised-contract-reviews/`
+        + `${encodeURIComponent(reviewId)}/confirmation`,
+      {
+        method: "POST",
+        headers: this.ownerHeaders(),
+        body: JSON.stringify({
+          confirmed_review_item_ids: reviewItemIds,
+          confirmed: true,
+        }),
+      },
+    );
+    return mapRevisedContractReview(data);
+  }
+
+  async createSignatureDraft(
+    contractId: string,
+    reviewId: string,
+    signers: SignatureSignerInput[],
+  ): Promise<{ editorUrl: string; expiresAt: string }> {
+    const data = await this.request<{ editor_url: string; expires_at: string }>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/signature-embedded-drafts`,
+      {
+        method: "POST",
+        headers: {
+          ...this.ownerHeaders(),
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          revised_contract_review_id: reviewId,
+          signers: signers.map((signer) => ({
+            role: signer.role,
+            name: signer.name.trim(),
+            signing_method: { type: "EMAIL", value: signer.email.trim() },
+          })),
+          confirmed: true,
+        }),
+      },
+    );
+    return { editorUrl: data.editor_url, expiresAt: data.expires_at };
+  }
+
+  async getSignatureView(contractId: string): Promise<LiveSignatureView> {
+    const contractPath = encodeURIComponent(contractId);
+    const [timeline, signature] = await Promise.all([
+      this.request<ApiAuditEvent[]>(`/api/v1/contracts/${contractPath}/timeline`, {
+        headers: this.ownerHeaders(),
+      }),
+      this.request<ApiSignature>(`/api/v1/contracts/${contractPath}/signature`, {
+        headers: this.ownerHeaders(),
+      }).catch((error: unknown) => {
+        if (error instanceof PublicApiError && error.status === 404) return null;
+        throw error;
+      }),
+    ]);
+    return {
+      signature: signature
+        ? {
+            status: signature.status,
+            modusignStatus: signature.modusign_status,
+            documentId: signature.modusign_document_id,
+          }
+        : null,
+      timeline: mapTimeline(timeline),
+    };
+  }
+
+  async getObligation(contractId: string): Promise<LiveObligation | null> {
+    const obligations = await this.request<ApiObligation[]>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/obligations`,
+      { headers: this.ownerHeaders() },
+    );
+    return obligations[0] ? mapObligation(obligations[0]) : null;
+  }
+
+  async createObligationEvidenceLink(
+    contractId: string,
+    obligationId: string,
+  ): Promise<{ publicUrl: string; expiresAt: string }> {
+    const data = await this.request<{ public_url: string; expires_at: string }>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/obligations/`
+        + `${encodeURIComponent(obligationId)}/evidence-link`,
+      {
+        method: "POST",
+        headers: {
+          ...this.ownerHeaders(),
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ expires_in_hours: 72 }),
+      },
+    );
+    return { publicUrl: data.public_url, expiresAt: data.expires_at };
+  }
+
+  async reviewObligation(
+    contractId: string,
+    obligationId: string,
+    decision: "APPROVED" | "DISPUTED",
+  ): Promise<LiveObligation> {
+    const data = await this.request<ApiObligation>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/obligations/`
+        + encodeURIComponent(obligationId),
+      {
+        method: "PATCH",
+        headers: this.ownerHeaders(),
+        body: JSON.stringify({ decision }),
+      },
+    );
+    return mapObligation(data);
+  }
+
+  async getRenewalView(contractId: string): Promise<LiveRenewalView> {
+    const contractPath = encodeURIComponent(contractId);
+    const [contract, contracts] = await Promise.all([
+      this.request<ApiContract>(`/api/v1/contracts/${contractPath}`, {
+        headers: this.ownerHeaders(),
+      }),
+      this.request<ApiContractListItem[]>("/api/v1/contracts", {
+        headers: this.ownerHeaders(),
+      }),
+    ]);
+    const summary = contracts.find((item) => item.id === contractId);
+    if (!summary) {
+      throw new PublicApiError(404, "NOT_FOUND", "계약을 찾을 수 없습니다.");
+    }
+    return {
+      title: contract.title,
+      expiryDday: summary.expiry_d_day,
+      noticeDday: summary.termination_notice_d_day,
+      autoRenewalDday: summary.auto_renewal_d_day,
+      currentDecision: contract.renewal_decision?.decision ?? null,
+      revisitReviewItemIds: contract.renewal_decision?.revisit_review_item_ids ?? [],
+    };
+  }
+
+  async saveRenewalDecision(
+    contractId: string,
+    decision: "RENEW_SAME_TERMS" | "RENEW_WITH_CHANGES" | "TERMINATE",
+  ): Promise<LiveRenewalView> {
+    const saved = await this.request<{
+      decision: LiveRenewalView["currentDecision"];
+      revisit_review_item_ids: string[];
+    }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/renewal-decision`, {
+      method: "PUT",
+      headers: this.ownerHeaders(),
+      body: JSON.stringify({ decision, confirmed: true }),
+    });
+    const current = await this.getRenewalView(contractId);
+    return {
+      ...current,
+      currentDecision: saved.decision,
+      revisitReviewItemIds: saved.revisit_review_item_ids,
+    };
   }
 
   async getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic> {
@@ -184,6 +1297,17 @@ class PublicApiAdapter extends MockAdapter {
     );
   }
 
+  private ownerHeaders(): HeadersInit {
+    if (!this.demoBearerToken) {
+      throw new PublicApiError(
+        401,
+        "OWNER_AUTH_REQUIRED",
+        "소유자 API를 사용하려면 로컬 데모 Bearer 토큰을 설정해 주세요.",
+      );
+    }
+    return { Authorization: `Bearer ${this.demoBearerToken}` };
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let response: Response;
     try {
@@ -193,7 +1317,7 @@ class PublicApiAdapter extends MockAdapter {
         credentials: "omit",
         headers: {
           Accept: "application/json",
-          ...(init.body ? { "Content-Type": "application/json" } : {}),
+          ...(init.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
           ...init.headers,
         },
       });
@@ -213,11 +1337,36 @@ class PublicApiAdapter extends MockAdapter {
   }
 }
 
+function contractStage(status: ContractSummary["status"]): string {
+  const labels: Record<ContractSummary["status"], string> = {
+    DRAFT: "계약서 준비",
+    ANALYZING: "분석 중",
+    REVIEW_REQUIRED: "검토 필요",
+    NEGOTIATING: "조정 진행",
+    READY_TO_SIGN: "서명 준비",
+    SIGNING: "서명 중",
+    SIGNED: "서명 완료",
+    IN_PROGRESS: "이행 중",
+    COMPLETED: "완료",
+    RENEWAL_DUE: "재계약 검토",
+  };
+  return labels[status];
+}
+
+function dDayLabel(dDay: number): string {
+  if (dDay === 0) return "오늘 만료";
+  return dDay > 0 ? `만료 D-${dDay}` : `만료 ${Math.abs(dDay)}일 지남`;
+}
+
 /**
- * NEXT_PUBLIC_USE_MOCK=false와 NEXT_PUBLIC_API_BASE_URL을 함께 설정하면
- * 공개 조정 요청 화면만 실 API를 호출한다. 다른 화면은 기존 목업을 유지한다.
+ * NEXT_PUBLIC_USE_MOCK=false와 NEXT_PUBLIC_API_BASE_URL을 함께 설정하면 공개 API와
+ * 대시보드가 실 API를 호출한다. 소유자 API의 로컬 mock 검증에는 데모 Bearer 토큰만 쓴다.
  */
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
+const demoBearerToken = process.env.NEXT_PUBLIC_DEMO_BEARER_TOKEN;
 const useMock = process.env.NEXT_PUBLIC_USE_MOCK !== "false" || !apiBaseUrl;
+export const isUsingMock = useMock;
 
-export const adapter: DataAdapter = useMock ? new MockAdapter() : new PublicApiAdapter(apiBaseUrl);
+export const adapter: DataAdapter = useMock
+  ? new MockAdapter()
+  : new ApiAdapter(apiBaseUrl, demoBearerToken);

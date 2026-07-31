@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: 안심홍보계약 API
+  title: 단디계약 API
   version: 0.2.0
   description: P0 프런트엔드와 FastAPI가 공유하는 HTTP 계약
 servers:
@@ -491,9 +491,9 @@ paths:
       description: |
         저장된 요청·응답에서 최종 문구를 결정한다. ACCEPT_REQUEST와
         ACCEPT_COUNTERPROPOSAL 항목은 관련 ReviewItem을 SENT에서 RESOLVED로,
-        KEEP_ORIGINAL 항목은 SENT에서 KEPT_ORIGINAL로 바꾼다. 조정 상태 CONFIRMED,
-        계약 상태 READY_TO_SIGN, 최종 문구와 ADJUSTMENT_CONFIRMED 감사 이벤트를
-        하나의 트랜잭션으로 기록한다.
+        KEEP_ORIGINAL 항목은 SENT에서 KEPT_ORIGINAL로 바꾼다. 조정 상태와 최종 문구,
+        ADJUSTMENT_CONFIRMED 감사 이벤트를 하나의 트랜잭션으로 기록한다. 계약은
+        NEGOTIATING을 유지하며 수정 계약서 대조 확인 후에만 READY_TO_SIGN이 된다.
       requestBody:
         required: true
         content:
@@ -511,14 +511,80 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/InvalidTransition"}
         "422": {$ref: "#/components/responses/ValidationError"}
+  /contracts/{contract_id}/revised-contract-reviews:
+    parameters:
+      - $ref: "#/components/parameters/ContractId"
+    post:
+      summary: 수정 계약서와 확정 조정 결과 대조
+      operationId: createRevisedContractReview
+      tags: [revised-contracts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RevisedContractReviewCreate"}
+      responses:
+        "201":
+          description: 근거가 연결된 수정 계약서 대조 결과
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RevisedContractReviewResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/InvalidTransition"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+  /contracts/{contract_id}/revised-contract-reviews/latest:
+    parameters:
+      - $ref: "#/components/parameters/ContractId"
+    get:
+      summary: 최신 수정 계약서 대조 조회
+      operationId: getLatestRevisedContractReview
+      tags: [revised-contracts]
+      responses:
+        "200":
+          description: 최신 수정 계약서 대조 결과
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RevisedContractReviewResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+  /contracts/{contract_id}/revised-contract-reviews/{review_id}/confirmation:
+    parameters:
+      - $ref: "#/components/parameters/ContractId"
+      - name: review_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      summary: 수정 계약서 대조 결과 최종 확인
+      operationId: confirmRevisedContractReview
+      tags: [revised-contracts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RevisedContractReviewConfirmation"}
+      responses:
+        "200":
+          description: 모든 항목 확인 및 계약 서명 준비 완료
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RevisedContractReviewResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/InvalidTransition"}
+        "422": {$ref: "#/components/responses/ValidationError"}
   /contracts/{contract_id}/agreement:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
-      summary: 변경·확인 합의서 생성
+      deprecated: true
+      summary: 레거시 변경·확인 합의서 생성(호환 전용)
       operationId: createAgreement
       tags: [agreements]
       description: |
+        이전 데이터 호환만을 위한 deprecated API이며 새 P0 흐름에서는 호출하지 않는다.
         원계약 문서 ID와 검증된 canonical signed_date가 없으면 INVALID_STATUS_TRANSITION으로
         거부한다. 원본 계약서는 수정하지 않으며, 확정된 조항으로 새 변경·확인 합의서 PDF를
         private Storage에 한 번 렌더링한다. PDF의 위치·SHA-256·페이지 수·합의서 레코드와
@@ -529,7 +595,7 @@ paths:
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "201":
-          description: 최대 네 조항의 변경·확인 합의서 생성
+          description: 이전 버전용 변경·확인 합의서 생성
           content:
             application/json:
               schema:
@@ -539,10 +605,11 @@ paths:
         "409": {$ref: "#/components/responses/InvalidTransition"}
         "422": {$ref: "#/components/responses/ValidationError"}
     get:
-      summary: 변경·확인 합의서 조회
+      deprecated: true
+      summary: 레거시 변경·확인 합의서 조회(호환 전용)
       operationId: getAgreement
       tags: [agreements]
-      description: 합의서의 구조화된 공개 내용을 반환한다. private Storage의 PDF 경로와 무결성 메타데이터는 반환하지 않는다.
+      description: 이전 버전에서 생성한 합의서의 구조화된 공개 내용을 반환한다. 새 P0 흐름에서는 호출하지 않으며 private Storage의 PDF 경로와 무결성 메타데이터는 반환하지 않는다.
       responses:
         "200":
           description: 현재 확정된 변경·확인 합의서
@@ -565,7 +632,7 @@ paths:
       tags: [signatures]
       description: |
         [C-7 changed] 템플릿을 사용하거나 서명을 즉시 발송하지 않는다. 사용자의
-        명시적 확인 후 C-6이 private Storage에 저장한 합의서 PDF의 SHA-256을 검증하여
+        명시적 확인 후 최신 CONFIRMED 수정 계약서 대조의 문서 ID와 SHA-256을 검증하여
         서명자 기본값과 함께 모두싸인 임베디드 초안을 만든다. 이 API는 PDF를 다시
         렌더링하지 않으며,
         사용자가 반환된 editor_url에서 서명란을 배치한 뒤 직접 발송한다. Contract는
@@ -1154,6 +1221,8 @@ components:
         - ADJUSTMENT_CONFIRMED
         - ADJUSTMENT_EXPIRED
         - AGREEMENT_CREATED
+        - REVISED_CONTRACT_REVIEW_CREATED
+        - REVISED_CONTRACT_CONFIRMED
         - SIGNATURE_DRAFT_CREATED
         - SIGNATURE_REQUESTED
         - SIGNATURE_STARTED
@@ -1186,7 +1255,7 @@ components:
               items: {$ref: "#/components/schemas/AuditEvent"}
     DocumentType:
       type: string
-      enum: [CONTRACT, PROPOSAL, ESTIMATE, MESSAGE]
+      enum: [CONTRACT, REVISED_CONTRACT, PROPOSAL, ESTIMATE, MESSAGE]
     Document:
       type: object
       additionalProperties: false
@@ -2024,6 +2093,61 @@ components:
                   대행사가 제시한 역제안 문구만 선택할 수 있다. 최종 문구는 서버가
                   저장된 응답에서 결정하며 클라이언트가 임의로 작성하지 않는다.
         confirmed: {type: boolean, const: true}
+    RevisedContractReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [adjustment_request_id, document_id]
+      properties:
+        adjustment_request_id: {type: string, format: uuid}
+        document_id: {type: string, format: uuid}
+    RevisedContractReviewConfirmation:
+      type: object
+      additionalProperties: false
+      required: [confirmed_review_item_ids, confirmed]
+      properties:
+        confirmed_review_item_ids:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        confirmed: {type: boolean, const: true}
+    RevisedContractReviewItem:
+      type: object
+      additionalProperties: false
+      required: [review_item_id, expected_text, match_status, source_page, source_text, confidence, owner_confirmed]
+      properties:
+        review_item_id: {type: string, format: uuid}
+        expected_text: {type: string, minLength: 1}
+        match_status: {type: string, enum: [MATCHED, NEEDS_CONFIRMATION]}
+        source_page: {type: [integer, "null"], minimum: 1}
+        source_text: {type: [string, "null"]}
+        confidence: {type: [number, "null"], minimum: 0, maximum: 1}
+        owner_confirmed: {type: boolean}
+    RevisedContractReview:
+      type: object
+      additionalProperties: false
+      required: [id, contract_id, adjustment_request_id, document_id, document_sha256, status, items, created_at, confirmed_at]
+      properties:
+        id: {type: string, format: uuid}
+        contract_id: {type: string, format: uuid}
+        adjustment_request_id: {type: string, format: uuid}
+        document_id: {type: string, format: uuid}
+        document_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        status: {type: string, enum: [REVIEW_REQUIRED, CONFIRMED]}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items: {$ref: "#/components/schemas/RevisedContractReviewItem"}
+        created_at: {type: string, format: date-time}
+        confirmed_at: {type: [string, "null"], format: date-time}
+    RevisedContractReviewResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/RevisedContractReview"}
     PublicSubmission:
       type: object
       additionalProperties: false
@@ -2187,10 +2311,28 @@ components:
     EmbeddedSignatureDraftCreate:
       type: object
       additionalProperties: false
-      required: [agreement_id, agreement_version, signers, confirmed]
+      required: [signers, confirmed]
+      oneOf:
+        - required: [revised_contract_review_id]
+          not:
+            anyOf:
+              - required: [agreement_id]
+              - required: [agreement_version]
+        - required: [agreement_id, agreement_version]
+          not:
+            required: [revised_contract_review_id]
       properties:
-        agreement_id: {type: string, format: uuid}
-        agreement_version: {type: integer, minimum: 1}
+        revised_contract_review_id: {type: string, format: uuid}
+        agreement_id:
+          type: string
+          format: uuid
+          deprecated: true
+          description: 이전 합의서 기반 서명 재시도를 위한 호환 필드. 새 흐름에서는 사용하지 않는다.
+        agreement_version:
+          type: integer
+          minimum: 1
+          deprecated: true
+          description: agreement_id와 함께 쓰는 이전 버전 호환 필드
         signers:
           type: array
           minItems: 2
@@ -2215,7 +2357,7 @@ components:
         confirmed:
           type: boolean
           const: true
-          description: 사용자가 서명자와 합의서 미리보기를 최종 확인함
+          description: 사용자가 서명자와 확인 완료 수정 계약서를 최종 확인함
     SignatureResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"

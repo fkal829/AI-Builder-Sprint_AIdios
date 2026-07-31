@@ -5,17 +5,58 @@ import { useParams, useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { EmptyState } from "@/components/EmptyState";
 import { useAsync } from "@/lib/hooks";
-import { adapter } from "@/lib/adapter";
+import {
+  adapter,
+  isUsingMock,
+  type AdjustmentResolutionInput,
+  type LiveAdjustmentDetail,
+} from "@/lib/adapter";
 import type { ContractDetail } from "@/lib/types";
 
-/* ⑦ 발송 후 대기 + 역제안 비교. 역제안이 오면 ⑥~⑦ 루프로 다시 들어감. */
+/* ⑦ 발송 후 대기 + 역제안 비교. P0는 응답 한 번 뒤 사람이 결과를 확정한다. */
 export default function ResponsesPage() {
   const { id } = useParams<{ id: string }>();
+  return isUsingMock ? <MockResponsesPage id={id} /> : <LiveResponsesPage id={id} />;
+}
+
+function MockResponsesPage({ id }: { id: string }) {
   const router = useRouter();
   const state = useAsync(() => adapter.getContract(id), [id]);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [view, setView] = useState<"normal" | "no_response" | "all_rejected">(
     "normal",
   );
+
+  const continueToRevision = async () => {
+    if (confirming) return;
+    setConfirming(true);
+    setConfirmError(null);
+    try {
+      const adjustmentId =
+        window.localStorage.getItem(`dandi:last-adjustment:${id}`) ?? "mock-adjustment";
+      const resolutions: AdjustmentResolutionInput[] = state.status === "ready"
+        ? state.data.clauses
+            .filter((clause) => clause.agencyResponse)
+            .map((clause) => ({
+              reviewItemId: clause.id,
+              resolution: clause.agencyResponse?.decision === "COUNTER"
+                ? "ACCEPT_COUNTERPROPOSAL"
+                : clause.agencyResponse?.decision === "ACCEPT"
+                  ? "ACCEPT_REQUEST"
+                  : "KEEP_ORIGINAL",
+            }))
+        : [];
+      await adapter.confirmAdjustmentResult(id, adjustmentId, resolutions);
+      router.push(`/contracts/${id}/revision`);
+    } catch (error) {
+      setConfirmError(
+        error instanceof Error ? error.message : "조정 결과를 확정하지 못했습니다.",
+      );
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   return (
     <AppScreen
@@ -26,8 +67,8 @@ export default function ResponsesPage() {
       }
       footer={
         view === "normal" && state.status === "ready" ? (
-          <CTAButton href={`/contracts/${id}/agreement`}>
-            변경·확인 합의서 만들기
+          <CTAButton onClick={continueToRevision}>
+            {confirming ? "확정 중…" : "응답 확정하고 수정 계약서 확인하기"}
           </CTAButton>
         ) : undefined
       }
@@ -62,10 +103,10 @@ export default function ResponsesPage() {
                 여기서 멈출게요
               </button>
               <button
-                onClick={() => router.push(`/contracts/${id}/agreement`)}
+                onClick={continueToRevision}
                 className="h-11 flex-1 rounded-lg border border-gray300 bg-white text-[13px] font-bold text-gray500"
               >
-                원안대로 진행
+                원안대로 최종 계약서 확인
               </button>
             </div>
           }
@@ -73,10 +114,247 @@ export default function ResponsesPage() {
       )}
 
       {state.status === "ready" && view === "normal" && (
-        <ResponsesBody data={state.data} contractId={id} />
+        <>
+          <ResponsesBody data={state.data} onConfirm={continueToRevision} />
+          {confirmError && (
+            <p className="mt-3 text-xs font-bold text-red-700">{confirmError}</p>
+          )}
+        </>
       )}
     </AppScreen>
   );
+}
+
+function LiveResponsesPage({ id }: { id: string }) {
+  const router = useRouter();
+  const state = useAsync(async () => {
+    const adjustmentId = window.localStorage.getItem(`dandi:last-adjustment:${id}`);
+    if (!adjustmentId) {
+      throw new Error("이 브라우저에서 발송한 조정 요청을 찾지 못했습니다.");
+    }
+    return adapter.getAdjustmentDetail(id, adjustmentId);
+  }, [id]);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [resolutionOverrides, setResolutionOverrides] = useState<
+    Record<string, AdjustmentResolutionInput["resolution"]>
+  >({});
+
+  const confirmedItems = state.status === "ready"
+    ? state.data.items.map((item) => ({
+        reviewItemId: item.reviewItemId,
+        resolution: resolutionOverrides[item.reviewItemId] ?? defaultResolution(item.decision),
+      }))
+    : [];
+  const canConfirm = state.status === "ready" && state.data.status === "CONFIRMED"
+    ? true
+    : confirmedItems.length > 0 && confirmedItems.every((item) => item.resolution !== null);
+
+  const confirmResult = async () => {
+    if (state.status !== "ready" || confirming) return;
+    if (state.data.status === "CONFIRMED") {
+      router.push(`/contracts/${id}/revision`);
+      return;
+    }
+    setConfirming(true);
+    setConfirmError(null);
+    try {
+      if (!canConfirm) {
+        throw new Error("각 역제안을 반영할지 원안을 유지할지 선택해주세요.");
+      }
+      await adapter.confirmAdjustmentResult(
+        id,
+        state.data.id,
+        confirmedItems as AdjustmentResolutionInput[],
+      );
+      router.push(`/contracts/${id}/revision`);
+    } catch (cause) {
+      setConfirmError(cause instanceof Error ? cause.message : "조정 결과를 확정하지 못했습니다.");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <AppScreen
+      title="대행사 응답"
+      backHref="/dashboard"
+      footer={
+        state.status === "ready"
+        && (state.data.status === "RESPONDED" || state.data.status === "CONFIRMED") ? (
+          <CTAButton onClick={confirmResult} disabled={confirming || !canConfirm}>
+            {confirming ? "확정 중…" : "응답 확정하고 수정 계약서 확인하기"}
+          </CTAButton>
+        ) : undefined
+      }
+    >
+      {state.status === "loading" && (
+        <p className="py-10 text-center text-sm text-gray500">응답을 불러오는 중…</p>
+      )}
+      {state.status === "error" && (
+        <p className="py-10 text-center text-sm font-bold text-amber800">⚠ {state.error}</p>
+      )}
+      {state.status === "ready" && (
+        <LiveResponseBody
+          detail={state.data}
+          resolutions={resolutionOverrides}
+          onResolution={(reviewItemId, resolution) => {
+            setResolutionOverrides((current) => ({ ...current, [reviewItemId]: resolution }));
+          }}
+        />
+      )}
+      {confirmError && <p className="mt-3 text-xs font-bold text-red-700">{confirmError}</p>}
+    </AppScreen>
+  );
+}
+
+function LiveResponseBody({
+  detail,
+  resolutions,
+  onResolution,
+}: {
+  detail: LiveAdjustmentDetail;
+  resolutions: Record<string, AdjustmentResolutionInput["resolution"]>;
+  onResolution: (
+    reviewItemId: string,
+    resolution: AdjustmentResolutionInput["resolution"],
+  ) => void;
+}) {
+  if (detail.status === "SENT" || detail.status === "OPENED") {
+    return (
+      <EmptyState
+        title="아직 답변이 없어요"
+        body={detail.expiresAt
+          ? `응답 기한은 ${detail.expiresAt.slice(0, 10)}까지예요. 필요하면 기존 연락 채널로 확인해주세요.`
+          : "대행사의 답변을 기다리고 있어요."}
+      />
+    );
+  }
+  if (detail.status === "EXPIRED") {
+    return <EmptyState title="응답 기한이 지났어요" body="대행사와 기존 연락 채널로 다음 진행을 확인해주세요." />;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {detail.items.map((item, index) => (
+        <article key={item.reviewItemId} className="rounded-xl border border-gray200 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-black text-ink">조정 항목 {index + 1}</h2>
+            <ResponseDecision decision={item.decision} />
+          </div>
+          <div className="mt-3 rounded-lg bg-paper p-3">
+            <div className="text-[10px] font-bold text-gray500">내 요청</div>
+            <p className="mt-1 text-[13px] leading-relaxed text-ink">{item.requestText}</p>
+          </div>
+          {item.counterText && (
+            <div className="mt-2 rounded-lg border border-amber600 bg-amber50 p-3">
+              <div className="text-[10px] font-bold text-amber700">대행사 역제안</div>
+              <p className="mt-1 text-[13px] font-bold leading-relaxed text-ink">
+                {item.counterText}
+              </p>
+            </div>
+          )}
+          {item.reason && (
+            <p className="mt-2 text-[11px] leading-relaxed text-gray700">사유: {item.reason}</p>
+          )}
+          {item.comparison && (
+            <div className="mt-3 rounded-lg bg-gray100 p-3 text-[11px] leading-relaxed text-gray700">
+              <b className="text-ink">AI 비교</b>
+              <p className="mt-1">{item.comparison.changedSummary}</p>
+              <ul className="mt-1 list-disc pl-4">
+                {item.comparison.remainingChecks.map((check) => <li key={check}>{check}</li>)}
+              </ul>
+              <p className="mt-1 font-bold">{item.comparison.finalConfirmation}</p>
+            </div>
+          )}
+          {detail.status !== "CONFIRMED" && item.decision === "COUNTER" && (
+            <ResolutionButtons
+              selected={resolutions[item.reviewItemId] ?? null}
+              acceptLabel="역제안 반영"
+              acceptValue="ACCEPT_COUNTERPROPOSAL"
+              onSelect={(resolution) => onResolution(item.reviewItemId, resolution)}
+            />
+          )}
+          {detail.status !== "CONFIRMED" && item.decision === "ACCEPT" && (
+            <ResolutionButtons
+              selected={resolutions[item.reviewItemId] ?? "ACCEPT_REQUEST"}
+              acceptLabel="요청안 반영"
+              acceptValue="ACCEPT_REQUEST"
+              onSelect={(resolution) => onResolution(item.reviewItemId, resolution)}
+            />
+          )}
+          {item.decision === "REJECT" && (
+            <p className="mt-3 rounded-lg bg-gray100 p-3 text-[11px] font-bold text-gray700">
+              거절된 항목은 원계약 조건을 유지합니다.
+            </p>
+          )}
+          {detail.status === "CONFIRMED" && (
+            <p className="mt-3 rounded-lg bg-amber50 p-3 text-[11px] font-bold text-amber700">
+              이 조정 결과는 이미 확정됐습니다. 수정 계약서를 확인해주세요.
+            </p>
+          )}
+        </article>
+      ))}
+      <p className="text-[11px] leading-relaxed text-gray500">
+        응답 확정 뒤에도 바로 서명하지 않습니다. 대행사가 다시 보낸 수정 계약서를
+        업로드하고 반영 내용을 직접 확인합니다.
+      </p>
+    </div>
+  );
+}
+
+function ResolutionButtons({
+  selected,
+  acceptLabel,
+  acceptValue,
+  onSelect,
+}: {
+  selected: AdjustmentResolutionInput["resolution"] | null;
+  acceptLabel: string;
+  acceptValue: "ACCEPT_REQUEST" | "ACCEPT_COUNTERPROPOSAL";
+  onSelect: (resolution: AdjustmentResolutionInput["resolution"]) => void;
+}) {
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        onClick={() => onSelect(acceptValue)}
+        className={`h-10 rounded-lg border text-[12px] font-bold ${
+          selected === acceptValue ? "border-amber700 bg-amber50 text-ink" : "border-gray300 bg-white text-gray700"
+        }`}
+      >
+        {acceptLabel}
+      </button>
+      <button
+        type="button"
+        onClick={() => onSelect("KEEP_ORIGINAL")}
+        className={`h-10 rounded-lg border text-[12px] font-bold ${
+          selected === "KEEP_ORIGINAL" ? "border-ink bg-gray100 text-ink" : "border-gray300 bg-white text-gray700"
+        }`}
+      >
+        원안 유지
+      </button>
+    </div>
+  );
+}
+
+function defaultResolution(
+  decision: LiveAdjustmentDetail["items"][number]["decision"],
+): AdjustmentResolutionInput["resolution"] | null {
+  if (decision === "ACCEPT") return "ACCEPT_REQUEST";
+  if (decision === "REJECT") return "KEEP_ORIGINAL";
+  return null;
+}
+
+function ResponseDecision({ decision }: { decision: LiveAdjustmentDetail["items"][number]["decision"] }) {
+  const label = decision === "ACCEPT"
+    ? "수락"
+    : decision === "COUNTER"
+      ? "역제안"
+      : decision === "REJECT"
+        ? "거절 · 원안 유지"
+        : "응답 대기";
+  return <span className="rounded bg-paper px-2 py-1 text-[10px] font-bold text-gray700">{label}</span>;
 }
 
 function ViewSwitch({
@@ -104,10 +382,10 @@ function ViewSwitch({
 
 function ResponsesBody({
   data,
-  contractId,
+  onConfirm,
 }: {
   data: ContractDetail;
-  contractId: string;
+  onConfirm: () => void;
 }) {
   const requested = useMemo(
     () =>
@@ -175,18 +453,17 @@ function ResponsesBody({
             유지돼요. 확인해보세요.
           </div>
           <div className="mt-3 flex flex-col gap-2">
-            <a
-              href={`/contracts/${contractId}/agreement`}
+            <button
+              type="button"
+              onClick={onConfirm}
               className="flex h-11 items-center justify-center rounded-lg border-2 border-amber700 bg-amber50 text-[13px] font-bold text-ink"
             >
-              역제안 수락 — {counter.agencyResponse?.counterText}으로 합의
-            </a>
-            <a
-              href={`/contracts/${contractId}/request`}
-              className="flex h-11 items-center justify-center rounded-lg border border-gray300 bg-white text-[13px] font-medium text-gray700"
-            >
-              다시 조정 요청하기
-            </a>
+              역제안 수락 후 수정 계약서 확인
+            </button>
+            <p className="text-center text-[11px] leading-relaxed text-gray500">
+              P0에서는 조정 응답을 한 번만 받습니다. 수정본이 다르면 기존 채널로 다시
+              요청해주세요.
+            </p>
           </div>
         </div>
       )}

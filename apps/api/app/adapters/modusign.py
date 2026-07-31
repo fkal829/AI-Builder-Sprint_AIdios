@@ -7,7 +7,6 @@ from uuid import uuid4
 import httpx
 
 from app.core.enums import ModusignStatus
-from app.schemas.agreements import Agreement
 from app.schemas.signatures import SignatureSigner
 
 
@@ -50,8 +49,8 @@ class ModusignAdapter:
     async def create_embedded_draft(
         self,
         *,
-        agreement: Agreement,
-        agreement_pdf: bytes,
+        document_title: str,
+        document_pdf: bytes,
         signers: list[SignatureSigner],
         redirect_url: str,
         metadata: dict[str, str] | None = None,
@@ -64,9 +63,9 @@ class ModusignAdapter:
                 expires_at=datetime.now(UTC) + timedelta(hours=2),
             )
         payload: dict[str, Any] = {
-            "title": f"{agreement.title} v{agreement.version}",
+            "title": document_title,
             "file": {
-                "base64": base64.b64encode(agreement_pdf).decode("ascii"),
+                "base64": base64.b64encode(document_pdf).decode("ascii"),
                 "extension": "pdf",
             },
             "participants": [

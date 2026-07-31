@@ -71,7 +71,7 @@ class SignatureAdapter(Protocol):
     async def create_embedded_draft(
         self,
         *,
-        agreement_pdf: bytes,
-        title: str,
+        document_pdf: bytes,
+        document_title: str,
         redirect_url: str,
     ) -> str: ...

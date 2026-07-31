@@ -262,9 +262,7 @@ async def test_tampered_stored_agreement_pdf_is_never_sent_to_modusign(signature
     )
 
     assert response.status_code == 502
-    signature = next(iter(adapter.mock_signatures.values())).signature
-    assert signature.status == InternalSignatureStatus.FAILED
-    assert signature.modusign_draft_id is None
+    assert adapter.mock_signatures == {}
 
 
 async def test_live_adapter_creates_embedded_draft_with_pdf_and_basic_auth() -> None:
@@ -296,8 +294,8 @@ async def test_live_adapter_creates_embedded_draft_with_pdf_and_basic_auth() -> 
             client=http_client,
         )
         draft = await modusign.create_embedded_draft(
-            agreement=agreement,
-            agreement_pdf=b"%PDF-1.4 test PDF",
+            document_title=f"{agreement.title} v{agreement.version}",
+            document_pdf=b"%PDF-1.4 test PDF",
             signers=[signer],
             redirect_url="https://app.example.com/contracts/signature-complete",
         )

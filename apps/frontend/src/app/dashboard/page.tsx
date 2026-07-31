@@ -8,12 +8,15 @@ import { EmptyState } from "@/components/EmptyState";
 import { useAsync } from "@/lib/hooks";
 import { adapter } from "@/lib/adapter";
 import { won } from "@/lib/format";
-import { DEMO_CONTRACT_ID } from "@/lib/mock";
 import type { BadgeTone } from "@/lib/status";
 import type { ContractSummary } from "@/lib/types";
 
 export default function DashboardPage() {
   const state = useAsync(() => adapter.getDashboard(), []);
+  const attentionContract = state.status === "ready"
+    ? state.data.contracts.find((contract) => contract.status === "REVIEW_REQUIRED")
+      ?? state.data.contracts[0]
+    : null;
 
   return (
     <AppScreen wide>
@@ -23,7 +26,7 @@ export default function DashboardPage() {
           계약을 읽고, 말하기 어려운 조건을 대신 정리해드려요
         </p>
         <h1 className="mt-1.5 text-3xl font-black tracking-tight text-ink lg:text-4xl">
-          안녕하세요, 광안리 카페 사장님
+          안녕하세요, 사장님
         </h1>
         <p className="mt-2 text-[15px] text-gray500">
           계약서의 조건을 함께 확인하고, 필요한 조정 요청을 문서로 남길 수 있어요.
@@ -107,13 +110,15 @@ export default function DashboardPage() {
           {/* 확인이 필요한 내용 */}
           <section>
             <h2 className="mb-3 text-lg font-black text-ink">확인이 필요한 내용</h2>
-            <Link
-              href={`/contracts/${DEMO_CONTRACT_ID}`}
-              className="flex items-center justify-center rounded-2xl border border-dashed border-gray300 bg-white/50 px-6 py-10 text-center text-sm text-gray500 transition hover:border-amber400 hover:bg-white"
-            >
-              계약서의 기간과 금액을 함께 확인하고, 필요하면 조정 요청 문구를 선택할
-              수 있어요.
-            </Link>
+            {attentionContract && (
+              <Link
+                href={contractHref(attentionContract)}
+                className="flex items-center justify-center rounded-2xl border border-dashed border-gray300 bg-white/50 px-6 py-10 text-center text-sm text-gray500 transition hover:border-amber400 hover:bg-white"
+              >
+                계약서의 기간과 금액을 함께 확인하고, 필요하면 조정 요청 문구를 선택할
+                수 있어요.
+              </Link>
+            )}
           </section>
 
           <Link
@@ -137,12 +142,7 @@ function statusBadge(c: ContractSummary): { label: string; tone: BadgeTone } {
 }
 
 function ContractRow({ contract }: { contract: ContractSummary }) {
-  const href =
-    contract.status === "RENEWAL_DUE"
-      ? `/contracts/${contract.id}/renewal`
-      : contract.status === "NEGOTIATING"
-        ? `/contracts/${contract.id}/responses`
-        : `/contracts/${contract.id}`;
+  const href = contractHref(contract);
   const badge = statusBadge(contract);
 
   return (
@@ -164,4 +164,23 @@ function ContractRow({ contract }: { contract: ContractSummary }) {
       <span className="text-gray400">→</span>
     </Link>
   );
+}
+
+function contractHref(contract: ContractSummary): string {
+  if (contract.status === "DRAFT" || contract.status === "ANALYZING") {
+    return `/contracts/${contract.id}/analysis`;
+  }
+  if (contract.status === "NEGOTIATING") {
+    return `/contracts/${contract.id}/responses`;
+  }
+  if (contract.status === "READY_TO_SIGN" || contract.status === "SIGNING") {
+    return `/contracts/${contract.id}/signature`;
+  }
+  if (contract.status === "SIGNED" || contract.status === "IN_PROGRESS") {
+    return `/contracts/${contract.id}/obligations`;
+  }
+  if (contract.status === "COMPLETED" || contract.status === "RENEWAL_DUE") {
+    return `/contracts/${contract.id}/renewal`;
+  }
+  return `/contracts/${contract.id}`;
 }

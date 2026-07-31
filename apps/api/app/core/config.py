@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     app_env: str = "local"
-    app_name: str = "안심홍보계약 API"
+    app_name: str = "단디계약 API"
     api_v1_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:3000"
     public_app_base_url: str = "http://localhost:3000"

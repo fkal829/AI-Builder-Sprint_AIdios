@@ -478,7 +478,7 @@ export const DEMO_CONTRACT: ContractDetail = {
     { id: "e1", label: "계약 업로드", date: "7/20", state: "done" },
     { id: "e2", label: "조건 입력 · AI 분석 완료", date: "7/20", state: "done" },
     { id: "e3", label: "요청 발송 · 대행사 응답", date: "7/22", state: "done" },
-    { id: "e4", label: "합의 확정 · 서명 요청", date: "7/23", state: "done" },
+    { id: "e4", label: "응답 확정 · 수정 계약서 대조", date: "7/23", state: "done" },
     { id: "e5", label: "서명 진행 중 (현재)", date: "7/23", state: "current" },
     { id: "e6", label: "산출물 제출·확인 · 만료 검토", date: "", state: "upcoming" },
   ],

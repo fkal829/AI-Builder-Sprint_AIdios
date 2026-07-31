@@ -8,8 +8,10 @@ from app.adapters.modusign import ModusignAdapter, ModusignAdapterError
 from app.core.enums import InternalSignatureStatus
 from app.core.exceptions import ExternalStorageFailure, ModusignRequestFailed, ResourceNotFound
 from app.repositories.agreements import AgreementRepository
-from app.repositories.documents import PrivateStorage
+from app.repositories.documents import DocumentRepository, PrivateStorage
+from app.repositories.revised_contracts import RevisedContractRepository
 from app.repositories.signatures import SignatureRepository
+from app.schemas.revised_contracts import RevisedContractReviewStatus
 from app.schemas.signatures import (
     EmbeddedSignatureDraft,
     EmbeddedSignatureDraftCreate,
@@ -25,6 +27,8 @@ class SignatureService:
         *,
         repository: SignatureRepository,
         agreements: AgreementRepository,
+        revisions: RevisedContractRepository,
+        documents: DocumentRepository,
         storage: PrivateStorage,
         modusign: ModusignAdapter,
         embedded_redirect_url: str,
@@ -33,6 +37,8 @@ class SignatureService:
     ) -> None:
         self._repository = repository
         self._agreements = agreements
+        self._revisions = revisions
+        self._documents = documents
         self._storage = storage
         self._modusign = modusign
         self._embedded_redirect_url = embedded_redirect_url
@@ -47,23 +53,65 @@ class SignatureService:
         payload: EmbeddedSignatureDraftCreate,
         idempotency_key: UUID,
     ) -> EmbeddedSignatureDraft:
-        agreement_record = await self._agreements.get_owned_agreement(
-            owner_id=owner_id, contract_id=contract_id
-        )
-        if agreement_record is None:
-            raise ResourceNotFound()
-        agreement = agreement_record.agreement
-        if (
-            agreement.id != payload.agreement_id
-            or agreement.version != payload.agreement_version
-        ):
-            raise InvalidStatusTransition("The confirmed agreement ID and version are required.")
+        revised_review_id = payload.revised_contract_review_id
+        document_id = None
+        document_sha256 = None
+        agreement_id = payload.agreement_id
+        agreement_version = payload.agreement_version
+        if revised_review_id is not None:
+            review = await self._revisions.get_latest_owned_revised_contract_review(
+                owner_id=owner_id,
+                contract_id=contract_id,
+            )
+            if (
+                review is None
+                or review.id != revised_review_id
+                or review.status != RevisedContractReviewStatus.CONFIRMED
+            ):
+                raise InvalidStatusTransition("The latest confirmed revised contract is required.")
+            document = await self._documents.get_owned_document(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                document_id=review.document_id,
+            )
+            if document is None:
+                raise ResourceNotFound()
+            document_pdf = await self._storage.download_private_object(path=document.storage_path)
+            if not hmac.compare_digest(
+                hashlib.sha256(document_pdf).hexdigest(), review.document_sha256
+            ):
+                raise ModusignRequestFailed()
+            document_id = document.id
+            document_sha256 = review.document_sha256
+            document_title = "확인된 수정 광고대행 계약서"
+        else:
+            agreement_record = await self._agreements.get_owned_agreement(
+                owner_id=owner_id, contract_id=contract_id
+            )
+            if agreement_record is None:
+                raise ResourceNotFound()
+            agreement = agreement_record.agreement
+            if agreement.id != agreement_id or agreement.version != agreement_version:
+                raise InvalidStatusTransition(
+                    "The confirmed agreement ID and version are required."
+                )
+            document_pdf = await self._storage.download_private_object(
+                path=agreement_record.pdf_storage_path
+            )
+            if not hmac.compare_digest(
+                hashlib.sha256(document_pdf).hexdigest(), agreement_record.pdf_sha256
+            ):
+                raise ModusignRequestFailed()
+            document_title = f"{agreement.title} v{agreement.version}"
         record = await self._repository.prepare_embedded_signature_draft(
             owner_id=owner_id,
             signature_id=uuid4(),
             contract_id=contract_id,
-            agreement_id=agreement.id,
-            agreement_version=agreement.version,
+            revised_contract_review_id=revised_review_id,
+            document_id=document_id,
+            document_sha256=document_sha256,
+            agreement_id=agreement_id,
+            agreement_version=agreement_version,
             idempotency_key=idempotency_key,
             requested_at=self._utc_now(),
         )
@@ -78,16 +126,9 @@ class SignatureService:
                 "An embedded signature draft already exists for this idempotency key."
             )
         try:
-            agreement_pdf = await self._storage.download_private_object(
-                path=agreement_record.pdf_storage_path
-            )
-            if not hmac.compare_digest(
-                hashlib.sha256(agreement_pdf).hexdigest(), agreement_record.pdf_sha256
-            ):
-                raise ExternalStorageFailure("합의서 PDF 무결성 검증에 실패했습니다.")
             vendor_draft = await self._modusign.create_embedded_draft(
-                agreement=agreement,
-                agreement_pdf=agreement_pdf,
+                document_title=document_title,
+                document_pdf=document_pdf,
                 signers=payload.signers,
                 redirect_url=self._embedded_redirect_url,
                 metadata=ModusignWebhookService.build_signature_metadata(

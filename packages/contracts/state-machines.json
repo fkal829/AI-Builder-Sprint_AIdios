@@ -19,6 +19,10 @@
     "CONFIRMED": [],
     "EXPIRED": []
   },
+  "revised_contract_review": {
+    "REVIEW_REQUIRED": ["CONFIRMED"],
+    "CONFIRMED": []
+  },
   "internal_signature": {
     "REQUEST_READY": ["REQUESTING"],
     "REQUESTING": ["EDITING", "FAILED"],

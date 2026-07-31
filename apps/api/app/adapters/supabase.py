@@ -69,12 +69,14 @@ from app.repositories.review_items import (
     ReviewItemSelectionOutcome,
     ReviewItemSelectionResult,
 )
+from app.repositories.revised_contracts import RevisedContractContext
 from app.repositories.signatures import SignatureRecord
 from app.repositories.webhooks import ModusignWebhookReceipt
 from app.schemas.agreements import Agreement
 from app.schemas.analysis import Analysis, ReviewItem
 from app.schemas.contracts import ContractCreate, RenewalDecision
 from app.schemas.documents import DocumentParseStatus, DocumentType
+from app.schemas.revised_contracts import RevisedContractReview, RevisedContractReviewStatus
 from app.schemas.signatures import Signature
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
 
@@ -184,6 +186,7 @@ class SupabaseAdapter:
         self._mock_adjustment_responses: dict[UUID, tuple[AdjustmentResponseRecord, ...]] = {}
         self._mock_final_clauses: dict[UUID, tuple[FinalClauseRecord, ...]] = {}
         self._mock_agreements: dict[UUID, AgreementRecord] = {}
+        self._mock_revised_contract_reviews: dict[UUID, RevisedContractReview] = {}
         self._mock_signatures: dict[UUID, SignatureRecord] = {}
         self._mock_modusign_webhook_events: dict[str, MockModusignWebhookEvent] = {}
         if mode == "live":
@@ -228,6 +231,10 @@ class SupabaseAdapter:
     @property
     def mock_analysis_tasks(self) -> dict[UUID, AnalysisTaskRecord]:
         return dict(self._mock_analysis_tasks)
+
+    @property
+    def mock_revised_contract_reviews(self) -> dict[UUID, RevisedContractReview]:
+        return dict(self._mock_revised_contract_reviews)
 
     @property
     def mock_obligations(self) -> dict[UUID, MockObligation]:
@@ -2647,11 +2654,6 @@ class SupabaseAdapter:
                             else ReviewItemStatus.KEPT_ORIGINAL
                         ),
                     )
-                self._mock_contracts[contract_id] = replace(
-                    contract,
-                    status=ContractStatus.READY_TO_SIGN,
-                    updated_at=confirmed_at,
-                )
                 self._mock_final_clauses[request.id] = tuple(final_clauses)
                 self._mock_audit_events.append(
                     MockAuditEvent(
@@ -2686,6 +2688,222 @@ class SupabaseAdapter:
             return None
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _adjustment_request_record_from_row(row)
+
+    async def get_revised_contract_context(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        adjustment_request_id: UUID,
+    ) -> RevisedContractContext | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                request = self._mock_adjustment_requests.get(adjustment_request_id)
+                clauses = self._mock_final_clauses.get(adjustment_request_id, ())
+                if (
+                    contract is None
+                    or contract.owner_id != owner_id
+                    or contract.status != ContractStatus.NEGOTIATING
+                    or request is None
+                    or request.contract_id != contract_id
+                    or request.status != AdjustmentRequestStatus.CONFIRMED
+                    or not clauses
+                ):
+                    return None
+                return RevisedContractContext(
+                    contract_title=contract.title,
+                    final_clauses=clauses,
+                )
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_adjustment_request_id": str(adjustment_request_id),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("get_revised_contract_context", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("수정 계약서 대조 문맥 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return RevisedContractContext(
+            contract_title=str(row["contract_title"]),
+            final_clauses=tuple(
+                FinalClauseRecord(
+                    review_item_id=UUID(str(item["review_item_id"])),
+                    category=AgreementClauseCategory(item["category"]),
+                    resolution=AdjustmentResolution(item["resolution"]),
+                    outcome=str(item["outcome"]),
+                    disposition=str(item["disposition"]),
+                    before_text=str(item["before_text"]),
+                    after_text=str(item["after_text"]),
+                    reason=item.get("reason"),
+                )
+                for item in row.get("final_clauses", [])
+            ),
+        )
+
+    async def create_revised_contract_review_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        review: RevisedContractReview,
+    ) -> RevisedContractReview | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(review.contract_id)
+                if (
+                    contract is None
+                    or contract.owner_id != owner_id
+                    or contract.status != ContractStatus.NEGOTIATING
+                ):
+                    return None
+                self._mock_revised_contract_reviews[review.id] = review
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=review.contract_id,
+                        event_type="REVISED_CONTRACT_REVIEW_CREATED",
+                        actor_type="OWNER",
+                        summary="수정 계약서 대조를 생성했습니다.",
+                        created_at=review.created_at,
+                    )
+                )
+                return review
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_review": review.model_dump(mode="json"),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("create_revised_contract_review_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("수정 계약서 대조 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return RevisedContractReview.model_validate(row)
+
+    async def get_latest_owned_revised_contract_review(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> RevisedContractReview | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if contract is None or contract.owner_id != owner_id:
+                    return None
+                reviews = [
+                    review
+                    for review in self._mock_revised_contract_reviews.values()
+                    if review.contract_id == contract_id
+                ]
+                return (
+                    max(reviews, key=lambda item: (item.created_at, item.id))
+                    if reviews
+                    else None
+                )
+        client = self._require_live_client()
+        params = {"p_owner_id": str(owner_id), "p_contract_id": str(contract_id)}
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("get_latest_owned_revised_contract_review", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("수정 계약서 대조 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return RevisedContractReview.model_validate(row)
+
+    async def confirm_revised_contract_review_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        review_id: UUID,
+        confirmed_review_item_ids: tuple[UUID, ...],
+        confirmed_at: datetime,
+    ) -> RevisedContractReview | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                review = self._mock_revised_contract_reviews.get(review_id)
+                latest = max(
+                    (
+                        item
+                        for item in self._mock_revised_contract_reviews.values()
+                        if item.contract_id == contract_id
+                    ),
+                    key=lambda item: (item.created_at, item.id),
+                    default=None,
+                )
+                expected_ids = {item.review_item_id for item in review.items} if review else set()
+                if (
+                    contract is None
+                    or contract.owner_id != owner_id
+                    or contract.status != ContractStatus.NEGOTIATING
+                    or review is None
+                    or review.status != RevisedContractReviewStatus.REVIEW_REQUIRED
+                    or latest is None
+                    or latest.id != review_id
+                    or set(confirmed_review_item_ids) != expected_ids
+                    or len(confirmed_review_item_ids) != len(expected_ids)
+                ):
+                    return None
+                confirmed = review.model_copy(
+                    update={
+                        "status": RevisedContractReviewStatus.CONFIRMED,
+                        "items": [
+                            item.model_copy(update={"owner_confirmed": True})
+                            for item in review.items
+                        ],
+                        "confirmed_at": confirmed_at,
+                    }
+                )
+                self._mock_revised_contract_reviews[review_id] = confirmed
+                self._mock_contracts[contract_id] = replace(
+                    contract,
+                    status=ContractStatus.READY_TO_SIGN,
+                    updated_at=confirmed_at,
+                )
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="REVISED_CONTRACT_CONFIRMED",
+                        actor_type="OWNER",
+                        summary="수정 계약서 대조 결과를 확인했습니다.",
+                        created_at=confirmed_at,
+                    )
+                )
+                return confirmed
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_review_id": str(review_id),
+            "p_confirmed_review_item_ids": [str(item) for item in confirmed_review_item_ids],
+            "p_confirmed_at": confirmed_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("confirm_revised_contract_review_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("수정 계약서 확인 저장에 실패했습니다.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return RevisedContractReview.model_validate(row)
 
     async def get_agreement_creation_context(
         self,
@@ -2823,8 +3041,11 @@ class SupabaseAdapter:
         owner_id: UUID,
         signature_id: UUID,
         contract_id: UUID,
-        agreement_id: UUID,
-        agreement_version: int,
+        revised_contract_review_id: UUID | None,
+        document_id: UUID | None,
+        document_sha256: str | None,
+        agreement_id: UUID | None,
+        agreement_version: int | None,
         idempotency_key: UUID,
         requested_at: datetime,
     ) -> SignatureRecord | None:
@@ -2832,6 +3053,11 @@ class SupabaseAdapter:
             async with self._mock_lock:
                 contract = self._mock_contracts.get(contract_id)
                 agreement = self._mock_agreements.get(contract_id)
+                revision = (
+                    self._mock_revised_contract_reviews.get(revised_contract_review_id)
+                    if revised_contract_review_id is not None
+                    else None
+                )
                 previous_failed = next(
                     (
                         record
@@ -2850,13 +3076,24 @@ class SupabaseAdapter:
                     InternalSignatureStatus.EDITING,
                     InternalSignatureStatus.SIGNING,
                 }
+                valid_revision = (
+                    revision is not None
+                    and revision.contract_id == contract_id
+                    and revision.status == RevisedContractReviewStatus.CONFIRMED
+                    and revision.document_id == document_id
+                    and revision.document_sha256 == document_sha256
+                )
+                valid_legacy_agreement = (
+                    revised_contract_review_id is None
+                    and agreement is not None
+                    and agreement.agreement.id == agreement_id
+                    and agreement.agreement.version == agreement_version
+                )
                 if (
                     contract is None
                     or contract.owner_id != owner_id
                     or contract.status != ContractStatus.READY_TO_SIGN
-                    or agreement is None
-                    or agreement.agreement.id != agreement_id
-                    or agreement.agreement.version != agreement_version
+                    or not (valid_revision or valid_legacy_agreement)
                     or any(
                         record.signature.contract_id == contract_id
                         and record.signature.status in active_statuses
@@ -2871,6 +3108,9 @@ class SupabaseAdapter:
                         status=InternalSignatureStatus.REQUESTING,
                         requested_at=requested_at,
                     ),
+                    revised_contract_review_id=revised_contract_review_id,
+                    document_id=document_id,
+                    document_sha256=document_sha256,
                     agreement_id=agreement_id,
                     agreement_version=agreement_version,
                     idempotency_key=idempotency_key,
@@ -2883,7 +3123,12 @@ class SupabaseAdapter:
             "p_owner_id": str(owner_id),
             "p_signature_id": str(signature_id),
             "p_contract_id": str(contract_id),
-            "p_agreement_id": str(agreement_id),
+            "p_revised_contract_review_id": (
+                str(revised_contract_review_id) if revised_contract_review_id else None
+            ),
+            "p_document_id": str(document_id) if document_id else None,
+            "p_document_sha256": document_sha256,
+            "p_agreement_id": str(agreement_id) if agreement_id else None,
             "p_agreement_version": agreement_version,
             "p_idempotency_key": str(idempotency_key),
             "p_requested_at": requested_at.isoformat(),
@@ -3825,7 +4070,14 @@ def _agreement_record_from_row(row: dict) -> AgreementRecord:
 def _signature_record_from_row(row: dict) -> SignatureRecord:
     return SignatureRecord(
         signature=Signature.model_validate(row["signature"]),
-        agreement_id=UUID(str(row["agreement_id"])),
-        agreement_version=int(row["agreement_version"]),
+        revised_contract_review_id=(
+            UUID(str(row["revised_contract_review_id"]))
+            if row.get("revised_contract_review_id")
+            else None
+        ),
+        document_id=UUID(str(row["document_id"])) if row.get("document_id") else None,
+        document_sha256=row.get("document_sha256"),
+        agreement_id=UUID(str(row["agreement_id"])) if row.get("agreement_id") else None,
+        agreement_version=(int(row["agreement_version"]) if row.get("agreement_version") else None),
         idempotency_key=UUID(str(row["idempotency_key"])),
     )

@@ -1,10 +1,10 @@
-# 안심홍보계약 P0 API·데이터 계약
+# 단디계약 P0 API·데이터 계약
 
 <!-- markdownlint-configure-file {"MD013": false} -->
 
 이 문서는 백엔드를 구현하는 B·C와 배포·E2E를 검증하는 D가 공유하는 데이터 경계와
 불변 규칙을 정리한다. 제품 범위와 사용자 흐름의 최상위 기준은 저장소 상위의
-`../기획안.md`이며 이 파일은 수정하지 않는다. HTTP endpoint와 요청·응답 스키마의
+최상위 제품 기준은 `docs/기획안.md`다. HTTP endpoint와 요청·응답 스키마의
 기준은 `packages/contracts/openapi/openapi.yaml`이다. 모든 endpoint의 Base path는
 `/api/v1`이다. 이 문서의 파일 경로 표기는 모두 저장소 루트 기준이다.
 
@@ -123,7 +123,7 @@ Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서�
 - 분석 시작
 - 조정 요청 초안 생성
 - 조정 링크 활성화
-- 합의서 생성
+- 수정 계약서 대조 생성·최종 확인
 - 모두싸인 임베디드 서명 초안 생성
 - 산출물 증빙 링크 생성
 
@@ -333,7 +333,7 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 `AnalysisTask=COMPLETED`, `AuditEvent` 기록은 한 트랜잭션으로 처리하고 원본
 `ExtractedTerm.id`와 분석 버전을 추적한다.
 
-## 7. 조정·합의 계약
+## 7. 조정·수정 계약서 대조
 
 - 조정 요청 초안은 1~4개의 `review_item_id`로 생성한다.
 - 초안 항목은 모두 `ReviewItem.status=SELECTED`이고 `user_choice`가 `COMPROMISE`
@@ -370,32 +370,22 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 
 최종 문구는 서버가 저장된 요청·응답에서 결정한다. `ACCEPT_REQUEST`와
 `ACCEPT_COUNTERPROPOSAL`은 관련 `ReviewItem`을 `SENT → RESOLVED`,
-`KEEP_ORIGINAL`은 `SENT → KEPT_ORIGINAL`로 바꾼다. 조정·계약 상태, 항목 상태,
-최종 문구와 `ADJUSTMENT_CONFIRMED` 감사 이벤트는 하나의 트랜잭션으로 기록한다.
-합의서는 확정된 항목만 사용하며 최대 4개 조항으로 생성한다. 합의서에는 원계약
-제목·체결일·문서 ID와 다음 필수
-`condition_summary` 네 그룹을 포함한다.
+`KEEP_ORIGINAL`은 `SENT → KEPT_ORIGINAL`로 바꾼다. 항목 상태, 최종 문구와
+`ADJUSTMENT_CONFIRMED` 감사 이벤트는 하나의 트랜잭션으로 기록한다. 이 시점의 Contract는
+`NEGOTIATING`을 유지하며 서명 가능한 상태가 아니다.
 
-- 계약기간·총액·결제 일정
-- 산출물·채널·보고 방식
-- 해지·환불·자동갱신
-- 콘텐츠·계정 권리, 촬영 안전, 시설 파손·손해 책임, 초상권·개인정보
+대행사가 기존 채널로 보낸 수정본은 `Document.type=REVISED_CONTRACT` PDF로 업로드한다.
+최신 수정본만 대조할 수 있으며 확정 조항 1~4개 각각에 `expected_text`, `match_status`,
+`source_page`, `source_text`, `confidence`를 보존한다. 정규화한 정확 문구를 찾은 경우만
+`MATCHED`와 결정적 `confidence=1.0`으로 표시한다. 찾지 못했거나 표현이 다르면
+`NEEDS_CONFIRMATION`으로 두고 AI 또는 문자열 유사도만으로 합의 반영을 확정하지 않는다.
 
-요약은 원계약의 검증된 값과 확정 조항으로 결정적으로 만들며 근거가 없는 조건은
-`원계약에서 확인되지 않아 추가 확인 필요`처럼 미확인임을 명시하고 임의로 채우지 않는다.
-각 조항은 변경 전·후 문구와 분류를 포함하고 합의된 변경(`outcome=AGREED`,
-`disposition=AGREED`)인지, 대행사 거절 또는 소유자 철회로 원문을 유지하는지
-(`outcome=KEPT_ORIGINAL`, `disposition=REJECTED/WITHDRAWN`)를 구분한다. 대행사 거절은
-비어 있지 않은 `reason`을 보존한다. 변경되지 않은 조항의 유지 방침과
-`OWNER`·`AGENCY` 서명란도 포함한다.
-원계약 문서 ID와 검증된 canonical `signed_date`가 없으면 합의서를 생성하지 않고
-`INVALID_STATUS_TRANSITION`으로 거부한다.
-
-원본 계약 PDF는 변경하지 않는다. 확정된 구조화 합의서는 별도 PDF로 한 번 렌더링하여
-private Storage에 저장하며, 저장 경로·SHA-256·페이지 수·합의서 버전·`AGREEMENT_CREATED`
-감사 이벤트를 원자적으로 기록한다. 저장 경로와 무결성 메타데이터는 내부 전용이므로
-`AgreementResponse`에 포함하지 않는다. PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를
-실패 처리하고 저장된 파일을 정리한다.
+소유자는 최신 대조의 모든 `review_item_id`를 빠짐없이 명시적으로 확인해야 한다. 확인은
+`RevisedContractReview=CONFIRMED`, 항목 `owner_confirmed=true`, Contract
+`NEGOTIATING → READY_TO_SIGN`, `REVISED_CONTRACT_CONFIRMED`를 하나의 트랜잭션으로
+기록한다. 새 수정본 업로드·대조는 이전 검토를 삭제하지 않으며 서명은 최신 CONFIRMED
+대조의 문서 ID와 SHA-256에만 묶인다. 기존 합의서 생성 API와 테이블은 이력 호환을 위해
+남기지만 새 P0 정상 경로에서는 사용하지 않는다.
 
 ## 8. 모두싸인 계약
 
@@ -404,16 +394,16 @@ private Storage에 저장하며, 저장 경로·SHA-256·페이지 수·합의�
 > 대체했다. 초안 API는 외부 서명 요청을 발송하지 않으며 사용자가 모두싸인 편집기에서
 > 서명란을 배치하고 직접 발송한다.
 
-- 임베디드 초안 생성에는 확정된 `agreement_id`, `agreement_version`,
-  `confirmed=true`가 필요하다.
+- 임베디드 초안 생성에는 최신 확정 `revised_contract_review_id`와 `confirmed=true`가
+  필요하다.
 - 서명자는 `OWNER` 한 명과 `AGENCY` 한 명으로 정확히 두 명이다.
 - 이름은 2~30자다.
 - `EMAIL`은 email 형식, `KAKAO`는 하이픈 없는 국내 휴대전화 번호 형식을 사용한다.
 - 두 서명자의 역할과 연락처는 중복될 수 없다.
 - 연락처 원문은 모두싸인 Adapter 전달에만 사용하고 API 응답·DB·로그에 저장하지 않는다.
-- 서버는 C-6이 private Storage에 확정·저장한 합의서 PDF를 읽고 SHA-256을 검증한 뒤,
+- 서버는 대조에서 확정된 수정 계약서 PDF를 private Storage에서 읽고 SHA-256을 검증한 뒤,
   모두싸인 `POST /embedded-drafts`의 `file.base64`, `file.extension=pdf`로 전달한다.
-  C-7은 PDF를 다시 렌더링하지 않으며 합의서 원문을 로컬 임시 파일이나 로그에 남기지 않는다.
+  PDF를 다시 렌더링하지 않으며 계약서 원문을 로컬 임시 파일이나 로그에 남기지 않는다.
 - 응답은 `signature`, `editor_url`, `expires_at`을 가진다. `editor_url`은 약 2시간
   유효한 민감 URL이며 `Cache-Control: no-store`로 한 번만 반환하고 DB·로그·멱등
   재생값에 저장하지 않는다.
@@ -446,7 +436,7 @@ private Storage에 저장하며, 저장 경로·SHA-256·페이지 수·합의�
   `READY_TO_SIGN`을 유지한다. 인증 후 최신 원본 상태가 `ABORTED` 또는
   `PROCESSING_FAILED`이면 계약을 `SIGNING → READY_TO_SIGN`으로 되돌리고 각각
   `SIGNATURE_ABORTED`, `SIGNATURE_FAILED`를 기록한다. 실패·중단 시도를 자동 재요청하지
-  않으며 사용자가 현재 합의서를 다시 확인하고 새 `Idempotency-Key`와
+  않으며 사용자가 현재 수정 계약서를 다시 확인하고 새 `Idempotency-Key`와
   `confirmed=true`로 요청해야 한다.
 - 재요청은 새 `Signature` 시도를 만들고 이전 terminal 레코드와 외부 초안·문서 ID를
   보존한다. 단일 서명 조회는 가장 최근 시도를 반환한다. 같은 멱등 키 재생이나 활성
@@ -537,7 +527,8 @@ DOCUMENT_UPLOADED, UNDERSTOOD_TERMS_SAVED,
 ANALYSIS_STARTED, ANALYSIS_RESTARTED, ANALYSIS_COMPLETED, ANALYSIS_FAILED,
 REVIEW_ITEM_SELECTION_UPDATED, ADJUSTMENT_DRAFT_CREATED, ADJUSTMENT_SENT,
 ADJUSTMENT_OPENED, ADJUSTMENT_RESPONDED, ADJUSTMENT_CONFIRMED,
-ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, SIGNATURE_DRAFT_CREATED,
+ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, REVISED_CONTRACT_REVIEW_CREATED,
+REVISED_CONTRACT_CONFIRMED, SIGNATURE_DRAFT_CREATED,
 SIGNATURE_REQUESTED, SIGNATURE_STARTED,
 SIGNATURE_COMPLETED, SIGNATURE_ABORTED, SIGNATURE_FAILED, OBLIGATION_CREATED,
 EVIDENCE_LINK_CREATED, EVIDENCE_SUBMITTED, EVIDENCE_APPROVED,
@@ -546,7 +537,7 @@ EVIDENCE_DISPUTED, RENEWAL_DECISION_SAVED
 
 계약 생성, 문서 업로드와 사용자 조건 저장부터 각각 `CONTRACT_CREATED`,
 `DOCUMENT_UPLOADED`, `UNDERSTOOD_TERMS_SAVED`를 기록한다. 분석의 최초 접수·수동
-재시작·완료·실패, 조정 초안·발송·열람·응답·확정·만료, 합의서 생성, 서명 초안·
+재시작·완료·실패, 조정 초안·발송·열람·응답·확정·만료, 수정 계약서 대조·확인, 서명 초안·
 요청·진행·종료, 대표 의무 생성·증빙 링크·제출·검토, 재계약 의사 저장도 위 대응
 이벤트를 상태 변경과 같은 트랜잭션에 기록한다. 같은 선택의 반복 저장이나 공개 `/open`
 재호출처럼 상태가 바뀌지 않는 멱등 재생은 새 이벤트를 만들지 않는다.
@@ -581,8 +572,9 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 | Contract `DRAFT → ANALYZING` | OWNER의 분석 시작 | 소유 계약의 `CONTRACT` 문서, 실행 중 작업 없음 | `AnalysisTask=QUEUED`, `ANALYSIS_STARTED` |
 | Contract `ANALYZING → REVIEW_REQUIRED` | SYSTEM의 분석 성공 | 검증된 분석 결과 | canonical 승격, 첫 명확한 대표 의무 자동 생성, `ANALYSIS_COMPLETED` |
 | Contract `REVIEW_REQUIRED → NEGOTIATING` | OWNER의 조정 요청 발송 | 선택된 1~4개 항목, `confirmed=true` | 공개 토큰·만료시각, 항목 `SENT`, `ADJUSTMENT_SENT` |
-| Contract `NEGOTIATING → READY_TO_SIGN` | OWNER의 최종 조정 확정 | 응답 완료, 항목별 유효한 resolution | 수락 항목 `RESOLVED`, 원안 유지 항목 `KEPT_ORIGINAL`, 확정 문구, `ADJUSTMENT_CONFIRMED` |
-| Contract `READY_TO_SIGN` 유지 | OWNER의 임베디드 초안 생성 | 현재 합의서·버전 일치, 서명자 2명, `confirmed=true` | `Signature=EDITING`, `modusign_draft_id`, `SIGNATURE_DRAFT_CREATED`; 발송 없음 |
+| Contract `NEGOTIATING` 유지 | OWNER의 최종 조정 확정 | 응답 완료, 항목별 유효한 resolution | 수락 항목 `RESOLVED`, 원안 유지 항목 `KEPT_ORIGINAL`, 확정 문구, `ADJUSTMENT_CONFIRMED` |
+| Contract `NEGOTIATING → READY_TO_SIGN` | OWNER의 수정본 대조 최종 확인 | 최신 수정본, 모든 대조 항목 명시 확인 | 대조 `CONFIRMED`, 문서 ID·SHA-256 고정, `REVISED_CONTRACT_CONFIRMED` |
+| Contract `READY_TO_SIGN` 유지 | OWNER의 임베디드 초안 생성 | 최신 확정 수정본 일치, 서명자 2명, `confirmed=true` | `Signature=EDITING`, `modusign_draft_id`, `SIGNATURE_DRAFT_CREATED`; 발송 없음 |
 | Contract `READY_TO_SIGN → SIGNING` | SYSTEM의 인증된 모두싸인 발송 상태 반영 | 초안과 외부 문서 연결, 최신 원본 `ON_GOING` | `Signature=SIGNING`, 외부 문서 ID, `SIGNATURE_STARTED` |
 | Contract `SIGNING → SIGNED` | SYSTEM의 인증된 모두싸인 완료 반영 | 멱등 웹훅 저장 및 최신 상태 조회 결과 `COMPLETED` | Signature 완료와 `AuditEvent` |
 | Contract `SIGNING → READY_TO_SIGN` | SYSTEM의 서명 중단·실패 반영 | 최신 인증 원본이 `ABORTED`·`PROCESSING_FAILED` | terminal Signature와 `SIGNATURE_ABORTED`·`SIGNATURE_FAILED` 보존, 자동 재요청 금지 |
@@ -591,7 +583,7 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 | Adjustment `SENT / OPENED → RESPONDED` | AGENCY의 `/responses` | 모든 항목의 최초이자 유효한 일괄 응답 | 응답·`responded_at`; SENT이면 같은 시각의 `opened_at`; `AuditEvent` |
 | Adjustment `RESPONDED → CONFIRMED` | OWNER의 최종 확정 | 모든 항목의 유효한 resolution | 관련 ReviewItem 최종 상태, 최종 문구, `ADJUSTMENT_CONFIRMED` |
 | Adjustment `SENT / OPENED → EXPIRED` | SYSTEM의 만료 판정 | 현재 시각이 `expires_at` 이상, 미응답 | 상태와 `AuditEvent`; 이후 응답 금지 |
-| Signature `REQUEST_READY → REQUESTING` | OWNER의 초안 생성 | 확정 합의서·서명자·명시 승인 | PDF 생성과 외부 초안 호출 시작 |
+| Signature `REQUEST_READY → REQUESTING` | OWNER의 초안 생성 | 확정 수정 계약서·서명자·명시 승인 | 저장 PDF 무결성 검증과 외부 초안 호출 시작 |
 | Signature `REQUESTING → EDITING` | OWNER의 초안 생성 성공 | 원본 `DRAFT`, 초안 ID 존재 | `SIGNATURE_DRAFT_CREATED`, 민감 편집 URL은 비저장 |
 | Signature `REQUESTING → FAILED` | SYSTEM의 PDF·초안 생성 실패 | 외부 문서 발송 전 실패 | 완료 시각과 `SIGNATURE_FAILED`, Contract는 `READY_TO_SIGN` 유지 |
 | Signature `EDITING → SIGNING` | SYSTEM의 외부 상태 반영 | 사용자가 편집기에서 발송, 인증 이벤트와 최신 원본 `ON_GOING` | 외부 문서 ID·fingerprint·`SIGNATURE_STARTED` |

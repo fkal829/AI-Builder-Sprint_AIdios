@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 export function ConfirmModal({
   open,
+  eyebrow = "서명 전 최종 확인",
   title,
   body,
   confirmLabel,
@@ -13,6 +14,8 @@ export function ConfirmModal({
   onCancel,
 }: {
   open: boolean;
+  /** 제목 위 작은 라벨 — 어떤 종류의 확인인지 표시 (기본값: 서명 전 최종 확인) */
+  eyebrow?: string;
   title: string;
   body: ReactNode;
   confirmLabel: string;
@@ -30,9 +33,7 @@ export function ConfirmModal({
         className="w-full max-w-[400px] animate-fade-up rounded-2xl border-2 border-ink bg-white p-5"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-1 text-xs font-medium text-gray500">
-          서명 전 최종 확인
-        </div>
+        <div className="mb-1 text-xs font-medium text-gray500">{eyebrow}</div>
         <h2 className="text-base font-black text-ink">{title}</h2>
         <div className="mt-2 text-[13px] leading-relaxed text-gray700">{body}</div>
         <div className="mt-4 flex gap-2">

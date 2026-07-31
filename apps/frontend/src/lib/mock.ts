@@ -306,6 +306,7 @@ export const DEMO_CONTRACT: ContractDetail = {
     {
       id: "cl_period",
       title: "계약 기간 · 자동연장",
+      docClauseId: "c4",
       state: "COUNTER_RECEIVED",
       signal: "NEEDS_CHECK",
       original: {
@@ -337,6 +338,7 @@ export const DEMO_CONTRACT: ContractDetail = {
     {
       id: "cl_monthly",
       title: "매달 내는 금액",
+      docClauseId: "c6",
       state: "AGREED",
       signal: "MISMATCH",
       original: {
@@ -363,6 +365,7 @@ export const DEMO_CONTRACT: ContractDetail = {
     {
       id: "cl_content",
       title: "콘텐츠 수량 · 보장",
+      docClauseId: "c3",
       state: "AGREED",
       signal: "UNCLEAR",
       original: {
@@ -389,6 +392,7 @@ export const DEMO_CONTRACT: ContractDetail = {
     {
       id: "cl_penalty",
       title: "중도 해지 정산금",
+      docClauseId: "c9",
       state: "KEPT_ORIGINAL",
       signal: "MISMATCH",
       original: {
@@ -418,6 +422,7 @@ export const DEMO_CONTRACT: ContractDetail = {
     {
       id: "cl_total",
       title: "총 계약금액",
+      docClauseId: "c5",
       state: "AGREED",
       signal: "MISMATCH",
       original: {
@@ -444,6 +449,7 @@ export const DEMO_CONTRACT: ContractDetail = {
     {
       id: "cl_refund",
       title: "환불 조건",
+      docClauseId: "c5",
       state: "ACCEPT_SELECTED",
       signal: "NO_BASIS",
       original: {

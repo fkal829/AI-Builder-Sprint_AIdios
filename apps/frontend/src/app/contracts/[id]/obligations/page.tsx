@@ -52,6 +52,14 @@ export default function ObligationsPage() {
             )}
           </div>
 
+          <a
+            href={`/contracts/${id}/performance`}
+            className="flex items-center justify-between rounded-lg border border-gray300 bg-white px-3.5 py-3 text-[13px] font-bold text-ink hover:bg-paper"
+          >
+            광고효과 관리 보기
+            <span className="text-gray500">›</span>
+          </a>
+
           {decision === "APPROVED" ? (
             <div className="rounded-lg border-2 border-amber700 bg-amber50 px-4 py-3 text-center">
               <div className="text-sm font-black text-amber700">

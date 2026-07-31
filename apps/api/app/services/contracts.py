@@ -153,7 +153,14 @@ def _contract_from_record(record: ContractRecord) -> Contract:
     )
 
 
-def _list_item_from_record(record: ContractRecord, *, today: date) -> ContractListItem:
+def contract_d_days(
+    record: ContractRecord, *, today: date
+) -> tuple[int | None, int | None, int | None]:
+    """Return (expiry, termination-notice, auto-renewal) D-day counts.
+
+    Shared by list rendering, the C-9 renewal review window, and C-10's
+    dashboard so the D-30/D-14/D-7 boundaries stay identical everywhere.
+    """
     expiry_d_day = (record.end_date - today).days if record.end_date else None
     termination_notice_d_day = (
         (record.termination_notice_date - today).days
@@ -162,6 +169,13 @@ def _list_item_from_record(record: ContractRecord, *, today: date) -> ContractLi
     )
     auto_renewal_d_day = (
         expiry_d_day if record.renewal_type == "AUTO" and record.end_date else None
+    )
+    return expiry_d_day, termination_notice_d_day, auto_renewal_d_day
+
+
+def _list_item_from_record(record: ContractRecord, *, today: date) -> ContractListItem:
+    expiry_d_day, termination_notice_d_day, auto_renewal_d_day = contract_d_days(
+        record, today=today
     )
     return ContractListItem(
         id=record.id,
@@ -177,14 +191,8 @@ def _list_item_from_record(record: ContractRecord, *, today: date) -> ContractLi
 
 
 def _is_renewal_review_window(record: ContractRecord, *, today: date) -> bool:
-    expiry_d_day = (record.end_date - today).days if record.end_date else None
-    termination_notice_d_day = (
-        (record.termination_notice_date - today).days
-        if record.termination_notice_date
-        else None
-    )
-    auto_renewal_d_day = (
-        expiry_d_day if record.renewal_type == "AUTO" and record.end_date else None
+    expiry_d_day, termination_notice_d_day, auto_renewal_d_day = contract_d_days(
+        record, today=today
     )
     return any(
         d_day is not None and 0 <= d_day <= upper_bound

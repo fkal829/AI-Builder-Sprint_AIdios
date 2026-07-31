@@ -17,6 +17,7 @@ from app.services.agreements import AgreementService
 from app.services.analysis import AnalysisService
 from app.services.contracts import ContractService
 from app.services.counterproposal import CounterproposalComparator
+from app.services.dashboard import DashboardService
 from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.obligations import ObligationService
@@ -241,6 +242,12 @@ async def get_modusign_webhook_service(
         modusign=modusign,
         webhook_secret=get_settings().modusign_webhook_secret,
     )
+
+
+async def get_dashboard_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> DashboardService:
+    return DashboardService(repository=supabase)
 
 
 async def get_current_owner_id(

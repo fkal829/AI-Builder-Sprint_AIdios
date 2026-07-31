@@ -28,6 +28,7 @@ from app.core.enums import (
     PublicTokenScope,
     RenewalDecisionType,
     ReviewItemStatus,
+    ReviewSignalType,
     SuggestionChoice,
     VerificationStatus,
 )
@@ -51,6 +52,7 @@ from app.repositories.contracts import (
     RenewalDecisionSaveOutcome,
     RenewalDecisionSaveResult,
 )
+from app.repositories.dashboard import DashboardReviewItem
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
 from app.repositories.obligations import (
@@ -789,6 +791,131 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("계약 목록 조회에 실패했습니다.") from error
         return [_contract_record_from_row(row, owner_id=owner_id) for row in response.data or []]
+
+    async def list_dashboard_obligations(
+        self, *, owner_id: UUID
+    ) -> Sequence[ObligationRecord]:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract_ids = {
+                    contract_id
+                    for owner, contract_id in self._mock_owned_contracts
+                    if owner == owner_id
+                }
+                return [
+                    _obligation_record_from_mock(obligation)
+                    for contract_id, obligation in self._mock_obligations.items()
+                    if contract_id in contract_ids
+                ]
+
+        contract_ids = [record.id for record in await self.list(owner_id=owner_id)]
+        if not contract_ids:
+            return []
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("obligations")
+                    .select(
+                        "id,contract_id,title,due_date,assignee,evidence_type,"
+                        "source_document_id,source_page,source_text,confidence,"
+                        "evidence_url,status,submitted_at,reviewed_at,"
+                        "payment_condition_met"
+                    )
+                    .in_("contract_id", [str(contract_id) for contract_id in contract_ids])
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("대시보드 이행 항목 집계에 실패했습니다.") from error
+        return [_obligation_record_from_row(row) for row in response.data or []]
+
+    async def list_dashboard_review_items(
+        self, *, owner_id: UUID
+    ) -> Sequence[DashboardReviewItem]:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract_ids = {
+                    contract_id
+                    for owner, contract_id in self._mock_owned_contracts
+                    if owner == owner_id
+                }
+                # `_mock_review_item_details` carries the full analysis-produced
+                # ReviewItem (including `type`); `_mock_review_items` is the
+                # narrower projection that adjustment confirmation updates to
+                # RESOLVED/KEPT_ORIGINAL. Live mode has a single `review_items`
+                # row per item, so mock mode must merge both to match it.
+                status_overrides = {
+                    item.id: item.status for item in self._mock_review_items.values()
+                }
+                return [
+                    DashboardReviewItem(
+                        contract_id=detail.contract_id,
+                        type=detail.type,
+                        status=status_overrides.get(detail.id, detail.status),
+                    )
+                    for detail in self._mock_review_item_details.values()
+                    if detail.contract_id in contract_ids
+                ]
+
+        contract_ids = [record.id for record in await self.list(owner_id=owner_id)]
+        if not contract_ids:
+            return []
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("review_items")
+                    .select("contract_id,type,status")
+                    .in_("contract_id", [str(contract_id) for contract_id in contract_ids])
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("대시보드 검토 신호 집계에 실패했습니다.") from error
+        return [
+            DashboardReviewItem(
+                contract_id=UUID(str(row["contract_id"])),
+                type=ReviewSignalType(row["type"]),
+                status=ReviewItemStatus(row["status"]),
+            )
+            for row in response.data or []
+        ]
+
+    async def list_dashboard_adjustment_request_item_counts(
+        self, *, owner_id: UUID
+    ) -> Sequence[int]:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract_ids = {
+                    contract_id
+                    for owner, contract_id in self._mock_owned_contracts
+                    if owner == owner_id
+                }
+                return [
+                    len(request.items)
+                    for request in self._mock_adjustment_requests.values()
+                    if request.contract_id in contract_ids
+                    and request.status != AdjustmentRequestStatus.DRAFT
+                ]
+
+        contract_ids = [record.id for record in await self.list(owner_id=owner_id)]
+        if not contract_ids:
+            return []
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("adjustment_requests")
+                    .select("status,adjustment_request_items(review_item_id)")
+                    .in_("contract_id", [str(contract_id) for contract_id in contract_ids])
+                    .neq("status", AdjustmentRequestStatus.DRAFT.value)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("대시보드 조정 항목 집계에 실패했습니다.") from error
+        return [len(row.get("adjustment_request_items") or []) for row in response.data or []]
 
     async def list_owned_obligations(
         self,

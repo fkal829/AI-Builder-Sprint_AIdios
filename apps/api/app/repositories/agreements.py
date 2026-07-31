@@ -20,6 +20,10 @@ class AgreementCreationContext:
 class AgreementRecord:
     agreement: Agreement
     adjustment_request_id: UUID
+    pdf_storage_path: str
+    pdf_sha256: str
+    pdf_size_bytes: int
+    pdf_page_count: int
     created_at: datetime
 
 

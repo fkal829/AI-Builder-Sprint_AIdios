@@ -1,6 +1,7 @@
-"""Render a confirmed agreement into the PDF supplied to Modusign.
+"""Render a confirmed agreement into its immutable private-PDF artifact.
 
-The PDF is created in memory only.  It is not written to local disk, storage, or logs.
+Callers create the bytes in memory and store them only through the private Storage adapter.
+This renderer never writes to disk or logs agreement contents.
 """
 
 from io import BytesIO
@@ -27,7 +28,9 @@ class AgreementPdfRenderer:
 
     def render(self, agreement: Agreement) -> bytes:
         buffer = BytesIO()
-        canvas = Canvas(buffer, pagesize=A4, pageCompression=1)
+        # ``invariant`` prevents timestamps/random identifiers in the PDF trailer so the
+        # stored artifact is reproducible from the same confirmed agreement data.
+        canvas = Canvas(buffer, pagesize=A4, pageCompression=1, invariant=1)
         font_name = self._register_font()
         width, height = A4
         left = 18 * mm
@@ -45,29 +48,30 @@ class AgreementPdfRenderer:
                 y -= size + gap
 
         line(agreement.title, size=16, gap=10)
-        line(f"Version: {agreement.version}", size=9)
-        line(f"Original contract: {agreement.original_contract.title}")
-        line(f"Original signed date: {agreement.original_contract.signed_date.isoformat()}")
-        line("Agreement summary", size=12, gap=7)
+        line(f"버전: {agreement.version}", size=9)
+        line(f"원계약 제목: {agreement.original_contract.title}")
+        line(f"원계약 체결일: {agreement.original_contract.signed_date.isoformat()}")
+        line(f"원계약 문서 ID: {agreement.original_contract.document_id}", size=8)
+        line("계약 조건 요약", size=12, gap=7)
         for label, value in (
-            ("Term and payment", agreement.condition_summary.term_and_payment),
-            ("Deliverables and reporting", agreement.condition_summary.deliverables_and_reporting),
-            ("Termination and renewal", agreement.condition_summary.termination_and_renewal),
+            ("계약기간·총액·결제", agreement.condition_summary.term_and_payment),
+            ("산출물·채널·보고", agreement.condition_summary.deliverables_and_reporting),
+            ("해지·환불·자동갱신", agreement.condition_summary.termination_and_renewal),
             (
-                "Rights, safety and liability",
+                "권리·안전·책임",
                 agreement.condition_summary.rights_safety_and_liability,
             ),
         ):
             line(f"{label}: {value}")
-        line("Agreed adjustments", size=12, gap=7)
+        line("확정된 조정 조항", size=12, gap=7)
         for index, clause in enumerate(agreement.clauses, start=1):
             line(f"{index}. [{clause.category}] {clause.outcome}")
-            line(f"Before: {clause.before}")
-            line(f"After: {clause.after}")
+            line(f"변경 전: {clause.before}")
+            line(f"변경 후: {clause.after}")
             if clause.reason:
-                line(f"Reason: {clause.reason}")
+                line(f"사유: {clause.reason}")
         line(agreement.unchanged_terms_policy)
-        line("Signature fields are placed by the requester in Modusign.", size=9)
+        line("서명란은 모두싸인 편집기에서 요청자가 직접 배치합니다.", size=9)
         canvas.save()
         return buffer.getvalue()
 

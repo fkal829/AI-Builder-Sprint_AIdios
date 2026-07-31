@@ -164,6 +164,8 @@ async def get_agreement_service(
 ) -> AgreementService:
     return AgreementService(
         repository=supabase,
+        storage=supabase,
+        pdf_renderer=AgreementPdfRenderer(font_path=get_settings().agreement_pdf_font_path),
         idempotency=IdempotencyService(supabase),
     )
 
@@ -175,8 +177,8 @@ async def get_signature_service(
     return SignatureService(
         repository=supabase,
         agreements=supabase,
+        storage=supabase,
         modusign=modusign,
-        agreement_pdf=AgreementPdfRenderer(font_path=get_settings().agreement_pdf_font_path),
         embedded_redirect_url=get_settings().modusign_embedded_redirect_url,
     )
 

@@ -124,7 +124,8 @@ The default `MODUSIGN_MODE=mock` never calls Modusign and is used by automated t
 To enable a real no-template embedded draft, set `MODUSIGN_MODE=live` together with
 `MODUSIGN_ACCOUNT_EMAIL` and `MODUSIGN_API_KEY` in the server-only `.env` file.
 Set `MODUSIGN_EMBEDDED_REDIRECT_URL` to an HTTPS frontend URL only when users should return
-there after final sending. The API creates an in-memory agreement PDF and calls
+there after final sending. C-6 renders the confirmed amendment agreement exactly once and
+stores it in private Storage with its SHA-256. C-7 downloads that immutable artifact and calls
 `POST /embedded-drafts`; it returns a short-lived editor URL but never sends a signing request.
 The user must place signature fields and press send in the Modusign editor. Set
 `AGREEMENT_PDF_FONT_PATH` to a Korean TTF font in non-Windows deployments. Do not commit the

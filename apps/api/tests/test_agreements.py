@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 import pytest
@@ -218,6 +219,11 @@ async def test_confirmation_resolves_items_and_creates_deterministic_agreement(
     assert agreement["clauses"][1]["after"] == "대행사 역제안 문구"
     assert "추가 확인 필요" in agreement["condition_summary"]["deliverables_and_reporting"]
     assert agreement["signature_roles"] == ["OWNER", "AGENCY"]
+    stored = adapter.mock_agreements[contract_id]
+    assert stored.pdf_storage_path in adapter.mock_objects
+    assert stored.pdf_page_count >= 1
+    assert adapter.mock_objects[stored.pdf_storage_path].startswith(b"%PDF-")
+    assert stored.pdf_sha256 == sha256(adapter.mock_objects[stored.pdf_storage_path]).hexdigest()
 
     replay = await client.post(
         f"/api/v1/contracts/{contract_id}/agreement",

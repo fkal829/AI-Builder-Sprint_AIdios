@@ -22,6 +22,53 @@ from app.services.state_machine import InvalidStatusTransition
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _implemented_canonical_operations(canonical: dict):
+    """Yield operations that are expected to exist in the FastAPI runtime now."""
+
+    for path, path_item in canonical["paths"].items():
+        for method, operation in path_item.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            if operation.get("x-implementation-status") == "planned":
+                continue
+            yield path, method, operation
+
+
+def test_canonical_openapi_marks_only_the_four_p2_operations_as_planned() -> None:
+    canonical = yaml.safe_load(
+        (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    declared_statuses = {
+        operation.get("x-implementation-status")
+        for path_item in canonical["paths"].values()
+        for method, operation in path_item.items()
+        if method in {"get", "post", "put", "patch", "delete"}
+    }
+    planned = {
+        (method.upper(), path): operation["operationId"]
+        for path, path_item in canonical["paths"].items()
+        for method, operation in path_item.items()
+        if method in {"get", "post", "put", "patch", "delete"}
+        and operation.get("x-implementation-status") == "planned"
+    }
+
+    assert declared_statuses <= {None, "planned"}
+    assert planned == {
+        ("POST", "/contracts/{contract_id}/performance-reports"): "createPerformanceReport",
+        (
+            "POST",
+            "/contracts/{contract_id}/performance-reports/{report_id}/extract",
+        ): "extractPerformanceReport",
+        (
+            "PATCH",
+            "/contracts/{contract_id}/performance-reports/{report_id}",
+        ): "confirmPerformanceReport",
+        ("GET", "/contracts/{contract_id}/performance"): "getContractPerformance",
+    }
+
+
 async def test_invalid_transition_body_and_header_share_request_id() -> None:
     test_app = FastAPI()
     install_http_contract(test_app)
@@ -137,9 +184,7 @@ def test_fastapi_operation_ids_match_canonical_openapi() -> None:
     )
     expected = {
         (method.upper(), f"/api/v1{path}"): operation["operationId"]
-        for path, path_item in canonical["paths"].items()
-        for method, operation in path_item.items()
-        if method in {"get", "post", "put", "patch", "delete"}
+        for path, method, operation in _implemented_canonical_operations(canonical)
     }
     relative_expected = {
         (method, path.removeprefix("/api/v1")): operation_id
@@ -193,27 +238,24 @@ def test_runtime_openapi_response_statuses_and_sensitive_headers_match_canonical
     )
     generated = app.openapi()
 
-    for path, path_item in canonical["paths"].items():
+    for path, method, operation in _implemented_canonical_operations(canonical):
         runtime_path = generated["paths"][f"/api/v1{path}"]
-        for method, operation in path_item.items():
-            if method not in {"get", "post", "put", "patch", "delete"}:
-                continue
-            expected_responses = operation["responses"]
-            actual_responses = runtime_path[method]["responses"]
-            assert set(actual_responses) == set(expected_responses), (
-                method,
-                path,
-            )
-            for status, response in expected_responses.items():
-                if "$ref" in response:
-                    response = canonical["components"]["responses"][
-                        response["$ref"].rsplit("/", 1)[1]
-                    ]
-                if "Cache-Control" in response.get("headers", {}):
-                    assert "Cache-Control" in actual_responses[status].get(
-                        "headers",
-                        {},
-                    ), (method, path, status)
+        expected_responses = operation["responses"]
+        actual_responses = runtime_path[method]["responses"]
+        assert set(actual_responses) == set(expected_responses), (
+            method,
+            path,
+        )
+        for status, response in expected_responses.items():
+            if "$ref" in response:
+                response = canonical["components"]["responses"][
+                    response["$ref"].rsplit("/", 1)[1]
+                ]
+            if "Cache-Control" in response.get("headers", {}):
+                assert "Cache-Control" in actual_responses[status].get(
+                    "headers",
+                    {},
+                ), (method, path, status)
 
 
 def test_runtime_openapi_metadata_and_security_match_canonical() -> None:
@@ -228,9 +270,6 @@ def test_runtime_openapi_metadata_and_security_match_canonical() -> None:
     assert generated["servers"] == canonical["servers"]
     assert generated["security"] == canonical["security"]
     assert generated["components"]["securitySchemes"] == canonical["components"]["securitySchemes"]
-    for path, path_item in canonical["paths"].items():
+    for path, method, operation in _implemented_canonical_operations(canonical):
         runtime_path = generated["paths"][f"/api/v1{path}"]
-        for method, operation in path_item.items():
-            if method not in {"get", "post", "put", "patch", "delete"}:
-                continue
-            assert runtime_path[method].get("security") == operation.get("security"), (method, path)
+        assert runtime_path[method].get("security") == operation.get("security"), (method, path)

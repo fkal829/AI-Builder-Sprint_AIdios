@@ -1,49 +1,27 @@
-"""P2-C-1 repository boundary for revision/flag/inquiry-draft storage.
+"""P2-C-1 repository boundary for `PerformanceReport` revision persistence.
 
-`PerformanceReport` (upload, extraction, status UPLOADED/EXTRACTED) is P2-B's
-schema and migration. This Protocol only covers what P2-C owns — appending an
-immutable revision and reading it back — so P2-C-3/P2-C-4 can build the
-confirm/correct and aggregation APIs against it once P2-B's foundation lands.
-Until then, implementations are in-memory fakes (see tests).
+The schema (`app/schemas/performance.py`) came out of the P2-0 common-contract
+PR (#66) and is the shared source of truth for both P2-B and P2-C — it already
+embeds each revision's flags/inquiry drafts and enforces the append-only
+invariants (version sequencing, `corrected_from_revision_id` chain,
+`current_revision` correctness) via Pydantic validators. This Protocol only
+covers what P2-C owns on top of that: appending an already-validated revision
+and reading the report back. Until P2-B's upload/extract migration lands,
+implementations are in-memory fakes (see tests).
 """
 
-from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
-from app.schemas.performance import (
-    PerformanceFlag,
-    PerformanceInquiryDraft,
-    PerformanceReportRevision,
-)
+from app.schemas.performance import PerformanceReport, PerformanceReportRevision
 
 
-class PerformanceRevisionRepository(Protocol):
+class PerformanceReportRepository(Protocol):
+    async def get_report(self, *, report_id: UUID) -> PerformanceReport | None: ...
+
     async def append_revision(
-        self,
-        *,
-        revision: PerformanceReportRevision,
-        flags: Sequence[PerformanceFlag],
-        inquiry_drafts: Sequence[PerformanceInquiryDraft],
-    ) -> PerformanceReportRevision:
-        """Store a new revision (plus its flags and inquiry drafts) and make
-        it the report's current revision. Never mutates a prior revision."""
+        self, *, report_id: UUID, revision: PerformanceReportRevision
+    ) -> PerformanceReport:
+        """Append an already-validated revision to the report's history and
+        make it current. Never mutates a previously stored revision."""
         ...
-
-    async def get_current_revision(
-        self, *, report_id: UUID
-    ) -> PerformanceReportRevision | None: ...
-
-    async def list_revisions(
-        self, *, report_id: UUID
-    ) -> Sequence[PerformanceReportRevision]:
-        """Version-ascending, append-only history for one report."""
-        ...
-
-    async def list_flags_for_revision(
-        self, *, report_revision_id: UUID
-    ) -> Sequence[PerformanceFlag]: ...
-
-    async def get_inquiry_draft(
-        self, *, flag_id: UUID
-    ) -> PerformanceInquiryDraft | None: ...

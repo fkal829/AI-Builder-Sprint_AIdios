@@ -15,6 +15,7 @@ import type {
   ContractDetail,
   ContractSummary,
   DashboardStats,
+  SuggestionChoice,
 } from "./types";
 
 type PublicResponseInput = {
@@ -76,9 +77,39 @@ type UnderstoodTermInput = {
 
 type ApiContract = { id: string };
 type ApiDocument = { id: string };
+type ApiReviewItem = {
+  id: string; type: LiveReviewItem["type"]; plain_explanation: string; source_page: number | null;
+  source_text: string | null; source_confidence: number | null; basis_text: string;
+  suggestion_accept: string; suggestion_compromise: string; suggestion_request: string;
+  user_choice: SuggestionChoice | null;
+};
+
 type ApiAnalysisTask = {
   status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
   error_code: string | null;
+  result: { review_items: ApiReviewItem[] } | null;
+};
+
+export type LiveReviewItem = {
+  id: string;
+  type: "MISMATCH" | "NO_BASIS" | "UNCLEAR" | "MISSING" | "NEEDS_CHECK";
+  plainExplanation: string;
+  sourcePage: number | null;
+  sourceText: string | null;
+  sourceConfidence: number | null;
+  basisText: string;
+  suggestionAccept: string;
+  suggestionCompromise: string;
+  suggestionRequest: string;
+  userChoice: SuggestionChoice | null;
+};
+
+export type LiveContractReview = {
+  title: string;
+  counterpartyName: string;
+  status: ContractSummary["status"];
+  understood: UnderstoodTermInput | null;
+  items: LiveReviewItem[];
 };
 
 export class PublicApiError extends Error {
@@ -108,6 +139,8 @@ export interface DataAdapter {
   saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput): Promise<void>;
   startContractAnalysis(contractId: string, documentId: string): Promise<void>;
   getContractAnalysis(contractId: string): Promise<ApiAnalysisTask>;
+  getLiveContractReview(contractId: string): Promise<LiveContractReview>;
+  selectReviewItem(contractId: string, itemId: string, choice: SuggestionChoice): Promise<void>;
   /** GET /api/v1/public/adjustment-requests/{token} */
   getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic | null>;
   /** POST /api/v1/public/adjustment-requests/{token}/open */
@@ -164,7 +197,25 @@ class MockAdapter implements DataAdapter {
   async getContractAnalysis(_contractId: string): Promise<ApiAnalysisTask> {
     void _contractId;
     await delay(120);
-    return { status: "COMPLETED", error_code: null };
+    return { status: "COMPLETED", error_code: null, result: { review_items: [] } };
+  }
+
+  async getLiveContractReview(_contractId: string): Promise<LiveContractReview> {
+    void _contractId;
+    return {
+      title: DEMO_CONTRACT.summary.title,
+      counterpartyName: DEMO_CONTRACT.summary.counterpartyName,
+      status: DEMO_CONTRACT.summary.status,
+      understood: null,
+      items: [],
+    };
+  }
+
+  async selectReviewItem(_contractId: string, _itemId: string, _choice: SuggestionChoice) {
+    void _contractId;
+    void _itemId;
+    void _choice;
+    await delay(120);
   }
 
   async getAdjustmentRequest(token: string) {
@@ -309,6 +360,38 @@ class ApiAdapter extends MockAdapter {
       `/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`,
       { headers: this.ownerHeaders() },
     );
+  }
+
+  async getLiveContractReview(contractId: string): Promise<LiveContractReview> {
+    const [contract, task] = await Promise.all([
+      this.request<{ title: string; counterparty_name: string; status: ContractSummary["status"]; understood_term: Record<string, unknown> | null }>(
+        `/api/v1/contracts/${encodeURIComponent(contractId)}`,
+        { headers: this.ownerHeaders() },
+      ),
+      this.getContractAnalysis(contractId),
+    ]);
+    if (task.status !== "COMPLETED" || !task.result) {
+      throw new PublicApiError(409, "ANALYSIS_NOT_COMPLETED", "분석이 아직 완료되지 않았습니다.");
+    }
+    return {
+      title: contract.title,
+      counterpartyName: contract.counterparty_name,
+      status: contract.status,
+      understood: contract.understood_term as UnderstoodTermInput | null,
+      items: task.result.review_items.map((item) => ({
+        id: item.id, type: item.type, plainExplanation: item.plain_explanation,
+        sourcePage: item.source_page, sourceText: item.source_text, sourceConfidence: item.source_confidence,
+        basisText: item.basis_text, suggestionAccept: item.suggestion_accept,
+        suggestionCompromise: item.suggestion_compromise, suggestionRequest: item.suggestion_request,
+        userChoice: item.user_choice,
+      })),
+    };
+  }
+
+  async selectReviewItem(contractId: string, itemId: string, choice: SuggestionChoice): Promise<void> {
+    await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/review-items/${encodeURIComponent(itemId)}`, {
+      method: "PATCH", headers: this.ownerHeaders(), body: JSON.stringify({ user_choice: choice }),
+    });
   }
 
   async getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic> {

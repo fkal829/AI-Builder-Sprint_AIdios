@@ -25,7 +25,9 @@ ALLOWED_CONTRACT_TRANSITIONS: dict[ContractStatus, set[ContractStatus]] = {
         ContractStatus.READY_TO_SIGN,
     },
     ContractStatus.NEGOTIATING: {ContractStatus.READY_TO_SIGN},
-    ContractStatus.READY_TO_SIGN: {ContractStatus.SIGNING},
+    # A terminal document status can be observed before its ON_GOING webhook.
+    # Reconciliation may therefore atomically catch READY_TO_SIGN up to SIGNED.
+    ContractStatus.READY_TO_SIGN: {ContractStatus.SIGNING, ContractStatus.SIGNED},
     ContractStatus.SIGNING: {ContractStatus.SIGNED, ContractStatus.READY_TO_SIGN},
     ContractStatus.SIGNED: {ContractStatus.IN_PROGRESS},
     ContractStatus.IN_PROGRESS: {
@@ -86,6 +88,7 @@ ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS: dict[
     },
     InternalSignatureStatus.EDITING: {
         InternalSignatureStatus.SIGNING,
+        InternalSignatureStatus.COMPLETED,
         InternalSignatureStatus.ABORTED,
         InternalSignatureStatus.FAILED,
     },
@@ -186,6 +189,9 @@ AUDIT_RULES: dict[tuple[StateEntityType, StrEnum, StrEnum], AuditRule] = {
         ContractStatus.SIGNING,
     ): _audit_rule(AuditEventType.SIGNATURE_REQUESTED, actors=(AuditActorType.OWNER,)),
     (StateEntityType.CONTRACT, ContractStatus.SIGNING, ContractStatus.SIGNED): _audit_rule(
+        AuditEventType.SIGNATURE_COMPLETED, actors=(AuditActorType.SYSTEM,)
+    ),
+    (StateEntityType.CONTRACT, ContractStatus.READY_TO_SIGN, ContractStatus.SIGNED): _audit_rule(
         AuditEventType.SIGNATURE_COMPLETED, actors=(AuditActorType.SYSTEM,)
     ),
     (
@@ -289,6 +295,11 @@ AUDIT_RULES: dict[tuple[StateEntityType, StrEnum, StrEnum], AuditRule] = {
     (OBLIGATION_ENTITY, ObligationStatus.PENDING, ObligationStatus.SUBMITTED): _audit_rule(
         AuditEventType.EVIDENCE_SUBMITTED, actors=(AuditActorType.AGENCY,)
     ),
+    (
+        StateEntityType.INTERNAL_SIGNATURE,
+        InternalSignatureStatus.EDITING,
+        InternalSignatureStatus.COMPLETED,
+    ): _audit_rule(AuditEventType.SIGNATURE_COMPLETED, actors=(AuditActorType.SYSTEM,)),
     (
         OBLIGATION_ENTITY,
         ObligationStatus.SUBMITTED,

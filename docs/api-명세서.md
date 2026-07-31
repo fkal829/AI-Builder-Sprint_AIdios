@@ -1035,6 +1035,12 @@ fingerprint로 사용한다. `requester.email`은 인증에 사용하지 않는�
 `SIGNING → READY_TO_SIGN`으로 되돌린다. 종료 상태 뒤의 오래된 이벤트는 상태를
 되돌리지 않으며 실패·중단 뒤 서명을 자동 재요청하지 않는다.
 
+초안 생성 시에는 내부 Signature ID와 서버 secret으로 만든 HMAC 증명 metadata를 모두싸인
+문서에 함께 넣는다. 웹훅 payload의 문서 ID만으로 내부 시도를 추측하지 않고, 최신 문서
+조회에서 이 metadata를 검증한 경우에만 연결한다. `COMPLETED`가 `ON_GOING`보다 먼저
+처리되면 최신 원본 상태를 우선하여 `EDITING/READY_TO_SIGN → COMPLETED/SIGNED`를 같은
+트랜잭션으로 보정한다.
+
 ## 7. 이행 항목·증빙 — B
 
 ### 7.1 이행 항목 목록
@@ -1200,12 +1206,14 @@ URL은 `http://` 또는 `https://`, 최대 2,048자만 허용한다. 서버는 U
 
 - 내부:
   `REQUEST_READY → REQUESTING → EDITING → SIGNING → COMPLETED / ABORTED / FAILED`
+  (`COMPLETED` 최신 상태가 먼저 도착하면 `EDITING → COMPLETED` 보정 허용)
 - 원본 enum: `DRAFT`, `SCHEDULED`, `ON_PROCESSING`, `ON_GOING`, `COMPLETED`,
   `ABORTED`, `PROCESSING_FAILED`
 - 정상 원본 흐름:
   `DRAFT → ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED`
 - 초안 생성 동안 Contract는 `READY_TO_SIGN`을 유지한다. 인증된 최신 `ON_GOING`은
   Contract `READY_TO_SIGN → SIGNING`, 최신 `COMPLETED`는 `SIGNING → SIGNED`,
+  단 `ON_GOING`보다 먼저 처리된 `COMPLETED`는 `READY_TO_SIGN → SIGNED` 보정,
   최신 `ABORTED`·`PROCESSING_FAILED`는 `SIGNING → READY_TO_SIGN`이다.
   실패·중단 후 재요청은 새 멱등 키를 사용한 사용자의 명시적 확인에서만 허용한다.
 

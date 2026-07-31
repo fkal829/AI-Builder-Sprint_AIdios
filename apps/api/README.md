@@ -149,6 +149,11 @@ The user must place signature fields and press send in the Modusign editor. Set
 `AGREEMENT_PDF_FONT_PATH` to a Korean TTF font in non-Windows deployments. Do not commit the
 `.env` file or log signer contact values, agreement contents, or the embedded editor URL.
 
+For C-8 webhook reconciliation, set a long random `MODUSIGN_WEBHOOK_SECRET` in the server-only
+`.env` file and configure the identical `X-Modusign-Webhook-Secret` custom header in Modusign's
+webhook registration. When it is empty or does not match, `/api/v1/webhooks/modusign` rejects the
+event with `401`; it never accepts an unsigned webhook.
+
 ## Supabase live 준비
 
 `SUPABASE_MODE=live`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`는 실행 중인 API의

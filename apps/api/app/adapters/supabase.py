@@ -60,6 +60,7 @@ from app.repositories.review_items import (
     ReviewItemSelectionResult,
 )
 from app.repositories.signatures import SignatureRecord
+from app.repositories.webhooks import ModusignWebhookReceipt
 from app.schemas.agreements import Agreement
 from app.schemas.analysis import Analysis, ReviewItem
 from app.schemas.contracts import ContractCreate, RenewalDecision
@@ -112,6 +113,16 @@ class MockObligation:
     submitted_at: datetime | None = None
     reviewed_at: datetime | None = None
     payment_condition_met: bool = False
+
+
+@dataclass(frozen=True)
+class MockModusignWebhookEvent:
+    deduplication_key: str
+    event_id: str | None
+    event_type: str
+    document_id: str
+    received_at: datetime
+    processed_at: datetime | None = None
 
 
 def utc_now() -> datetime:
@@ -168,6 +179,7 @@ class SupabaseAdapter:
         self._mock_final_clauses: dict[UUID, tuple[FinalClauseRecord, ...]] = {}
         self._mock_agreements: dict[UUID, AgreementRecord] = {}
         self._mock_signatures: dict[UUID, SignatureRecord] = {}
+        self._mock_modusign_webhook_events: dict[str, MockModusignWebhookEvent] = {}
         if mode == "live":
             self._client = create_client(url, service_role_key)
 
@@ -240,6 +252,10 @@ class SupabaseAdapter:
     @property
     def mock_signatures(self) -> dict[UUID, SignatureRecord]:
         return dict(self._mock_signatures)
+
+    @property
+    def mock_modusign_webhook_events(self) -> dict[str, MockModusignWebhookEvent]:
+        return dict(self._mock_modusign_webhook_events)
 
     async def authenticate_owner(self, token: str) -> UUID | None:
         if self.mode == "mock":
@@ -2364,6 +2380,189 @@ class SupabaseAdapter:
             return None
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _signature_record_from_row(row)
+
+    async def record_modusign_webhook_event(
+        self,
+        *,
+        receipt: ModusignWebhookReceipt,
+    ) -> bool:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if receipt.deduplication_key in self._mock_modusign_webhook_events:
+                    return False
+                self._mock_modusign_webhook_events[receipt.deduplication_key] = (
+                    MockModusignWebhookEvent(
+                        deduplication_key=receipt.deduplication_key,
+                        event_id=receipt.event_id,
+                        event_type=receipt.event_type,
+                        document_id=receipt.document_id,
+                        received_at=receipt.received_at,
+                    )
+                )
+                return True
+
+        client = self._require_live_client()
+        params = {
+            "p_deduplication_key": receipt.deduplication_key,
+            "p_event_id": receipt.event_id,
+            "p_event_type": receipt.event_type,
+            "p_document_id": receipt.document_id,
+            "p_received_at": receipt.received_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("record_modusign_webhook_event", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("Unable to persist the webhook event.") from error
+        return bool(response.data)
+
+    async def mark_modusign_webhook_processed(
+        self,
+        *,
+        deduplication_key: str,
+        processed_at: datetime,
+    ) -> None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                event = self._mock_modusign_webhook_events.get(deduplication_key)
+                if event is not None and event.processed_at is None:
+                    self._mock_modusign_webhook_events[deduplication_key] = replace(
+                        event,
+                        processed_at=processed_at,
+                    )
+            return
+
+        client = self._require_live_client()
+        params = {
+            "p_deduplication_key": deduplication_key,
+            "p_processed_at": processed_at.isoformat(),
+        }
+        try:
+            await asyncio.to_thread(
+                lambda: client.rpc("mark_modusign_webhook_processed", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("Unable to record webhook processing.") from error
+
+    async def apply_modusign_document_status(
+        self,
+        *,
+        signature_id: UUID,
+        document_id: str,
+        event_key: str,
+        status: ModusignStatus,
+        processed_at: datetime,
+    ) -> bool:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                record = self._mock_signatures.get(signature_id)
+                if record is None:
+                    return False
+                signature = record.signature
+                contract = self._mock_contracts.get(signature.contract_id)
+                if contract is None or signature.status in {
+                    InternalSignatureStatus.COMPLETED,
+                    InternalSignatureStatus.ABORTED,
+                    InternalSignatureStatus.FAILED,
+                }:
+                    return False
+                if signature.modusign_document_id not in (None, document_id):
+                    return False
+
+                signature_update = {
+                    "modusign_document_id": document_id,
+                    "modusign_status": status,
+                    "last_event_id": event_key,
+                }
+                audit_event: str | None = None
+                target_contract_status = contract.status
+                if status == ModusignStatus.ON_GOING:
+                    if (
+                        signature.status == InternalSignatureStatus.EDITING
+                        and contract.status == ContractStatus.READY_TO_SIGN
+                    ):
+                        signature_update["status"] = InternalSignatureStatus.SIGNING
+                        target_contract_status = ContractStatus.SIGNING
+                        audit_event = "SIGNATURE_STARTED"
+                    elif signature.status != InternalSignatureStatus.SIGNING:
+                        return False
+                elif status == ModusignStatus.COMPLETED:
+                    if signature.status not in {
+                        InternalSignatureStatus.EDITING,
+                        InternalSignatureStatus.SIGNING,
+                    } or contract.status not in {
+                        ContractStatus.READY_TO_SIGN,
+                        ContractStatus.SIGNING,
+                    }:
+                        return False
+                    signature_update["status"] = InternalSignatureStatus.COMPLETED
+                    signature_update["completed_at"] = processed_at
+                    target_contract_status = ContractStatus.SIGNED
+                    audit_event = "SIGNATURE_COMPLETED"
+                elif status in {ModusignStatus.ABORTED, ModusignStatus.PROCESSING_FAILED}:
+                    if signature.status not in {
+                        InternalSignatureStatus.EDITING,
+                        InternalSignatureStatus.SIGNING,
+                    }:
+                        return False
+                    signature_update["status"] = (
+                        InternalSignatureStatus.ABORTED
+                        if status == ModusignStatus.ABORTED
+                        else InternalSignatureStatus.FAILED
+                    )
+                    signature_update["completed_at"] = processed_at
+                    if contract.status == ContractStatus.SIGNING:
+                        target_contract_status = ContractStatus.READY_TO_SIGN
+                    audit_event = (
+                        "SIGNATURE_ABORTED"
+                        if status == ModusignStatus.ABORTED
+                        else "SIGNATURE_FAILED"
+                    )
+                elif status not in {
+                    ModusignStatus.DRAFT,
+                    ModusignStatus.SCHEDULED,
+                    ModusignStatus.ON_PROCESSING,
+                } or signature.status != InternalSignatureStatus.EDITING:
+                    return False
+
+                self._mock_signatures[signature_id] = replace(
+                    record,
+                    signature=signature.model_copy(update=signature_update),
+                )
+                if target_contract_status != contract.status:
+                    self._mock_contracts[contract.id] = replace(
+                        contract,
+                        status=target_contract_status,
+                    )
+                if audit_event is not None:
+                    self._mock_audit_events.append(
+                        MockAuditEvent(
+                            id=uuid4(),
+                            contract_id=contract.id,
+                            event_type=audit_event,
+                            actor_type="SYSTEM",
+                            summary="Modusign document status was reconciled.",
+                            created_at=processed_at,
+                        )
+                    )
+                return True
+
+        client = self._require_live_client()
+        params = {
+            "p_signature_id": str(signature_id),
+            "p_modusign_document_id": document_id,
+            "p_last_event_id": event_key,
+            "p_modusign_status": status.value,
+            "p_processed_at": processed_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("apply_modusign_document_status", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("Unable to reconcile the signature status.") from error
+        return bool(response.data)
 
     async def send_adjustment_with_audit(
         self,

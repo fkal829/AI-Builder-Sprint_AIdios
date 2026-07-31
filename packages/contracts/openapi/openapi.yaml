@@ -763,9 +763,13 @@ paths:
         인증 성공 후 이벤트를 멱등하게 저장하고 즉시 204를 반환한다. 문서 상태 조회와
         계약 상태 전이는 응답 이후 비동기로 수행한다. 실제 수신 payload에서 안정적인
         이벤트 ID를 검증할 수 있으면 사용하고, 없으면 event.type, document.id,
-        canonical payload hash를 중복 판단 fingerprint로 사용한다. 최신 원본 상태가
+        canonical payload hash를 중복 판단 fingerprint로 사용한다. 임베디드 초안에 넣은
+        내부 Signature ID와 HMAC 증명 metadata를 최신 문서 조회 결과에서 검증한 경우에만
+        외부 문서와 연결한다. 최신 원본 상태가
         COMPLETED이면 Contract를 SIGNING에서 SIGNED로, ABORTED 또는 PROCESSING_FAILED면
-        READY_TO_SIGN으로 전환하고 대응 감사 이벤트를 원자적으로 기록한다. 종료 상태의
+        READY_TO_SIGN으로 전환하고 대응 감사 이벤트를 원자적으로 기록한다. COMPLETED가
+        ON_GOING보다 먼저 관측되면 EDITING/READY_TO_SIGN에서 COMPLETED/SIGNED로 원자적으로
+        보정한다. 종료 상태의
         오래된 이벤트는 상태를 되돌리지 않으며 실패 후 서명을 자동 재요청하지 않는다.
       security:
         - ModusignWebhookSecret: []

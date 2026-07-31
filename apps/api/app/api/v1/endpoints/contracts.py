@@ -25,6 +25,7 @@ from app.api.dependencies import (
     get_document_access_service,
     get_document_upload_service,
     get_idempotency_service,
+    get_obligation_service,
     get_review_item_service,
     get_signature_service,
     get_understood_term_service,
@@ -50,6 +51,7 @@ from app.schemas.contracts import (
     RenewalDecisionRequest,
 )
 from app.schemas.documents import Document, DocumentAccess, DocumentType
+from app.schemas.obligations import ObligationList
 from app.schemas.signatures import (
     EmbeddedSignatureDraft,
     EmbeddedSignatureDraftCreate,
@@ -66,6 +68,7 @@ from app.services.documents import (
     read_upload_content,
 )
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
+from app.services.obligations import ObligationService
 from app.services.review_items import ReviewItemService
 from app.services.signatures import SignatureService
 from app.services.understood_terms import UnderstoodTermService
@@ -264,6 +267,29 @@ async def get_contract_timeline(
 ) -> ApiResponse[list[AuditEvent]]:
     timeline = await service.timeline(owner_id=owner_id, contract_id=contract_id)
     return ApiResponse(data=timeline, error=None, request_id=request_id(request))
+
+
+@router.get(
+    "/{contract_id}/obligations",
+    response_model=ApiResponse[ObligationList],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약을 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
+async def list_contract_obligations(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ObligationService, Depends(get_obligation_service)],
+) -> ApiResponse[ObligationList]:
+    obligations = await service.list(owner_id=owner_id, contract_id=contract_id)
+    return ApiResponse(
+        data=list(obligations),
+        error=None,
+        request_id=request_id(request),
+    )
 
 
 @router.put(

@@ -19,6 +19,7 @@ from app.services.contracts import ContractService
 from app.services.counterproposal import CounterproposalComparator
 from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
+from app.services.obligations import ObligationService
 from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
 from app.services.signatures import SignatureService
@@ -147,6 +148,12 @@ async def get_contract_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> ContractService:
     return ContractService(supabase)
+
+
+async def get_obligation_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> ObligationService:
+    return ObligationService(supabase)
 
 
 async def get_public_token_service(

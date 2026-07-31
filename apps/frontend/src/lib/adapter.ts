@@ -46,6 +46,13 @@ export class PublicApiError extends Error {
   }
 }
 
+/** 조항 하나에 대한 AI 설명 — 원문 뷰어의 "AI 설명 더 보기" 버튼 응답 형태 */
+export interface ClauseExplanation {
+  summary: string;
+  officialBasis: string | null;
+  confidence: number | null;
+}
+
 export interface DataAdapter {
   /** GET /api/v1/dashboard */
   getDashboard(): Promise<{ stats: DashboardStats; contracts: ContractSummary[] }>;
@@ -59,6 +66,8 @@ export interface DataAdapter {
   submitAdjustmentResponses(token: string, responses: PublicResponseInput[]): Promise<void>;
   /** POST /api/v1/public/obligations/{token}/evidence */
   submitObligationEvidence(token: string, evidenceUrl: string): Promise<void>;
+  /** GET /api/v1/contracts/{contractId}/clauses/{clauseId}/explain — 조항 AI 설명(온디맨드) */
+  explainClause(contractId: string, clauseId: string): Promise<ClauseExplanation>;
 }
 
 /** 네트워크 지연 흉내 (분석 진행 화면 등에서 사용) */
@@ -98,6 +107,26 @@ class MockAdapter implements DataAdapter {
     void token;
     void evidenceUrl;
     await delay(240);
+  }
+
+  async explainClause(_contractId: string, clauseId: string) {
+    await delay(700); // 실제 LLM 호출 체감을 위해 조회보다 살짝 긴 지연
+    const card = DEMO_CONTRACT.clauses.find((c) => c.docClauseId === clauseId);
+    if (card) {
+      return {
+        summary: card.aiExplanation,
+        officialBasis: card.officialBasis,
+        confidence: card.confidence,
+      };
+    }
+    const doc = DEMO_CONTRACT.document.clauses.find((d) => d.id === clauseId);
+    return {
+      summary:
+        doc?.note ??
+        "이 조항은 AI가 특별히 확인이 필요하다고 표시한 위험 신호는 없어요. 비교적 무난하게 넘어가셔도 괜찮은 조항이에요.",
+      officialBasis: null,
+      confidence: null,
+    };
   }
 }
 

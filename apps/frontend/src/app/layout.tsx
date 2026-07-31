@@ -18,7 +18,7 @@ const gaegu = Gaegu({
 });
 
 export const metadata: Metadata = {
-  title: "안심홍보계약",
+  title: "단디계약",
   description:
     "읽지 못한 계약을 읽어주고, 하지 못한 말을 대신해준다 — 소상공인용 광고대행 계약 CLM",
 };

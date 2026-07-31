@@ -19,7 +19,7 @@ export function AgencyShell({
       {/* 무가입 안내 바 */}
       <div className="border-b border-gray200 bg-white">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-5 py-3">
-          <span className="text-sm font-black text-ink">안심홍보계약</span>
+          <span className="text-sm font-black text-ink">단디계약</span>
           <span className="rounded-full bg-gray100 px-2.5 py-1 text-[11px] font-medium text-gray700">
             회원가입 없이 · 토큰 접근
           </span>

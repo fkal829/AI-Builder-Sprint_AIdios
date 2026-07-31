@@ -1,5 +1,5 @@
 /* ===========================================================================
-   안심홍보계약 — 도메인 타입 (기획안 §10 데이터 모델 · §11 상태 머신)
+   단디계약 — 도메인 타입 (기획안 §10 데이터 모델 · §11 상태 머신)
    내부 enum은 원문 그대로 유지하고, 사용자 표시는 status.ts에서 매핑.
    =========================================================================== */
 
@@ -158,6 +158,8 @@ export interface ClauseCard {
   userChoice: SuggestionChoice | null;
   /** 대행사 응답 (발송 후) */
   agencyResponse: AgencyResponse | null;
+  /** 원문 뷰어(document.clauses)에서 대응하는 조항 id — 좌우 연동용 */
+  docClauseId?: string;
 }
 
 export interface ContractSummary {

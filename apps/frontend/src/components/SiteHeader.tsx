@@ -39,7 +39,7 @@ export function SiteHeader() {
             ✓
           </span>
           <span className="text-[19px] font-black tracking-tight text-ink">
-            안심홍보계약
+            단디계약
           </span>
         </Link>
 

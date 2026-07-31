@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { useAsync } from "@/lib/hooks";
 import { adapter } from "@/lib/adapter";
+import {
+  loadRequestDraft,
+  saveRequestDraft,
+  type RequestDraft,
+} from "@/lib/requestDraft";
 
 /* ⑥ 조정 요청서 미리보기 (주경로) — 선택한 문구 확인·발송 전 최종확인.
    톤완충 자유입력(P1)은 접힌 부가 경로로 분리. */
@@ -15,15 +20,47 @@ export default function RequestPreviewPage() {
   const state = useAsync(() => adapter.getContract(id), [id]);
   const [confirm, setConfirm] = useState(false);
 
+  // 뷰어에서 인라인으로 작성한 초안이 있으면 우선 사용(없으면 목업 userChoice로 폴백)
+  const [draft, setDraft] = useState<RequestDraft | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(loadRequestDraft(id));
+  }, [id]);
+
   const items = useMemo(() => {
     if (state.status !== "ready") return [];
-    return state.data.clauses
-      .filter((c) => c.userChoice === "REQUEST" || c.userChoice === "COMPROMISE")
+    const autoItems = state.data.clauses
       .map((c) => {
-        const s = c.suggestions.find((x) => x.choice === c.userChoice)!;
-        return { id: c.id, title: c.title, text: s.text };
-      });
-  }, [state]);
+        // "!"로 확인하지 않은 확인 필요 조항은 초안에 없으므로 요청서에 포함하지 않는다
+        const d = draft?.[c.id];
+        if (!d) return null;
+        if (d.choice !== "REQUEST" && d.choice !== "COMPROMISE") return null;
+        return { id: c.id, title: c.title, text: d.text, manual: false };
+      })
+      .filter(
+        (x): x is { id: string; title: string; text: string; manual: boolean } => x !== null,
+      );
+
+    const manualItems = Object.entries(draft ?? {})
+      .filter(([, d]) => d.origin === "manual" && d.text.trim() !== "")
+      .map(([clauseId, d]) => ({
+        id: clauseId,
+        title: d.title ?? "추가한 조항",
+        text: d.text,
+        manual: true,
+      }));
+
+    return [...autoItems, ...manualItems];
+  }, [state, draft]);
+
+  // 추가 조항 삭제 — draft에서 제거하고 즉시 localStorage 갱신
+  const removeManualItem = (clauseId: string) => {
+    if (!draft) return;
+    const next = { ...draft };
+    delete next[clauseId];
+    setDraft(next);
+    saveRequestDraft(id, next);
+  };
 
   return (
     <AppScreen
@@ -47,11 +84,22 @@ export default function RequestPreviewPage() {
             {items.map((it) => (
               <div
                 key={it.id}
-                className="rounded-lg bg-paper px-3.5 py-3 text-[13px]"
+                className="flex items-start justify-between gap-2 rounded-lg bg-paper px-3.5 py-3 text-[13px]"
               >
-                <span className="font-bold text-ink">{it.title}</span>
-                <span className="text-gray500"> → </span>
-                <span className="text-gray700">“{it.text}”</span>
+                <div>
+                  <span className="font-bold text-ink">{it.title}</span>
+                  <span className="text-gray500"> → </span>
+                  <span className="text-gray700">“{it.text}”</span>
+                </div>
+                {it.manual && (
+                  <button
+                    type="button"
+                    onClick={() => removeManualItem(it.id)}
+                    className="flex-none text-[11px] font-bold text-gray500 hover:text-amber700"
+                  >
+                    ✕ 삭제
+                  </button>
+                )}
               </div>
             ))}
           </div>

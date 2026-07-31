@@ -3,17 +3,19 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from app.core.enums import IdempotencyOperation, PublicTokenScope
+from app.core.enums import IdempotencyOperation, ObligationStatus, PublicTokenScope
 from app.core.errors import ErrorCode
 from app.core.exceptions import PublicTokenExpired, ResourceNotFound
 from app.repositories.obligations import (
     EvidenceLinkCreateOutcome,
+    EvidenceReviewOutcome,
     EvidenceSubmissionOutcome,
     ObligationRecord,
     ObligationRepository,
 )
 from app.schemas.adjustments import PublicSubmission
 from app.schemas.obligations import (
+    EvidenceReviewRequest,
     EvidenceSubmission,
     Obligation,
     PublicLink,
@@ -132,6 +134,31 @@ class ObligationService:
         if outcome == EvidenceSubmissionOutcome.INVALID_STATUS_TRANSITION:
             raise InvalidStatusTransition("증빙은 PENDING 상태에서 한 번만 제출할 수 있습니다.")
         return PublicSubmission(submitted=True)
+
+    async def review_evidence(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        obligation_id: UUID,
+        payload: EvidenceReviewRequest,
+    ) -> Obligation:
+        result = await self._repository.review_obligation_evidence_with_audit(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            obligation_id=obligation_id,
+            decision=ObligationStatus(payload.decision),
+            reviewed_at=self._utc_now(),
+        )
+        if result.outcome == EvidenceReviewOutcome.NOT_FOUND:
+            raise ResourceNotFound()
+        if result.outcome == EvidenceReviewOutcome.INVALID_STATUS_TRANSITION:
+            raise InvalidStatusTransition(
+                "SUBMITTED 상태의 이행 항목만 승인하거나 이의를 제기할 수 있습니다."
+            )
+        if result.obligation is None:
+            raise RuntimeError("증빙 검토 저장 결과가 없습니다.")
+        return _obligation_from_record(result.obligation)
 
     def _replay_evidence_link(self, stored: dict[str, Any]) -> PublicLink:
         _, public_tokens = self._link_dependencies()

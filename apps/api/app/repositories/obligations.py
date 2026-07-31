@@ -41,6 +41,18 @@ class EvidenceSubmissionOutcome(StrEnum):
     INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
 
 
+class EvidenceReviewOutcome(StrEnum):
+    REVIEWED = "REVIEWED"
+    NOT_FOUND = "NOT_FOUND"
+    INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
+
+
+@dataclass(frozen=True)
+class EvidenceReviewResult:
+    outcome: EvidenceReviewOutcome
+    obligation: ObligationRecord | None
+
+
 class ObligationRepository(Protocol):
     async def list_owned_obligations(
         self,
@@ -65,3 +77,13 @@ class ObligationRepository(Protocol):
         evidence_url: str,
         submitted_at: datetime,
     ) -> EvidenceSubmissionOutcome: ...
+
+    async def review_obligation_evidence_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        obligation_id: UUID,
+        decision: ObligationStatus,
+        reviewed_at: datetime,
+    ) -> EvidenceReviewResult: ...

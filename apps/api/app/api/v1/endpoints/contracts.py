@@ -51,7 +51,13 @@ from app.schemas.contracts import (
     RenewalDecisionRequest,
 )
 from app.schemas.documents import Document, DocumentAccess, DocumentType
-from app.schemas.obligations import ObligationList, PublicLink, PublicLinkCreate
+from app.schemas.obligations import (
+    EvidenceReviewRequest,
+    Obligation,
+    ObligationList,
+    PublicLink,
+    PublicLinkCreate,
+)
 from app.schemas.signatures import (
     EmbeddedSignatureDraft,
     EmbeddedSignatureDraftCreate,
@@ -321,6 +327,37 @@ async def create_obligation_evidence_link(
     )
     return ApiResponse(
         data=link,
+        error=None,
+        request_id=request_id(request),
+    )
+
+
+@router.patch(
+    "/{contract_id}/obligations/{obligation_id}",
+    response_model=ApiResponse[Obligation],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "이행 항목을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "이행 항목 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "요청 검증 실패"},
+    },
+)
+async def review_obligation_evidence(
+    request: Request,
+    contract_id: UUID,
+    obligation_id: UUID,
+    payload: EvidenceReviewRequest,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ObligationService, Depends(get_obligation_service)],
+) -> ApiResponse[Obligation]:
+    obligation = await service.review_evidence(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        obligation_id=obligation_id,
+        payload=payload,
+    )
+    return ApiResponse(
+        data=obligation,
         error=None,
         request_id=request_id(request),
     )

@@ -111,3 +111,9 @@ class EvidenceSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     evidence_url: EvidenceUrl
+
+
+class EvidenceReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["APPROVED", "DISPUTED"]

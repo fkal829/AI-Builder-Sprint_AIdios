@@ -42,6 +42,10 @@ D-30·D-14·D-7 검토 구간을 다시 확인하고, 실제 선택 변경과
 만료를 다시 검증하고 증빙 URL, `PENDING → SUBMITTED` 상태와
 `EVIDENCE_SUBMITTED` 감사 이벤트를 하나의 트랜잭션으로 저장한다.
 
+`20260730320000_review_obligation_evidence.sql`은 7.5의 소유권과 `SUBMITTED`
+상태를 잠금 검증하고 승인·이의 상태, 검토 시각, 지급 조건 표시와 대응 감사 이벤트를
+하나의 트랜잭션으로 저장한다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

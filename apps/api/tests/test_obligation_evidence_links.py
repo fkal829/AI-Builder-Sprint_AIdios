@@ -8,10 +8,16 @@ from httpx import ASGITransport, AsyncClient
 
 from app.adapters.supabase import MockObligation, SupabaseAdapter
 from app.api.dependencies import get_obligation_service, get_supabase_adapter
-from app.core.enums import ObligationStatus, PublicTokenScope
+from app.core.enums import ContractStatus, ObligationStatus, PublicTokenScope
+from app.core.exceptions import ExternalStorageFailure
 from app.main import app
-from app.repositories.obligations import EvidenceLinkCreateOutcome
-from app.services.idempotency import IdempotencyService
+from app.repositories.contracts import ContractRecord
+from app.repositories.obligations import (
+    EvidenceLinkCreateOutcome,
+    EvidenceLinkCreateResult,
+)
+from app.schemas.obligations import PublicLinkCreate
+from app.services.idempotency import request_fingerprint
 from app.services.obligations import ObligationService
 from app.services.public_tokens import PublicTokenService
 
@@ -24,7 +30,13 @@ MIGRATION = (
     Path(__file__).resolve().parents[3]
     / "supabase"
     / "migrations"
-    / "20260730300000_add_obligation_evidence_links.sql"
+    / "20260730300001_add_obligation_evidence_links.sql"
+)
+IDEMPOTENT_MIGRATION = (
+    Path(__file__).resolve().parents[3]
+    / "supabase"
+    / "migrations"
+    / "20260730330007_make_evidence_link_idempotent.sql"
 )
 
 
@@ -53,6 +65,27 @@ def pending_obligation() -> MockObligation:
     )
 
 
+def contract_record(*, status: ContractStatus = ContractStatus.SIGNED) -> ContractRecord:
+    return ContractRecord(
+        id=CONTRACT_ID,
+        owner_id=OWNER_ID,
+        title="광안리 카페 SNS 광고대행 계약",
+        counterparty_name="부산홍보대행",
+        status=status,
+        signed_date=None,
+        start_date=None,
+        end_date=None,
+        termination_notice_date=None,
+        renewal_type=None,
+        total_amount=None,
+        understood_term=None,
+        renewal_decision=None,
+        modusign_document_id=None,
+        created_at=FIXED_NOW,
+        updated_at=FIXED_NOW,
+    )
+
+
 @pytest.fixture
 async def evidence_link_context():
     adapter = SupabaseAdapter(
@@ -65,10 +98,10 @@ async def evidence_link_context():
         demo_bearer_token=BEARER_TOKEN,
     )
     obligation = pending_obligation()
+    adapter._mock_contracts[CONTRACT_ID] = contract_record()
     adapter._mock_obligations[CONTRACT_ID] = obligation
     service = ObligationService(
         adapter,
-        idempotency=IdempotencyService(adapter, now=lambda: FIXED_NOW),
         public_tokens=PublicTokenService(
             adapter,
             signing_secret=TOKEN_SECRET,
@@ -101,10 +134,7 @@ async def test_creates_and_replays_evidence_link_without_storing_raw_url(
 ) -> None:
     client, adapter, obligation = evidence_link_context
     key = uuid4()
-    path = (
-        f"/api/v1/contracts/{CONTRACT_ID}/obligations/"
-        f"{obligation.id}/evidence-link"
-    )
+    path = f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}/evidence-link"
 
     created = await client.post(
         path,
@@ -116,12 +146,13 @@ async def test_creates_and_replays_evidence_link_without_storing_raw_url(
     assert created.headers["Cache-Control"] == "no-store"
     data = created.json()["data"]
     assert data["scope"] == "OBLIGATION_EVIDENCE"
-    assert data["public_url"].startswith("http://localhost:3000/obligations/")
+    assert data["public_url"].startswith("http://localhost:3000/r/")
+    assert data["public_url"].endswith("/evidence")
     assert data["expires_at"] == (FIXED_NOW + timedelta(hours=72)).isoformat().replace(
         "+00:00", "Z"
     )
 
-    token = data["public_url"].rsplit("/", 1)[-1]
+    token = data["public_url"].split("/r/", 1)[1].removesuffix("/evidence")
     token_records = tuple(adapter.mock_public_tokens.values())
     assert len(token_records) == 1
     assert token_records[0].scope == PublicTokenScope.OBLIGATION_EVIDENCE
@@ -138,8 +169,7 @@ async def test_creates_and_replays_evidence_link_without_storing_raw_url(
     events = [
         event
         for event in adapter.mock_audit_events
-        if event.contract_id == CONTRACT_ID
-        and event.event_type == "EVIDENCE_LINK_CREATED"
+        if event.contract_id == CONTRACT_ID and event.event_type == "EVIDENCE_LINK_CREATED"
     ]
     assert len(events) == 1
     assert events[0].created_at == FIXED_NOW
@@ -154,22 +184,22 @@ async def test_creates_and_replays_evidence_link_without_storing_raw_url(
     assert replay.headers["Cache-Control"] == "no-store"
     assert replay.json()["data"] == data
     assert len(adapter.mock_public_tokens) == 1
-    assert len(
-        [
-            event
-            for event in adapter.mock_audit_events
-            if event.event_type == "EVIDENCE_LINK_CREATED"
-        ]
-    ) == 1
+    assert (
+        len(
+            [
+                event
+                for event in adapter.mock_audit_events
+                if event.event_type == "EVIDENCE_LINK_CREATED"
+            ]
+        )
+        == 1
+    )
 
 
 async def test_rejects_same_key_with_different_expiry(evidence_link_context) -> None:
     client, _adapter, obligation = evidence_link_context
     key = uuid4()
-    path = (
-        f"/api/v1/contracts/{CONTRACT_ID}/obligations/"
-        f"{obligation.id}/evidence-link"
-    )
+    path = f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}/evidence-link"
     first = await client.post(
         path,
         headers=auth_headers(idempotency_key=key),
@@ -186,6 +216,60 @@ async def test_rejects_same_key_with_different_expiry(evidence_link_context) -> 
     assert conflict.status_code == 409
     assert conflict.headers["Cache-Control"] == "no-store"
     assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+
+
+async def test_response_loss_after_commit_replays_without_duplicate_side_effect(
+    evidence_link_context,
+    monkeypatch,
+) -> None:
+    client, adapter, obligation = evidence_link_context
+    key = uuid4()
+    path = f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}/evidence-link"
+    original = adapter.create_obligation_evidence_link_idempotent
+    calls = 0
+
+    async def commit_then_lose_response(**kwargs) -> EvidenceLinkCreateResult:
+        nonlocal calls
+        calls += 1
+        result = await original(**kwargs)
+        if calls == 1:
+            raise ExternalStorageFailure("simulated lost RPC response")
+        return result
+
+    monkeypatch.setattr(
+        adapter,
+        "create_obligation_evidence_link_idempotent",
+        commit_then_lose_response,
+    )
+
+    with pytest.raises(ExternalStorageFailure):
+        await client.post(
+            path,
+            headers=auth_headers(idempotency_key=key),
+            json={"expires_in_hours": 72},
+        )
+
+    replay = await client.post(
+        path,
+        headers=auth_headers(idempotency_key=key),
+        json={"expires_in_hours": 72},
+    )
+
+    assert replay.status_code == 201
+    assert calls == 2
+    assert len(adapter.mock_public_tokens) == 1
+    assert (
+        len(
+            [
+                event
+                for event in adapter.mock_audit_events
+                if event.event_type == "EVIDENCE_LINK_CREATED"
+            ]
+        )
+        == 1
+    )
+    assert len(adapter.mock_idempotency_records) == 1
+    assert adapter.mock_idempotency_records[0].response_status == 201
 
 
 async def test_hides_missing_resources_and_rejects_non_pending_status(
@@ -210,10 +294,7 @@ async def test_hides_missing_resources_and_rejects_non_pending_status(
         updated_at=FIXED_NOW,
     )
     invalid_status = await client.post(
-        (
-            f"/api/v1/contracts/{CONTRACT_ID}/obligations/"
-            f"{obligation.id}/evidence-link"
-        ),
+        (f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}/evidence-link"),
         headers=auth_headers(idempotency_key=uuid4()),
         json={"expires_in_hours": 72},
     )
@@ -228,14 +309,53 @@ async def test_hides_missing_resources_and_rejects_non_pending_status(
     )
 
 
+async def test_rejects_evidence_link_before_contract_is_signed(
+    evidence_link_context,
+) -> None:
+    client, adapter, obligation = evidence_link_context
+    path = f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}/evidence-link"
+
+    for status in (
+        ContractStatus.DRAFT,
+        ContractStatus.ANALYZING,
+        ContractStatus.REVIEW_REQUIRED,
+        ContractStatus.NEGOTIATING,
+        ContractStatus.READY_TO_SIGN,
+        ContractStatus.SIGNING,
+        ContractStatus.COMPLETED,
+        ContractStatus.RENEWAL_DUE,
+    ):
+        adapter._mock_contracts[CONTRACT_ID] = contract_record(status=status)
+        response = await client.post(
+            path,
+            headers=auth_headers(idempotency_key=uuid4()),
+            json={"expires_in_hours": 72},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+
+
+async def test_allows_evidence_link_while_contract_is_in_progress(
+    evidence_link_context,
+) -> None:
+    client, adapter, obligation = evidence_link_context
+    adapter._mock_contracts[CONTRACT_ID] = contract_record(status=ContractStatus.IN_PROGRESS)
+
+    response = await client.post(
+        (f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}/evidence-link"),
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"expires_in_hours": 72},
+    )
+
+    assert response.status_code == 201
+
+
 async def test_validates_auth_header_and_expiry_with_no_store(
     evidence_link_context,
 ) -> None:
     client, _adapter, obligation = evidence_link_context
-    path = (
-        f"/api/v1/contracts/{CONTRACT_ID}/obligations/"
-        f"{obligation.id}/evidence-link"
-    )
+    path = f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}/evidence-link"
     unauthorized = await client.post(
         path,
         headers={"Idempotency-Key": str(uuid4())},
@@ -263,13 +383,19 @@ async def test_validates_auth_header_and_expiry_with_no_store(
 
 async def test_live_adapter_calls_atomic_evidence_link_rpc(monkeypatch) -> None:
     obligation_id = uuid4()
+    idempotency_key = uuid4()
 
     class FakeResponse:
-        data = "CREATED"
+        data: dict[str, str]
 
     class FakeRpc:
+        def __init__(self, data: dict[str, str]) -> None:
+            self._data = data
+
         def execute(self):
-            return FakeResponse()
+            response = FakeResponse()
+            response.data = self._data
+            return response
 
     class FakeClient:
         def __init__(self) -> None:
@@ -277,7 +403,13 @@ async def test_live_adapter_calls_atomic_evidence_link_rpc(monkeypatch) -> None:
 
         def rpc(self, name, params):
             self.calls.append((name, params))
-            return FakeRpc()
+            return FakeRpc(
+                {
+                    "outcome": "CREATED",
+                    "token_id": params["p_public_token_id"],
+                    "expires_at": params["p_token_expires_at"],
+                }
+            )
 
     async def run_inline(function, *args, **kwargs):
         return function(*args, **kwargs)
@@ -306,21 +438,28 @@ async def test_live_adapter_calls_atomic_evidence_link_rpc(monkeypatch) -> None:
         expires_at=FIXED_NOW + timedelta(hours=72),
     )
 
-    outcome = await adapter.create_obligation_evidence_link_with_audit(
+    request_hash = request_fingerprint(PublicLinkCreate(expires_in_hours=72))
+    result = await adapter.create_obligation_evidence_link_idempotent(
         owner_id=OWNER_ID,
         contract_id=CONTRACT_ID,
         obligation_id=obligation_id,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
         public_token=token_record,
     )
 
-    assert outcome == EvidenceLinkCreateOutcome.CREATED
+    assert result.outcome == EvidenceLinkCreateOutcome.CREATED
+    assert result.token_id == token_record.id
+    assert result.expires_at == token_record.expires_at
     assert fake_client.calls == [
         (
-            "create_obligation_evidence_link_with_audit",
+            "create_obligation_evidence_link_idempotent",
             {
                 "p_owner_id": str(OWNER_ID),
                 "p_contract_id": str(CONTRACT_ID),
                 "p_obligation_id": str(obligation_id),
+                "p_idempotency_key": str(idempotency_key),
+                "p_request_hash": request_hash,
                 "p_public_token_id": str(token_record.id),
                 "p_token_hash": token_record.token_hash,
                 "p_token_scope": "OBLIGATION_EVIDENCE",
@@ -337,12 +476,28 @@ def test_migration_persists_token_and_audit_in_one_rpc() -> None:
 
     assert "function public.create_obligation_evidence_link_with_audit" in sql
     assert "contract.owner_id = p_owner_id" in sql
+    assert "for update of obligation, contract" in sql
     assert "v_status <> 'PENDING'" in sql
+    assert "v_contract_status not in ('SIGNED', 'IN_PROGRESS')" in sql
     assert "p_token_scope <> 'OBLIGATION_EVIDENCE'" in sql
     assert "insert into public.public_tokens" in sql
     assert "insert into public.audit_events" in sql
     assert "'EVIDENCE_LINK_CREATED'" in sql
     assert "to service_role" in sql
+
+
+def test_idempotent_migration_commits_replay_token_and_audit_together() -> None:
+    sql = IDEMPOTENT_MIGRATION.read_text(encoding="utf-8")
+
+    assert "function public.create_obligation_evidence_link_idempotent" in sql
+    assert "insert into public.idempotency_records" in sql
+    assert "for update" in sql
+    assert "'outcome', 'REPLAY'" in sql
+    assert "insert into public.public_tokens" in sql
+    assert "insert into public.audit_events" in sql
+    assert "response_status = 201" in sql
+    assert "response_payload = v_replay_payload" in sql
+    assert "from service_role" in sql
 
 
 def test_openapi_exposes_evidence_link_contract() -> None:
@@ -352,11 +507,10 @@ def test_openapi_exposes_evidence_link_contract() -> None:
     ]["post"]
 
     assert set(operation["responses"]) >= {"201", "401", "404", "409", "422"}
-    assert operation["requestBody"]["content"]["application/json"]["schema"][
-        "$ref"
-    ].endswith("/PublicLinkCreate")
+    assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/PublicLinkCreate"
+    )
     assert any(
-        parameter["name"] == "Idempotency-Key"
-        and parameter["required"] is True
+        parameter["name"] == "Idempotency-Key" and parameter["required"] is True
         for parameter in operation["parameters"]
     )

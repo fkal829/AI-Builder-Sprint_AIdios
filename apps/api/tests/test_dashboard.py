@@ -1,33 +1,54 @@
-from datetime import UTC, date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.adapters.supabase import SupabaseAdapter
-from app.api.dependencies import get_supabase_adapter
+from app.adapters.supabase import MockObligation, SupabaseAdapter
+from app.api.dependencies import (
+    get_dashboard_service,
+    get_supabase_adapter,
+)
 from app.core.enums import (
     AdjustmentRequestStatus,
+    AdjustmentResolution,
+    AdjustmentResponseDecision,
+    AgreementClauseCategory,
     ContractStatus,
-    DetectionMethod,
     ObligationStatus,
-    ReviewBasisType,
     ReviewItemStatus,
-    ReviewSeverity,
     ReviewSignalType,
     SuggestionChoice,
-    VerificationStatus,
 )
 from app.main import app
-from app.repositories.adjustments import AdjustmentRequestItemRecord, AdjustmentRequestRecord
+from app.repositories.adjustments import (
+    AdjustmentRequestItemRecord,
+    AdjustmentRequestRecord,
+    AdjustmentResponseRecord,
+    FinalClauseRecord,
+    ReviewItemForAdjustment,
+)
 from app.repositories.contracts import ContractRecord
-from app.schemas.analysis import ReviewItem
+from app.services.dashboard import DashboardService
 
-OWNER_ID = UUID("00000000-0000-4000-8000-000000000091")
-DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000092")
-BEARER_TOKEN = "dashboard-test-owner-token-000000"
-NOW = datetime(2026, 7, 31, 12, tzinfo=UTC)
+OWNER_ID = UUID("00000000-0000-4000-8000-000000000013")
+OTHER_OWNER_ID = UUID("00000000-0000-4000-8000-000000000099")
+DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000041")
+BEARER_TOKEN = "local-demo-owner-token"
 TODAY = date(2026, 7, 31)
+NOW = datetime(2026, 7, 31, 3, tzinfo=UTC)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+
+
+@dataclass(frozen=True)
+class DashboardReviewItem:
+    id: UUID
+    contract_id: UUID
+    type: ReviewSignalType
+    status: ReviewItemStatus
 
 
 @pytest.fixture
@@ -45,42 +66,39 @@ async def dashboard_context():
     async def override_adapter():
         return adapter
 
+    async def override_service():
+        return DashboardService(adapter, now=lambda: NOW)
+
     app.dependency_overrides[get_supabase_adapter] = override_adapter
+    app.dependency_overrides[get_dashboard_service] = override_service
     try:
         async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://testserver"
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
         ) as client:
             yield client, adapter
     finally:
         app.dependency_overrides.clear()
 
 
-def authorization_header(token: str = BEARER_TOKEN) -> dict[str, str]:
+def auth_headers(token: str = BEARER_TOKEN) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def get_dashboard(client: AsyncClient) -> dict:
-    response = await client.get("/api/v1/dashboard", headers=authorization_header())
-    assert response.status_code == 200
-    return response.json()["data"]
-
-
-def add_contract(
-    adapter: SupabaseAdapter,
+def contract_record(
     *,
+    owner_id: UUID = OWNER_ID,
     status: ContractStatus,
     total_amount: int | None = None,
     end_date: date | None = None,
     termination_notice_date: date | None = None,
     renewal_type: str | None = None,
-    contract_id: UUID | None = None,
-) -> UUID:
-    contract_id = contract_id or uuid4()
-    adapter._mock_owned_contracts.add((OWNER_ID, contract_id))
-    adapter._mock_contracts[contract_id] = ContractRecord(
+) -> ContractRecord:
+    contract_id = uuid4()
+    return ContractRecord(
         id=contract_id,
-        owner_id=OWNER_ID,
-        title="대시보드 테스트 계약",
+        owner_id=owner_id,
+        title=f"대시보드 계약 {contract_id}",
         counterparty_name="부산홍보대행",
         status=status,
         signed_date=None,
@@ -95,52 +113,132 @@ def add_contract(
         created_at=NOW,
         updated_at=NOW,
     )
-    return contract_id
 
 
-def make_review_item(
+def seed_contract(adapter: SupabaseAdapter, record: ContractRecord) -> None:
+    adapter._mock_contracts[record.id] = record
+    adapter._mock_owned_contracts.add((record.owner_id, record.id))
+
+
+def seed_review_item(
+    adapter: SupabaseAdapter,
     *,
     contract_id: UUID,
-    item_type: ReviewSignalType,
+    signal: ReviewSignalType,
     status: ReviewItemStatus,
-    item_id: UUID | None = None,
-) -> ReviewItem:
-    return ReviewItem(
-        id=item_id or uuid4(),
+) -> UUID:
+    item_id = uuid4()
+    adapter._mock_review_item_details[item_id] = DashboardReviewItem(
+        id=item_id,
         contract_id=contract_id,
-        type=item_type,
-        severity=ReviewSeverity.CHECK,
-        detection_method=DetectionMethod.DETERMINISTIC,
-        model_confidence=None,
-        model_limitations=None,
-        plain_explanation="설명",
-        basis_type=ReviewBasisType.INTERNAL_RULE,
-        basis_text="계약 원문과 사용자 이해조건 비교",
-        basis_citation=None,
-        related_extracted_term_ids=[uuid4()],
-        source_document_id=None,
-        source_page=None,
-        source_text=None,
-        source_confidence=None,
-        verification_status=VerificationStatus.MISSING_EVIDENCE,
-        suggestion_accept="원안을 수용합니다.",
-        suggestion_compromise="절충안을 제안합니다.",
-        suggestion_request="수정을 요청합니다.",
-        user_choice=None if status == ReviewItemStatus.UNREVIEWED else SuggestionChoice.REQUEST,
+        type=signal,
         status=status,
+    )
+    return item_id
+
+
+def adjustment_item(
+    adapter: SupabaseAdapter,
+    *,
+    contract_id: UUID,
+    item_id: UUID | None = None,
+) -> AdjustmentRequestItemRecord:
+    review_item_id = item_id or uuid4()
+    adapter._mock_review_items[review_item_id] = ReviewItemForAdjustment(
+        id=review_item_id,
+        contract_id=contract_id,
+        status=ReviewItemStatus.SENT,
+        user_choice=SuggestionChoice.REQUEST,
+        suggestion_compromise="조건을 절충해 주세요.",
+        suggestion_request="조건을 명확히 적어 주세요.",
+    )
+    return AdjustmentRequestItemRecord(
+        review_item_id=review_item_id,
+        user_choice=SuggestionChoice.REQUEST,
+        request_text="조건을 명확히 적어 주세요.",
     )
 
 
-def add_review_item(adapter: SupabaseAdapter, item: ReviewItem) -> None:
-    adapter._mock_review_item_details[item.id] = item
+def adjustment_request(
+    *,
+    contract_id: UUID,
+    status: AdjustmentRequestStatus,
+    items: tuple[AdjustmentRequestItemRecord, ...],
+) -> AdjustmentRequestRecord:
+    sent_at = None if status == AdjustmentRequestStatus.DRAFT else NOW
+    return AdjustmentRequestRecord(
+        id=uuid4(),
+        contract_id=contract_id,
+        status=status,
+        items=items,
+        expires_in_hours=72,
+        sent_at=sent_at,
+        expires_at=sent_at,
+        opened_at=None,
+        responded_at=None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
 
 
-async def test_empty_owner_returns_all_zero_dashboard(dashboard_context) -> None:
+def obligation(
+    *,
+    contract_id: UUID,
+    status: ObligationStatus,
+) -> MockObligation:
+    has_submission = status != ObligationStatus.PENDING
+    has_review = status in {
+        ObligationStatus.APPROVED,
+        ObligationStatus.DISPUTED,
+    }
+    return MockObligation(
+        id=uuid4(),
+        contract_id=contract_id,
+        title="인스타그램 게시물 4건",
+        due_date=date(2026, 8, 20),
+        assignee="AGENCY",
+        evidence_type="URL",
+        source_document_id=uuid4(),
+        source_page=1,
+        source_text="인스타그램 게시물 4건을 게시한다.",
+        confidence=0.9,
+        status=status,
+        created_at=NOW,
+        updated_at=NOW,
+        evidence_url="https://example.com/evidence" if has_submission else None,
+        submitted_at=NOW if has_submission else None,
+        reviewed_at=NOW if has_review else None,
+        payment_condition_met=status == ObligationStatus.APPROVED,
+    )
+
+
+def final_clause(
+    *,
+    review_item_id: UUID,
+    resolution: AdjustmentResolution,
+) -> FinalClauseRecord:
+    agreed = resolution != AdjustmentResolution.KEEP_ORIGINAL
+    return FinalClauseRecord(
+        review_item_id=review_item_id,
+        category=AgreementClauseCategory.OTHER,
+        resolution=resolution,
+        outcome="AGREED" if agreed else "KEPT_ORIGINAL",
+        disposition="AGREED" if agreed else "WITHDRAWN",
+        before_text="기존 조건",
+        after_text="최종 조건",
+        reason=None,
+    )
+
+
+async def test_empty_dashboard_returns_zeroes_and_null_signal(
+    dashboard_context,
+) -> None:
     client, _adapter = dashboard_context
 
-    data = await get_dashboard(client)
+    response = await client.get("/api/v1/dashboard", headers=auth_headers())
 
-    assert data == {
+    assert response.status_code == 200
+    assert response.json()["data"] == {
         "total": 0,
         "signing": 0,
         "in_progress": 0,
@@ -159,457 +257,311 @@ async def test_empty_owner_returns_all_zero_dashboard(dashboard_context) -> None
     }
 
 
-async def test_requires_authentication() -> None:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
-        response = await client.get("/api/v1/dashboard")
-    assert response.status_code == 401
-
-
-async def test_counts_contracts_by_status_without_double_counting(dashboard_context) -> None:
-    client, adapter = dashboard_context
-    add_contract(adapter, status=ContractStatus.DRAFT)
-    add_contract(adapter, status=ContractStatus.SIGNING)
-    add_contract(adapter, status=ContractStatus.SIGNING)
-    add_contract(adapter, status=ContractStatus.IN_PROGRESS)
-    add_contract(adapter, status=ContractStatus.RENEWAL_DUE)
-    add_contract(adapter, status=ContractStatus.COMPLETED)
-
-    data = await get_dashboard(client)
-
-    assert data["total"] == 6
-    assert data["signing"] == 2
-    assert data["in_progress"] == 2
-    assert data["completed"] == 1
-
-
-@pytest.mark.parametrize(
-    ("end_days", "notice_days", "renewal_type", "expected"),
-    [
-        (30, None, None, 1),
-        (31, None, None, 0),
-        (None, 14, None, 1),
-        (None, 15, None, 0),
-        (7, None, "AUTO", 1),
-        (None, None, None, 0),
-    ],
-)
-async def test_expiring_soon_boundaries(
-    dashboard_context, end_days, notice_days, renewal_type, expected
-) -> None:
-    client, adapter = dashboard_context
-    add_contract(
-        adapter,
-        status=ContractStatus.IN_PROGRESS,
-        end_date=TODAY + timedelta(days=end_days) if end_days is not None else None,
-        termination_notice_date=(
-            TODAY + timedelta(days=notice_days) if notice_days is not None else None
-        ),
-        renewal_type=renewal_type,
-    )
-
-    data = await get_dashboard(client)
-
-    assert data["expiring_soon"] == expected
-
-
-async def test_expiring_soon_does_not_double_count_a_single_contract(dashboard_context) -> None:
-    client, adapter = dashboard_context
-    add_contract(
-        adapter,
-        status=ContractStatus.IN_PROGRESS,
-        end_date=TODAY + timedelta(days=10),
-        termination_notice_date=TODAY + timedelta(days=5),
-    )
-
-    data = await get_dashboard(client)
-
-    assert data["expiring_soon"] == 1
-
-
-async def test_total_committed_sums_qualifying_statuses_once_each(dashboard_context) -> None:
-    client, adapter = dashboard_context
-    add_contract(adapter, status=ContractStatus.SIGNED, total_amount=1_000_000)
-    add_contract(adapter, status=ContractStatus.IN_PROGRESS, total_amount=2_000_000)
-    add_contract(adapter, status=ContractStatus.RENEWAL_DUE, total_amount=3_000_000)
-    add_contract(adapter, status=ContractStatus.COMPLETED, total_amount=4_000_000)
-    # Not yet committed: excluded even though total_amount is set.
-    add_contract(adapter, status=ContractStatus.NEGOTIATING, total_amount=5_000_000)
-    add_contract(adapter, status=ContractStatus.READY_TO_SIGN, total_amount=6_000_000)
-    # Committed status without a canonical amount contributes nothing.
-    add_contract(adapter, status=ContractStatus.SIGNED, total_amount=None)
-
-    data = await get_dashboard(client)
-
-    assert data["total_committed"] == 1_000_000 + 2_000_000 + 3_000_000 + 4_000_000
-
-
-async def test_obligation_status_counts_and_payment_condition_met_amount(
+async def test_dashboard_aggregates_deterministic_counts_dates_and_amounts(
     dashboard_context,
 ) -> None:
     client, adapter = dashboard_context
-    from app.adapters.supabase import MockObligation
+    signing = contract_record(
+        status=ContractStatus.SIGNING,
+        total_amount=500_000,
+        end_date=date(2026, 8, 30),
+    )
+    in_progress = contract_record(
+        status=ContractStatus.IN_PROGRESS,
+        total_amount=1_000_000,
+        end_date=date(2026, 12, 31),
+        termination_notice_date=date(2026, 8, 14),
+    )
+    renewal_due = contract_record(
+        status=ContractStatus.RENEWAL_DUE,
+        total_amount=2_000_000,
+        end_date=date(2026, 8, 7),
+        renewal_type="AUTO",
+    )
+    completed = contract_record(
+        status=ContractStatus.COMPLETED,
+        total_amount=3_000_000,
+    )
+    signed = contract_record(
+        status=ContractStatus.SIGNED,
+        total_amount=4_000_000,
+        end_date=date(2026, 7, 30),
+    )
+    for record in (signing, in_progress, renewal_due, completed, signed):
+        seed_contract(adapter, record)
 
-    pending_contract = add_contract(adapter, status=ContractStatus.IN_PROGRESS, total_amount=100)
-    submitted_contract = add_contract(
-        adapter, status=ContractStatus.IN_PROGRESS, total_amount=200
+    adapter._mock_obligations[in_progress.id] = obligation(
+        contract_id=in_progress.id,
+        status=ObligationStatus.PENDING,
     )
-    approved_contract = add_contract(
-        adapter, status=ContractStatus.IN_PROGRESS, total_amount=300
+    adapter._mock_obligations[renewal_due.id] = obligation(
+        contract_id=renewal_due.id,
+        status=ObligationStatus.APPROVED,
     )
-    approved_no_amount_contract = add_contract(
-        adapter, status=ContractStatus.IN_PROGRESS, total_amount=None
+    adapter._mock_obligations[completed.id] = obligation(
+        contract_id=completed.id,
+        status=ObligationStatus.SUBMITTED,
     )
-
-    def obligation(contract_id: UUID, status: ObligationStatus) -> MockObligation:
-        return MockObligation(
-            id=uuid4(),
-            contract_id=contract_id,
-            title="산출물",
-            due_date=TODAY,
-            assignee="대행사",
-            evidence_type="URL",
-            source_document_id=uuid4(),
-            source_page=1,
-            source_text="산출물 근거",
-            confidence=0.9,
-            status=status,
-            created_at=NOW,
-            updated_at=NOW,
-            payment_condition_met=status == ObligationStatus.APPROVED,
-        )
-
-    adapter._mock_obligations[pending_contract] = obligation(
-        pending_contract, ObligationStatus.PENDING
-    )
-    adapter._mock_obligations[submitted_contract] = obligation(
-        submitted_contract, ObligationStatus.SUBMITTED
-    )
-    adapter._mock_obligations[approved_contract] = obligation(
-        approved_contract, ObligationStatus.APPROVED
-    )
-    adapter._mock_obligations[approved_no_amount_contract] = obligation(
-        approved_no_amount_contract, ObligationStatus.APPROVED
+    adapter._mock_obligations[signed.id] = obligation(
+        contract_id=signed.id,
+        status=ObligationStatus.APPROVED,
     )
 
-    data = await get_dashboard(client)
+    response = await client.get("/api/v1/dashboard", headers=auth_headers())
 
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 5
+    assert data["signing"] == 1
+    assert data["in_progress"] == 2
+    assert data["completed"] == 1
+    assert data["expiring_soon"] == 3
     assert data["obligation_pending"] == 1
     assert data["obligation_submitted"] == 1
     assert data["obligation_approved"] == 2
-    assert data["payment_condition_met_amount"] == 300
+    assert data["total_committed"] == 10_000_000
+    assert data["payment_condition_met_amount"] == 6_000_000
 
 
-async def test_review_item_status_drives_unresolved_and_clause_counts(dashboard_context) -> None:
-    client, adapter = dashboard_context
-    contract_id = add_contract(adapter, status=ContractStatus.NEGOTIATING)
-    for status in (
-        ReviewItemStatus.UNREVIEWED,
-        ReviewItemStatus.SELECTED,
-        ReviewItemStatus.SENT,
-        ReviewItemStatus.RESOLVED,
-        ReviewItemStatus.RESOLVED,
-        ReviewItemStatus.KEPT_ORIGINAL,
-    ):
-        add_review_item(
-            adapter,
-            make_review_item(
-                contract_id=contract_id,
-                item_type=ReviewSignalType.MISMATCH,
-                status=status,
-            ),
-        )
-
-    data = await get_dashboard(client)
-
-    assert data["unresolved_signals"] == 3
-    assert data["adjustment_agreed_clauses"] == 2
-    assert data["adjustment_rejected_clauses"] == 1
-
-
-async def test_review_item_dashboard_prefers_confirmation_status_override(
+async def test_dashboard_counts_distinct_adjustments_and_uses_fixed_signal_tie_break(
     dashboard_context,
 ) -> None:
-    """Adjustment confirmation only updates the narrow `_mock_review_items`
-    projection, not the canonical detail store, so the dashboard must merge
-    both to match live mode's single `review_items` row."""
     client, adapter = dashboard_context
-    from app.repositories.adjustments import ReviewItemForAdjustment
+    contract = contract_record(status=ContractStatus.NEGOTIATING)
+    seed_contract(adapter, contract)
 
-    contract_id = add_contract(adapter, status=ContractStatus.NEGOTIATING)
-    item_id = uuid4()
-    add_review_item(
-        adapter,
-        make_review_item(
-            contract_id=contract_id,
-            item_type=ReviewSignalType.NO_BASIS,
-            status=ReviewItemStatus.SENT,
-            item_id=item_id,
-        ),
-    )
-    adapter._mock_review_items[item_id] = ReviewItemForAdjustment(
-        id=item_id,
-        contract_id=contract_id,
-        status=ReviewItemStatus.RESOLVED,
-        user_choice=SuggestionChoice.REQUEST,
-        suggestion_compromise="절충안",
-        suggestion_request="요청안",
-    )
-
-    data = await get_dashboard(client)
-
-    assert data["adjustment_agreed_clauses"] == 1
-    assert data["unresolved_signals"] == 0
-
-
-@pytest.mark.parametrize(
-    ("types", "expected"),
-    [
-        (
-            [ReviewSignalType.MISMATCH, ReviewSignalType.MISMATCH, ReviewSignalType.MISSING],
-            "MISMATCH",
-        ),
-        # Tie broken by ReviewSignalType declaration order: MISMATCH before NO_BASIS.
-        ([ReviewSignalType.NO_BASIS, ReviewSignalType.MISMATCH], "MISMATCH"),
-        ([], None),
-    ],
-)
-async def test_most_common_signal_is_deterministic(dashboard_context, types, expected) -> None:
-    client, adapter = dashboard_context
-    contract_id = add_contract(adapter, status=ContractStatus.NEGOTIATING)
-    for item_type in types:
-        add_review_item(
+    for signal in (
+        ReviewSignalType.MISMATCH,
+        ReviewSignalType.MISMATCH,
+        ReviewSignalType.NO_BASIS,
+        ReviewSignalType.NO_BASIS,
+        ReviewSignalType.UNCLEAR,
+    ):
+        seed_review_item(
             adapter,
-            make_review_item(
-                contract_id=contract_id,
-                item_type=item_type,
-                status=ReviewItemStatus.UNREVIEWED,
-            ),
+            contract_id=contract.id,
+            signal=signal,
+            status=ReviewItemStatus.UNREVIEWED,
         )
-
-    data = await get_dashboard(client)
-
-    assert data["most_common_signal"] == expected
-
-
-async def test_most_common_signal_excludes_resolved_items(dashboard_context) -> None:
-    client, adapter = dashboard_context
-    contract_id = add_contract(adapter, status=ContractStatus.NEGOTIATING)
-    add_review_item(
+    seed_review_item(
         adapter,
-        make_review_item(
-            contract_id=contract_id,
-            item_type=ReviewSignalType.MISMATCH,
-            status=ReviewItemStatus.RESOLVED,
-        ),
+        contract_id=contract.id,
+        signal=ReviewSignalType.MISSING,
+        status=ReviewItemStatus.RESOLVED,
     )
 
-    data = await get_dashboard(client)
-
-    assert data["most_common_signal"] is None
-    assert data["unresolved_signals"] == 0
-
-
-async def test_adjustment_requested_clauses_excludes_draft(dashboard_context) -> None:
-    client, adapter = dashboard_context
-    contract_id = add_contract(adapter, status=ContractStatus.NEGOTIATING)
-
-    def request(status: AdjustmentRequestStatus, item_count: int) -> AdjustmentRequestRecord:
-        return AdjustmentRequestRecord(
-            id=uuid4(),
-            contract_id=contract_id,
-            status=status,
-            items=tuple(
-                AdjustmentRequestItemRecord(
-                    review_item_id=uuid4(),
-                    user_choice=SuggestionChoice.REQUEST,
-                    request_text="수정을 요청합니다.",
-                )
-                for _ in range(item_count)
-            ),
-            expires_in_hours=72,
-            sent_at=None if status == AdjustmentRequestStatus.DRAFT else NOW,
-            expires_at=(
-                None
-                if status == AdjustmentRequestStatus.DRAFT
-                else NOW + timedelta(hours=72)
-            ),
-            opened_at=None,
-            responded_at=None,
-            created_at=NOW,
-            updated_at=NOW,
-        )
-
-    draft = request(AdjustmentRequestStatus.DRAFT, 5)
-    sent = request(AdjustmentRequestStatus.SENT, 2)
-    confirmed = request(AdjustmentRequestStatus.CONFIRMED, 1)
-    adapter._mock_adjustment_requests[draft.id] = draft
-    adapter._mock_adjustment_requests[sent.id] = sent
-    adapter._mock_adjustment_requests[confirmed.id] = confirmed
-
-    data = await get_dashboard(client)
-
-    assert data["adjustment_requested_clauses"] == 3
-
-
-class _FakeQueryResult:
-    def __init__(self, data: list[dict]) -> None:
-        self.data = data
-
-
-class _FakeQueryBuilder:
-    def __init__(self, table_name: str, data_by_table: dict[str, list[dict]]) -> None:
-        self._table_name = table_name
-        self._data_by_table = data_by_table
-
-    def select(self, _columns: str) -> "_FakeQueryBuilder":
-        return self
-
-    def eq(self, _column: str, _value: object) -> "_FakeQueryBuilder":
-        return self
-
-    def in_(self, _column: str, _values: object) -> "_FakeQueryBuilder":
-        return self
-
-    def neq(self, _column: str, _value: object) -> "_FakeQueryBuilder":
-        return self
-
-    def execute(self) -> _FakeQueryResult:
-        return _FakeQueryResult(self._data_by_table.get(self._table_name, []))
-
-
-class _FakeClient:
-    def __init__(self, data_by_table: dict[str, list[dict]]) -> None:
-        self._data_by_table = data_by_table
-
-    def table(self, name: str) -> _FakeQueryBuilder:
-        return _FakeQueryBuilder(name, self._data_by_table)
-
-
-async def test_live_adapter_queries_owner_scoped_tables_for_dashboard(monkeypatch) -> None:
-    contract_id = uuid4()
-    fake_client = _FakeClient(
+    shared_item = adjustment_item(adapter, contract_id=contract.id)
+    rejected_item = adjustment_item(adapter, contract_id=contract.id)
+    kept_item = adjustment_item(adapter, contract_id=contract.id)
+    draft_item = adjustment_item(adapter, contract_id=contract.id)
+    sent = adjustment_request(
+        contract_id=contract.id,
+        status=AdjustmentRequestStatus.SENT,
+        items=(shared_item, rejected_item),
+    )
+    confirmed = adjustment_request(
+        contract_id=contract.id,
+        status=AdjustmentRequestStatus.CONFIRMED,
+        items=(shared_item, kept_item),
+    )
+    draft = adjustment_request(
+        contract_id=contract.id,
+        status=AdjustmentRequestStatus.DRAFT,
+        items=(draft_item,),
+    )
+    adapter._mock_adjustment_requests.update(
         {
-            "contracts": [
-                {
-                    "id": str(contract_id),
-                    "title": "라이브 계약",
-                    "counterparty_name": "부산홍보대행",
-                    "status": "IN_PROGRESS",
-                    "signed_date": None,
-                    "start_date": None,
-                    "end_date": None,
-                    "termination_notice_date": None,
-                    "renewal_type": None,
-                    "total_amount": 500000,
-                    "modusign_document_id": None,
-                    "created_at": NOW.isoformat(),
-                    "updated_at": NOW.isoformat(),
-                }
-            ],
-            "obligations": [
-                {
-                    "id": str(uuid4()),
-                    "contract_id": str(contract_id),
-                    "title": "산출물",
-                    "due_date": TODAY.isoformat(),
-                    "assignee": "대행사",
-                    "evidence_type": "URL",
-                    "source_document_id": str(uuid4()),
-                    "source_page": 1,
-                    "source_text": "근거",
-                    "confidence": 0.9,
-                    "evidence_url": None,
-                    "status": "APPROVED",
-                    "submitted_at": None,
-                    "reviewed_at": None,
-                    "payment_condition_met": True,
-                }
-            ],
-            "review_items": [
-                {"contract_id": str(contract_id), "type": "MISMATCH", "status": "SENT"},
-            ],
-            "adjustment_requests": [
-                {
-                    "status": "SENT",
-                    "adjustment_request_items": [{"review_item_id": str(uuid4())}],
-                }
-            ],
+            sent.id: sent,
+            confirmed.id: confirmed,
+            draft.id: draft,
         }
     )
-
-    async def run_inline(function, *args, **kwargs):
-        return function(*args, **kwargs)
-
-    monkeypatch.setattr("app.adapters.supabase.create_client", lambda *_args: fake_client)
-    monkeypatch.setattr("app.adapters.supabase.asyncio.to_thread", run_inline)
-    adapter = SupabaseAdapter(
-        mode="live",
-        url="https://project.supabase.co",
-        service_role_key="test-service-role-key",
-        bucket="contracts",
-        demo_owner_id=OWNER_ID,
-        demo_contract_id=uuid4(),
-        demo_bearer_token=BEARER_TOKEN,
+    adapter._mock_adjustment_responses[sent.id] = (
+        AdjustmentResponseRecord(
+            review_item_id=shared_item.review_item_id,
+            decision=AdjustmentResponseDecision.ACCEPT,
+            counter_text=None,
+            reason=None,
+        ),
+        AdjustmentResponseRecord(
+            review_item_id=rejected_item.review_item_id,
+            decision=AdjustmentResponseDecision.REJECT,
+            counter_text=None,
+            reason="원안 유지",
+        ),
+    )
+    adapter._mock_final_clauses[confirmed.id] = (
+        final_clause(
+            review_item_id=shared_item.review_item_id,
+            resolution=AdjustmentResolution.ACCEPT_REQUEST,
+        ),
+        final_clause(
+            review_item_id=kept_item.review_item_id,
+            resolution=AdjustmentResolution.KEEP_ORIGINAL,
+        ),
     )
 
-    obligations = await adapter.list_dashboard_obligations(owner_id=OWNER_ID)
-    review_items = await adapter.list_dashboard_review_items(owner_id=OWNER_ID)
-    item_counts = await adapter.list_dashboard_adjustment_request_item_counts(owner_id=OWNER_ID)
+    response = await client.get("/api/v1/dashboard", headers=auth_headers())
 
-    assert [o.status for o in obligations] == [ObligationStatus.APPROVED]
-    assert [(r.contract_id, r.type, r.status) for r in review_items] == [
-        (contract_id, ReviewSignalType.MISMATCH, ReviewItemStatus.SENT)
-    ]
-    assert item_counts == [1]
+    data = response.json()["data"]
+    assert data["unresolved_signals"] == 5
+    assert data["most_common_signal"] == "MISMATCH"
+    assert data["adjustment_requested_clauses"] == 3
+    assert data["adjustment_agreed_clauses"] == 1
+    assert data["adjustment_rejected_clauses"] == 2
 
 
-async def test_live_adapter_skips_queries_when_owner_has_no_contracts(monkeypatch) -> None:
-    fake_client = _FakeClient({})
-
-    async def run_inline(function, *args, **kwargs):
-        return function(*args, **kwargs)
-
-    monkeypatch.setattr("app.adapters.supabase.create_client", lambda *_args: fake_client)
-    monkeypatch.setattr("app.adapters.supabase.asyncio.to_thread", run_inline)
-    adapter = SupabaseAdapter(
-        mode="live",
-        url="https://project.supabase.co",
-        service_role_key="test-service-role-key",
-        bucket="contracts",
-        demo_owner_id=OWNER_ID,
-        demo_contract_id=uuid4(),
-        demo_bearer_token=BEARER_TOKEN,
+async def test_dashboard_excludes_every_other_owner_fact(
+    dashboard_context,
+) -> None:
+    client, adapter = dashboard_context
+    own = contract_record(status=ContractStatus.DRAFT)
+    foreign = contract_record(
+        owner_id=OTHER_OWNER_ID,
+        status=ContractStatus.COMPLETED,
+        total_amount=99_000_000,
+        end_date=TODAY,
     )
+    seed_contract(adapter, own)
+    seed_contract(adapter, foreign)
+    seed_review_item(
+        adapter,
+        contract_id=foreign.id,
+        signal=ReviewSignalType.NEEDS_CHECK,
+        status=ReviewItemStatus.UNREVIEWED,
+    )
+    adapter._mock_obligations[foreign.id] = obligation(
+        contract_id=foreign.id,
+        status=ObligationStatus.APPROVED,
+    )
+    foreign_item = adjustment_item(adapter, contract_id=foreign.id)
+    foreign_request = adjustment_request(
+        contract_id=foreign.id,
+        status=AdjustmentRequestStatus.SENT,
+        items=(foreign_item,),
+    )
+    adapter._mock_adjustment_requests[foreign_request.id] = foreign_request
 
-    assert await adapter.list_dashboard_obligations(owner_id=OWNER_ID) == []
-    assert await adapter.list_dashboard_review_items(owner_id=OWNER_ID) == []
-    assert await adapter.list_dashboard_adjustment_request_item_counts(owner_id=OWNER_ID) == []
+    response = await client.get("/api/v1/dashboard", headers=auth_headers())
 
-
-def test_openapi_exposes_dashboard_contract() -> None:
-    openapi = app.openapi()
-    operation = openapi["paths"]["/api/v1/dashboard"]["get"]
-
-    assert set(operation["responses"]) >= {"200", "401"}
-    response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
-    assert response_schema["$ref"].endswith("/ApiResponse_Dashboard_")
-    dashboard_schema = openapi["components"]["schemas"]["Dashboard"]
-    assert set(dashboard_schema["required"]) == {
-        "total",
-        "signing",
-        "in_progress",
-        "completed",
-        "expiring_soon",
-        "unresolved_signals",
-        "adjustment_requested_clauses",
-        "adjustment_agreed_clauses",
-        "adjustment_rejected_clauses",
-        "obligation_pending",
-        "obligation_submitted",
-        "obligation_approved",
-        "total_committed",
-        "payment_condition_met_amount",
+    assert response.json()["data"] == {
+        "total": 1,
+        "signing": 0,
+        "in_progress": 0,
+        "completed": 0,
+        "expiring_soon": 0,
+        "unresolved_signals": 0,
+        "adjustment_requested_clauses": 0,
+        "adjustment_agreed_clauses": 0,
+        "adjustment_rejected_clauses": 0,
+        "obligation_pending": 0,
+        "obligation_submitted": 0,
+        "obligation_approved": 0,
+        "total_committed": 0,
+        "payment_condition_met_amount": 0,
+        "most_common_signal": None,
     }
-    assert "most_common_signal" in dashboard_schema["properties"]
+
+
+async def test_dashboard_unauthorized_error_uses_safe_envelope(
+    dashboard_context,
+) -> None:
+    client, _adapter = dashboard_context
+
+    response = await client.get("/api/v1/dashboard")
+
+    assert response.status_code == 401
+    body = response.json()
+    assert body["data"] is None
+    assert body["error"] == {
+        "code": "UNAUTHORIZED_ACCESS",
+        "message": "인증이 필요합니다.",
+    }
+    assert body["requestId"] == response.headers["X-Request-ID"]
+
+
+async def test_live_adapter_calls_owner_scoped_dashboard_rpc(monkeypatch) -> None:
+    calls = []
+    row = {
+        "total": 2,
+        "signing": 1,
+        "in_progress": 1,
+        "completed": 0,
+        "expiring_soon": 1,
+        "unresolved_signals": 3,
+        "adjustment_requested_clauses": 2,
+        "adjustment_agreed_clauses": 1,
+        "adjustment_rejected_clauses": 1,
+        "obligation_pending": 1,
+        "obligation_submitted": 0,
+        "obligation_approved": 1,
+        "total_committed": 1_500_000,
+        "payment_condition_met_amount": 500_000,
+        "most_common_signal": "UNCLEAR",
+    }
+
+    class FakeClient:
+        def rpc(self, name, params):
+            calls.append((name, params))
+            return SimpleNamespace(
+                execute=lambda: SimpleNamespace(data=row),
+            )
+
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "app.adapters.supabase.create_client",
+        lambda *_args: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "app.adapters.supabase.asyncio.to_thread",
+        run_inline,
+    )
+    adapter = SupabaseAdapter(
+        mode="live",
+        url="https://example.supabase.co",
+        service_role_key="service-role-key",
+        bucket="contracts",
+        demo_owner_id=OWNER_ID,
+        demo_contract_id=DEMO_CONTRACT_ID,
+        demo_bearer_token=BEARER_TOKEN,
+    )
+
+    result = await adapter.get_dashboard(owner_id=OWNER_ID, today=TODAY)
+
+    assert calls == [
+        (
+            "get_owner_dashboard",
+            {
+                "p_owner_id": str(OWNER_ID),
+                "p_today": "2026-07-31",
+            },
+        )
+    ]
+    assert result.total == 2
+    assert result.total_committed == 1_500_000
+    assert result.most_common_signal == ReviewSignalType.UNCLEAR
+
+
+def test_dashboard_openapi_matches_canonical_operation() -> None:
+    operation = app.openapi()["paths"]["/api/v1/dashboard"]["get"]
+
+    assert operation["operationId"] == "getDashboard"
+    assert set(operation["responses"]) == {"200", "401"}
+
+
+def test_dashboard_migration_is_owner_scoped_and_deterministic() -> None:
+    migration = (
+        REPOSITORY_ROOT / "supabase" / "migrations" / "20260730330003_add_dashboard_aggregation.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "where contract.owner_id = p_owner_id" in migration
+    assert "request.status <> 'DRAFT'" in migration
+    assert "select distinct item.review_item_id" in migration
+    assert "order by signal.signal_count desc, signal.tie_priority" in migration
+    assert "end_date - p_today between 0 and 30" in migration
+    assert "termination_notice_date - p_today between 0 and 14" in migration
+    assert "end_date - p_today between 0 and 7" in migration
+    assert "from public.obligations obligation" in migration
+    assert "to service_role" in migration

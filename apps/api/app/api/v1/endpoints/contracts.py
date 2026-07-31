@@ -15,6 +15,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.responses import JSONResponse
 
 from app.api.dependencies import (
     get_adjustment_service,
@@ -31,6 +32,7 @@ from app.api.dependencies import (
     get_understood_term_service,
 )
 from app.core.enums import IdempotencyOperation
+from app.core.exceptions import AnalysisStartUnavailable, InvalidDocument
 from app.core.http import request_id
 from app.schemas.adjustments import (
     AdjustmentRequest,
@@ -41,7 +43,7 @@ from app.schemas.adjustments import (
 )
 from app.schemas.agreements import AdjustmentConfirmation, Agreement
 from app.schemas.analysis import AnalysisStartRequest, AnalysisTask, ReviewItem, ReviewItemUpdate
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiError, ApiResponse
 from app.schemas.contracts import (
     AuditEvent,
     Contract,
@@ -81,10 +83,23 @@ from app.services.understood_terms import UnderstoodTermService
 
 router = APIRouter()
 
+NO_STORE_RESPONSE_HEADERS = {
+    "Cache-Control": {
+        "description": "민감한 공개 URL의 캐시 저장 금지",
+        "schema": {"type": "string", "example": "no-store"},
+    }
+}
+
 
 @router.post(
     "/{contract_id}/adjustment-confirmation",
     response_model=ApiResponse[AdjustmentRequest],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약 또는 조정 요청을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "조정 확정 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "확정 요청 검증 실패"},
+    },
 )
 async def confirm_adjustment(
     request: Request,
@@ -105,6 +120,12 @@ async def confirm_adjustment(
     "/{contract_id}/agreement",
     response_model=ApiResponse[Agreement],
     status_code=201,
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "합의서 생성 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "요청 검증 실패"},
+    },
 )
 async def create_agreement(
     request: Request,
@@ -121,7 +142,15 @@ async def create_agreement(
     return ApiResponse(data=agreement, error=None, request_id=request_id(request))
 
 
-@router.get("/{contract_id}/agreement", response_model=ApiResponse[Agreement])
+@router.get(
+    "/{contract_id}/agreement",
+    response_model=ApiResponse[Agreement],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "합의서를 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
 async def get_agreement(
     request: Request,
     contract_id: UUID,
@@ -136,6 +165,17 @@ async def get_agreement(
     "/{contract_id}/signature-embedded-drafts",
     response_model=ApiResponse[EmbeddedSignatureDraft],
     status_code=201,
+    responses={
+        201: {
+            "description": "내장 서명 초안 생성",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약 또는 합의서를 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "서명 초안 생성 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "요청 검증 실패"},
+        502: {"model": ApiResponse[None], "description": "모두싸인 요청 실패"},
+    },
 )
 async def create_signature_embedded_draft(
     request: Request,
@@ -156,7 +196,15 @@ async def create_signature_embedded_draft(
     return ApiResponse(data=draft, error=None, request_id=request_id(request))
 
 
-@router.get("/{contract_id}/signature", response_model=ApiResponse[Signature])
+@router.get(
+    "/{contract_id}/signature",
+    response_model=ApiResponse[Signature],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "서명 상태를 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
 async def get_signature(
     request: Request,
     contract_id: UUID,
@@ -171,6 +219,12 @@ async def get_signature(
     "/{contract_id}/adjustment-requests",
     response_model=ApiResponse[AdjustmentRequest],
     status_code=201,
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약 또는 검토 항목을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "조정 요청 생성 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "조정 요청 검증 실패"},
+    },
 )
 async def create_adjustment_request_draft(
     request: Request,
@@ -192,6 +246,12 @@ async def create_adjustment_request_draft(
 @router.get(
     "/{contract_id}/adjustment-requests/{adjustment_request_id}",
     response_model=ApiResponse[OwnerAdjustmentDetail],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "조정 요청을 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "경로 ID 검증 실패"},
+        502: {"model": ApiResponse[None], "description": "역제안 비교 실패"},
+    },
 )
 async def get_owner_adjustment_request(
     request: Request,
@@ -211,6 +271,32 @@ async def get_owner_adjustment_request(
 @router.post(
     "/{contract_id}/adjustment-requests/{adjustment_request_id}/send",
     response_model=ApiResponse[AdjustmentRequestSent],
+    responses={
+        200: {
+            "description": "조정 요청 링크 생성",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        401: {
+            "model": ApiResponse[None],
+            "description": "인증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        404: {
+            "model": ApiResponse[None],
+            "description": "조정 요청을 찾을 수 없음",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        409: {
+            "model": ApiResponse[None],
+            "description": "발송 상태 또는 멱등 충돌",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        422: {
+            "model": ApiResponse[None],
+            "description": "발송 확인 요청 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+    },
 )
 async def send_adjustment_request(
     request: Request,
@@ -232,7 +318,15 @@ async def send_adjustment_request(
     return ApiResponse(data=sent, error=None, request_id=request_id(request))
 
 
-@router.post("", response_model=ApiResponse[Contract], status_code=201)
+@router.post(
+    "",
+    response_model=ApiResponse[Contract],
+    status_code=201,
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        422: {"model": ApiResponse[None], "description": "계약 입력 검증 실패"},
+    },
+)
 async def create_contract(
     request: Request,
     payload: ContractCreate,
@@ -243,7 +337,13 @@ async def create_contract(
     return ApiResponse(data=contract, error=None, request_id=request_id(request))
 
 
-@router.get("", response_model=ApiResponse[list[ContractListItem]])
+@router.get(
+    "",
+    response_model=ApiResponse[list[ContractListItem]],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+    },
+)
 async def list_contracts(
     request: Request,
     owner_id: Annotated[UUID, Depends(get_current_owner_id)],
@@ -253,7 +353,15 @@ async def list_contracts(
     return ApiResponse(data=contracts, error=None, request_id=request_id(request))
 
 
-@router.get("/{contract_id}", response_model=ApiResponse[Contract])
+@router.get(
+    "/{contract_id}",
+    response_model=ApiResponse[Contract],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약을 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
 async def get_contract(
     request: Request,
     contract_id: UUID,
@@ -264,7 +372,15 @@ async def get_contract(
     return ApiResponse(data=contract, error=None, request_id=request_id(request))
 
 
-@router.get("/{contract_id}/timeline", response_model=ApiResponse[list[AuditEvent]])
+@router.get(
+    "/{contract_id}/timeline",
+    response_model=ApiResponse[list[AuditEvent]],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약을 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
 async def get_contract_timeline(
     request: Request,
     contract_id: UUID,
@@ -303,10 +419,30 @@ async def list_contract_obligations(
     response_model=ApiResponse[PublicLink],
     status_code=201,
     responses={
-        401: {"model": ApiResponse[None], "description": "인증 실패"},
-        404: {"model": ApiResponse[None], "description": "이행 항목을 찾을 수 없음"},
-        409: {"model": ApiResponse[None], "description": "이행 항목 상태 충돌"},
-        422: {"model": ApiResponse[None], "description": "요청 검증 실패"},
+        201: {
+            "description": "증빙 제출 링크 생성",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        401: {
+            "model": ApiResponse[None],
+            "description": "인증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        404: {
+            "model": ApiResponse[None],
+            "description": "이행 항목을 찾을 수 없음",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        409: {
+            "model": ApiResponse[None],
+            "description": "이행 항목 상태 충돌",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        422: {
+            "model": ApiResponse[None],
+            "description": "요청 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
     },
 )
 async def create_obligation_evidence_link(
@@ -410,6 +546,10 @@ async def upload_contract_document(
     ],
 ) -> ApiResponse[Document]:
     try:
+        form = await request.form()
+        unexpected_fields = set(form.keys()) - {"file", "type"}
+        if unexpected_fields:
+            raise InvalidDocument("허용되지 않은 multipart 필드가 포함되어 있습니다.")
         content = await read_upload_content(
             file,
             max_size_bytes=service.max_size_bytes,
@@ -526,7 +666,7 @@ async def start_contract_analysis(
     owner_id: Annotated[UUID, Depends(get_current_owner_id)],
     service: Annotated[AnalysisService, Depends(get_analysis_service)],
     idempotency: Annotated[IdempotencyService, Depends(get_idempotency_service)],
-) -> ApiResponse[AnalysisTask]:
+) -> ApiResponse[AnalysisTask] | JSONResponse:
     current_request_id = request_id(request)
 
     async def perform() -> IdempotentOutcome[ApiResponse[AnalysisTask]]:
@@ -546,6 +686,22 @@ async def start_contract_analysis(
             replay_payload=envelope.model_dump(mode="json", by_alias=True),
         )
 
+    def admission_failure(
+        error: Exception,
+    ) -> IdempotentOutcome[ApiResponse[AnalysisTask]] | None:
+        if not isinstance(error, AnalysisStartUnavailable):
+            return None
+        envelope = ApiResponse[AnalysisTask](
+            data=None,
+            error=ApiError(code=error.code.value, message=error.message),
+            request_id=current_request_id,
+        )
+        return IdempotentOutcome(
+            status_code=error.status_code,
+            response=envelope,
+            replay_payload=envelope.model_dump(mode="json", by_alias=True),
+        )
+
     outcome = await idempotency.execute(
         owner_id=owner_id,
         operation=IdempotencyOperation.ANALYSIS_START,
@@ -554,12 +710,20 @@ async def start_contract_analysis(
         request_payload=payload,
         perform=perform,
         replay=lambda stored: ApiResponse[AnalysisTask].model_validate(stored),
+        exception_outcome=admission_failure,
     )
+    if outcome.replayed:
+        request.state.request_id = outcome.response.request_id
     if not outcome.replayed and outcome.response.data is not None:
         background_tasks.add_task(
             service.process,
             owner_id=owner_id,
             task_id=outcome.response.data.id,
+        )
+    if outcome.status_code != 202:
+        return JSONResponse(
+            status_code=outcome.status_code,
+            content=outcome.response.model_dump(mode="json", by_alias=True),
         )
     return outcome.response
 

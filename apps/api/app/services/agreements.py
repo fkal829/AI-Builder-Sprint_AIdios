@@ -77,7 +77,8 @@ class AgreementService:
             pdf_content = self._pdf_renderer.render(agreement)
             pdf_id = uuid4()
             pdf_storage_path = (
-                f"{owner_id}/{contract_id}/agreements/{agreement.id}/v{agreement.version}/{pdf_id}.pdf"
+                f"{owner_id}/{contract_id}/agreements/{agreement.id}/"
+                f"v{agreement.version}/{pdf_id}.pdf"
             )
             record = AgreementRecord(
                 agreement=agreement,

@@ -49,9 +49,34 @@ async def test_issues_hashed_adjustment_token_and_resolves_it(token_adapter) -> 
     assert resolved.resource_id == adjustment_id
     assert issued.token not in token_adapter.mock_public_tokens
     assert all(
-        issued.token not in repr(record)
-        for record in token_adapter.mock_public_tokens.values()
+        issued.token not in repr(record) for record in token_adapter.mock_public_tokens.values()
     )
+
+
+def test_public_token_identifier_uses_all_128_random_bits(
+    token_adapter,
+    monkeypatch,
+) -> None:
+    random_bytes = bytes(range(16))
+    calls: list[int] = []
+
+    def token_bytes(size: int) -> bytes:
+        calls.append(size)
+        return random_bytes
+
+    monkeypatch.setattr("app.services.public_tokens.secrets.token_bytes", token_bytes)
+    now = datetime(2026, 7, 30, tzinfo=UTC)
+    service = PublicTokenService(token_adapter, signing_secret=TOKEN_SECRET, now=lambda: now)
+
+    issued, record = service.prepare(
+        scope=PublicTokenScope.OBLIGATION_EVIDENCE,
+        resource_id=uuid4(),
+        expires_at=now + timedelta(hours=1),
+    )
+
+    assert calls == [16]
+    assert record.id.bytes == random_bytes
+    assert issued.token.startswith(f"{record.id}.")
 
 
 @pytest.mark.parametrize(

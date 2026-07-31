@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -10,6 +9,7 @@ from app.core.enums import (
     AdjustmentResponseDecision,
     SuggestionChoice,
 )
+from app.core.text_safety import contains_unsafe_legal_conclusion
 
 
 class AdjustmentRequestCreate(BaseModel):
@@ -115,16 +115,6 @@ class PublicSubmission(BaseModel):
     submitted: Literal[True]
 
 
-UNSAFE_COUNTERPROPOSAL_PATTERNS = (
-    r"사기(?:의심)?업체",
-    r"불법계약",
-    r"안전한업체",
-    r"승소(?:할)?가능",
-    r"승소확률",
-    r"법률자문.{0,12}(?:대체|대신)(?:합니다|한다|할수있|가능)",
-)
-
-
 class StrictAdjustmentModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -137,10 +127,7 @@ class CounterproposalComparisonInput(StrictAdjustmentModel):
 
     @model_validator(mode="after")
     def validate_non_blank_text(self) -> "CounterproposalComparisonInput":
-        if any(
-            not value.strip()
-            for value in (self.request_text, self.counter_text, self.reason)
-        ):
+        if any(not value.strip() for value in (self.request_text, self.counter_text, self.reason)):
             raise ValueError("역제안 비교 입력 문자열은 비어 있을 수 없습니다.")
         return self
 
@@ -171,11 +158,7 @@ class GeneratedCounterproposalComparison(StrictAdjustmentModel):
         )
         if any(not value.strip() for value in text_values):
             raise ValueError("역제안 비교 출력 문자열은 비어 있을 수 없습니다.")
-        normalized = re.sub(r"[\W_]+", "", " ".join(text_values)).lower()
-        if any(
-            re.search(pattern, normalized)
-            for pattern in UNSAFE_COUNTERPROPOSAL_PATTERNS
-        ):
+        if contains_unsafe_legal_conclusion(text_values):
             raise ValueError("역제안 비교 출력에 허용되지 않은 단정 표현이 있습니다.")
         return self
 

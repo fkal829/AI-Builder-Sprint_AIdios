@@ -163,9 +163,7 @@ class DocumentUploadService:
             max_pdf_pages=self.max_pdf_pages,
         )
         document_id = uuid4()
-        storage_path = (
-            f"{owner_id}/{contract_id}/{document_id}/source.{validated.extension}"
-        )
+        storage_path = f"{owner_id}/{contract_id}/{document_id}/source.{validated.extension}"
         record = DocumentRecord(
             id=document_id,
             contract_id=contract_id,
@@ -189,13 +187,34 @@ class DocumentUploadService:
                 record=record,
             )
         except ExternalStorageFailure as error:
+            # The metadata RPC may have committed even if its response was lost.
+            # Recover by the caller-generated document ID before deciding whether
+            # the already-uploaded private object is safe to delete.
             try:
-                await self.storage.delete_private_object(path=storage_path)
-            except ExternalStorageFailure as rollback_error:
-                raise ExternalStorageFailure(
-                    "문서 메타데이터 저장과 Storage 롤백에 실패했습니다."
-                ) from rollback_error
-            raise error
+                recovered = await self.documents.get_owned_document(
+                    owner_id=owner_id,
+                    contract_id=contract_id,
+                    document_id=document_id,
+                )
+            except ExternalStorageFailure:
+                # Commit state is still ambiguous. Preserve the source object so
+                # a committed DB row can never be left pointing at deleted data.
+                raise error from None
+
+            if recovered is not None:
+                if recovered != record:
+                    raise ExternalStorageFailure(
+                        "문서 메타데이터 저장 결과가 업로드 요청과 일치하지 않습니다."
+                    ) from error
+                saved = recovered
+            else:
+                try:
+                    await self.storage.delete_private_object(path=storage_path)
+                except ExternalStorageFailure as rollback_error:
+                    raise ExternalStorageFailure(
+                        "문서 메타데이터 저장과 Storage 롤백에 실패했습니다."
+                    ) from rollback_error
+                raise error
         if saved is None:
             await self.storage.delete_private_object(path=storage_path)
             raise ResourceNotFound()

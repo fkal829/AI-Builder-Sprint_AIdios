@@ -23,9 +23,7 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     supabase_storage_bucket: str = "contracts"
     supabase_mode: Literal["mock", "live"] = "mock"
-    supabase_mock_storage_access_base_url: str = (
-        "http://localhost:8000/api/v1/_mock/storage"
-    )
+    supabase_mock_storage_access_base_url: str = "http://localhost:8000/api/v1/_mock/storage"
 
     document_max_size_mib: int = Field(default=20, ge=1, le=100)
     document_max_pdf_pages: int = Field(default=100, ge=1, le=500)
@@ -45,6 +43,15 @@ class Settings(BaseSettings):
     upstage_extract_model: str = "information-extract"
     upstage_solar_timeout_seconds: float = Field(default=120, ge=1, le=300)
     upstage_solar_model: str = "solar-pro3"
+
+    analysis_recovery_batch_size: int = Field(default=10, ge=1, le=100)
+    analysis_recovery_stale_after_seconds: int = Field(default=60, ge=0, le=3600)
+    analysis_recovery_processing_timeout_seconds: int = Field(
+        default=14400,
+        ge=60,
+        le=604800,
+    )
+    analysis_recovery_interval_seconds: float = Field(default=30, gt=0, le=60)
 
     modusign_mode: Literal["mock", "live"] = "mock"
     modusign_account_email: str = ""
@@ -72,12 +79,9 @@ class Settings(BaseSettings):
         if self.upstage_mode == "live" and not self.upstage_api_key:
             raise ValueError("UPSTAGE_MODE=live에는 UPSTAGE_API_KEY가 필요합니다.")
         if self.modusign_mode == "live" and (
-            not self.modusign_account_email
-            or not self.modusign_api_key
+            not self.modusign_account_email or not self.modusign_api_key
         ):
-            raise ValueError(
-                "MODUSIGN_MODE=live requires account email and API key"
-            )
+            raise ValueError("MODUSIGN_MODE=live requires account email and API key")
         if self.app_env == "production" and self.supabase_mode == "mock":
             raise ValueError("production에서는 SUPABASE_MODE=mock을 사용할 수 없습니다.")
         if (

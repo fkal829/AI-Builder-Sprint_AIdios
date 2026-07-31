@@ -319,7 +319,7 @@ class AdjustmentService:
         )
 
     def _public_url(self, token: str) -> str:
-        return f"{self._public_app_base_url}/adjustments/{token}"
+        return f"{self._public_app_base_url}/r/{token}"
 
     def _public_item_id(
         self,

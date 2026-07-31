@@ -22,7 +22,30 @@ class AnalysisTaskRecord:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class QueuedAnalysisJob:
+    """A stale queued task together with the owner context needed to process it."""
+
+    owner_id: UUID
+    task_id: UUID
+    created_at: datetime
+
+
 class AnalysisRepository(Protocol):
+    async def fail_stale_processing_analysis_jobs(
+        self,
+        *,
+        stale_before: datetime,
+        limit: int,
+    ) -> tuple[AnalysisTaskRecord, ...]: ...
+
+    async def list_stale_queued_analysis_jobs(
+        self,
+        *,
+        stale_before: datetime,
+        limit: int,
+    ) -> tuple[QueuedAnalysisJob, ...]: ...
+
     async def get_latest_analysis_task(
         self,
         *,

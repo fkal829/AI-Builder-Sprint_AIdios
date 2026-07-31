@@ -19,6 +19,10 @@ base64 문서 항목 하나로 전송한다. 추출 요청에는 first-level sca
 사용한다. 별도의 자유 형식 시스템 프롬프트 대신 각 필드의 한국어 설명과 타입을
 스키마에 명시한다.
 
+live Parse·Extract는 모델, 시작 시각, 성공·실패 상태, HTTP status, 지연 시간,
+스키마 검증 성공 여부만 구조화 로그에 남긴다. API key, 계약 원문·파일, data URL,
+전체 요청·응답 payload는 로그에 남기지 않는다.
+
 Universal Extraction의 `additional_values` 좌표를 같은 페이지의 Document Parse 요소와
 겹침 검증한 경우에만 해당 요소 원문을 `source_text`로 저장한다. 좌표가 맞지 않으면
 값을 확정하지 않고 `MISSING_EVIDENCE`로 처리한다. Upstage의 범주형 confidence는 저장
@@ -41,9 +45,12 @@ live 모드는 `UPSTAGE_SOLAR_MODEL=solar-pro3`,
 - 비보정 자기평가값과 모델 한계
 
 응답은 `contract-review-copy-v1` 프롬프트와 strict JSON Schema로 요청하고 별도의
-Pydantic 스키마로 다시 검증한다. 입력 후보와 출력 UUID 집합이 다르거나, 세 문구가
-같거나, 금지된 단정 표현 또는 입력 근거에 없는 숫자가 있으면 저장하지 않는다.
-결정 규칙과 Solar 문구가 함께 사용된 항목은 `detection_method=HYBRID`다.
+Pydantic 스키마로 다시 검증한다. 검토 항목은 실제 live 검증에서 성공한 기본 1건
+chunk로 순차 호출한다. 일부 chunk가 성공했더라도 전체 입력 UUID의 개수·중복·순서가
+일치해야만 결과를 반환하며, 뒤 chunk가 실패하면 앞 결과도 저장하지 않고 분석 전체를
+실패 처리한다. 세 문구가 같거나, 금지된 단정 표현 또는 입력 근거에 없는 숫자가 있어도
+저장하지 않는다. 결정 규칙과 Solar 문구가 함께 사용된 항목은
+`detection_method=HYBRID`다.
 
 Solar Chat API는 보정된 confidence를 제공하지 않는다. 공개 계약의
 `model_confidence`에는 Solar가 반환한 비보정 자기평가값을 넣고,
@@ -76,14 +83,22 @@ live 요청은 `counterproposal-comparison-v1` 프롬프트와 strict JSON Schem
 mock 결과는 실제 요청·역제안·사유를 반영한 규칙 기반 예시이고 실제 Solar 응답이
 아니다.
 
+2026-07-31 09:17:58 UTC에 가상 역제안 한 건을 실제 `solar-pro3`로 호출해
+`counterproposal-comparison-v1` strict JSON Schema 검증, 달라진 점·남은
+확인사항·최종 확인 생성과 입력 근거 검사를 모두 통과했다. 결과와 재현 명령은
+`fixtures/evaluation/COUNTERPROPOSAL_LIVE_RESULTS.md`에 기록한다.
+
 ## Evaluator Loop
 
-1. Document Parse 결과와 1차 추출 결과를 Pydantic 스키마로 검증한다.
-2. 누락, `NOT_FOUND`, 근거 불일치, 확인 필요 필드만 두 번째 추출 대상으로 좁힌다.
-3. 작업당 Evaluator Loop는 최대 2회에서 종료한다.
-4. 두 번째에도 찾지 못한 필드는 `NOT_FOUND`, 근거가 맞지 않는 값은
+1. 선택한 주 계약 문서와 지원 문서를 각각 한 번 Parse한다.
+2. 1라운드에서 모든 선택 문서의 추출 결과를 Pydantic 스키마로 검증한다.
+3. 문서별 누락, `NOT_FOUND`, 근거 불일치, 확인 필요 필드만 2라운드 재추출 대상으로
+   좁힌다.
+4. 지원 문서 수와 관계없이 작업의 Evaluator `attempt_count`는 최대 2라운드다. 한
+   라운드에는 선택 문서별 추출 호출이 하나씩 포함될 수 있다.
+5. 두 번째에도 찾지 못한 필드는 `NOT_FOUND`, 근거가 맞지 않는 값은
    `MISSING_EVIDENCE`로 저장한다.
-5. 날짜·금액·비율·canonical 승격과 계약 상태 전이는 모델이 아니라 서버 코드와 DB
+6. 날짜·금액·비율·canonical 승격과 계약 상태 전이는 모델이 아니라 서버 코드와 DB
    트랜잭션이 처리한다.
 
 mock 모드는 고정된 가상 계약 결과를 사용하며, 발견한 값에는 `source_page`,
@@ -93,6 +108,45 @@ mock 모드는 고정된 가상 계약 결과를 사용하며, 발견한 값에�
 
 mock Solar 문구는 항목별 필드와 신호를 반영하지만 실제 모델 응답이 아니며
 `model_limitations`에도 이 사실을 표시한다.
+
+## 비동기 작업 복구 경계
+
+HTTP 진입점의 FastAPI `BackgroundTasks`는 빠른 mock/demo 처리를 위한 보조 경로이며,
+내구성 복구는 별도 worker가 맡는다. 4.5 최근 분석 조회는 상태 변경이나 AI 호출을
+일으키지 않는 순수 조회다.
+
+`python -m app.workers.analysis_recovery --once`는 설정한 cutoff보다 오래된 `QUEUED`
+작업을 `created_at ASC, id ASC` 순서로 최대 batch만 읽고, 저장된 `owner_id`와 `task_id`로
+기존 `AnalysisService.process`를 호출한다. 실제 claim은 기존의 조건부
+`QUEUED → PROCESSING` 전이인 `mark_analysis_processing`이 수행하므로, 여러 worker가
+같은 작업을 읽어도 한 worker만 처리한다. worker 로그에는 작업 UUID, 개수와 오류 유형만
+남기며 계약 원문, 공개 토큰, 키, URL을 남기지 않는다.
+
+별도 `ANALYSIS_RECOVERY_PROCESSING_TIMEOUT_SECONDS`(기본 14,400초)는 Upstage Parse·Extract,
+Solar 실행 시간보다 충분히 긴 처리 제한이다. worker는 `updated_at`이 이 제한보다
+오래된 `PROCESSING` 행만 `FOR UPDATE SKIP LOCKED`로 잠그고 cutoff과 상태를 다시
+확인한다. 확인된 행은 `FAILED/DOCUMENT_PARSE_FAILED`, 주 계약 문서와 선택 자료
+`parse_status=FAILED`, `ANALYSIS_FAILED` 감사 이벤트로 한 DB 트랜잭션에 전이한다.
+계약 상태는 `ANALYZING`을 유지하고 새 멱등 키로 사용자가 명시적으로 재시작해야
+하며, worker가 자동으로 무한 재시도하지 않는다.
+
+운영에서는 API 프로세스와 별도의 worker를 실행한다.
+
+```bash
+# 한 번 실행
+python -m app.workers.analysis_recovery --once
+
+# 장기 실행 (기본 30초 간격)
+python -m app.workers.analysis_recovery --loop
+```
+
+`ANALYSIS_RECOVERY_STALE_AFTER_SECONDS`(기본 60),
+`ANALYSIS_RECOVERY_PROCESSING_TIMEOUT_SECONDS`(기본 14,400),
+`ANALYSIS_RECOVERY_BATCH_SIZE`(기본 10),
+`ANALYSIS_RECOVERY_INTERVAL_SECONDS`(기본 30)로 범위를 조절한다. mock/live repository의
+cutoff·정렬·limit·소유자 전달과 동시 claim·timeout 전이 안전성은 자동 테스트로
+검증했고, 실제 Supabase
+환경에서는 마이그레이션 적용 뒤 worker 배포가 필요하다.
 
 ## 고정 계약 10건 오프라인 평가
 
@@ -121,6 +175,8 @@ Solar `POST /v1/chat/completions`를 실제 호출했다. 요청 모델은 `sola
 - 쉬운 설명 3/3 생성
 - 원안 수용·절충·요청 문구 3종 3/3 생성 및 항목별 상호 구분 확인
 - 입력 ID 일치, 입력에 없는 숫자, 금지 단정 표현 검사 통과
+- 기본 1건 chunk 전략을 production과 평가 실행기에 함께 적용한 뒤
+  2026-07-31 09:05:34 UTC에 외부 요청 3회를 다시 실행해 모두 성공
 
 최초 3건 배치 요청은 120초 timeout 뒤 한 번 재시도했지만 `ReadTimeout`으로
 실패했다. 한 건씩 나눈 호출은 모두 성공했으므로 실제 endpoint와 응답 계약 연동은

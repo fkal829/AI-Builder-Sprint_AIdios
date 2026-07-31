@@ -107,9 +107,7 @@ async def test_uploads_contract_pdf_to_private_mock_storage(upload_context) -> N
     assert stored.storage_path.endswith(f"/{document_id}/source.pdf")
     assert "customer-provided-name" not in stored.storage_path
     assert adapter.mock_objects[stored.storage_path] == pdf
-    assert [event.event_type for event in adapter.mock_audit_events] == [
-        "DOCUMENT_UPLOADED"
-    ]
+    assert [event.event_type for event in adapter.mock_audit_events] == ["DOCUMENT_UPLOADED"]
 
 
 async def test_accepts_utf8_message_as_single_virtual_page(upload_context) -> None:
@@ -126,6 +124,22 @@ async def test_accepts_utf8_message_as_single_virtual_page(upload_context) -> No
     stored = adapter.mock_documents[UUID(response.json()["data"]["id"])]
     assert stored.page_count == 1
     assert stored.content_type == "text/plain"
+
+
+async def test_rejects_unexpected_multipart_fields(upload_context) -> None:
+    client, adapter, _service = upload_context
+
+    response = await client.post(
+        f"/api/v1/contracts/{CONTRACT_ID}/documents",
+        headers=authorization_header(),
+        data={"type": "CONTRACT", "unexpected": "must-not-be-accepted"},
+        files={"file": ("contract.pdf", make_pdf(), "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert adapter.mock_objects == {}
+    assert adapter.mock_documents == {}
 
 
 @pytest.mark.parametrize(
@@ -327,6 +341,77 @@ async def test_rolls_back_private_object_when_metadata_transaction_fails(
         )
 
     assert adapter.mock_objects == {}
+    assert adapter.mock_documents == {}
+    assert adapter.mock_audit_events == ()
+
+
+async def test_recovers_when_metadata_rpc_commits_before_response_is_lost(
+    upload_context,
+    monkeypatch,
+) -> None:
+    _client, adapter, service = upload_context
+    create_document_with_audit = adapter.create_document_with_audit
+
+    async def commit_then_lose_response(**kwargs):
+        await create_document_with_audit(**kwargs)
+        raise ExternalStorageFailure("저장 후 응답이 유실됨")
+
+    monkeypatch.setattr(
+        adapter,
+        "create_document_with_audit",
+        commit_then_lose_response,
+    )
+    content = make_pdf()
+
+    document = await service.upload(
+        owner_id=OWNER_ID,
+        contract_id=CONTRACT_ID,
+        document_type=DocumentType.CONTRACT,
+        declared_content_type="application/pdf",
+        content=content,
+    )
+
+    stored = adapter.mock_documents[document.id]
+    assert adapter.mock_objects[stored.storage_path] == content
+    assert [event.event_type for event in adapter.mock_audit_events] == ["DOCUMENT_UPLOADED"]
+
+
+async def test_preserves_private_object_when_metadata_commit_state_is_ambiguous(
+    upload_context,
+    monkeypatch,
+) -> None:
+    _client, adapter, service = upload_context
+
+    async def lose_metadata_response(**_kwargs):
+        raise ExternalStorageFailure("저장 응답이 유실됨")
+
+    async def fail_commit_recovery_lookup(**_kwargs):
+        raise ExternalStorageFailure("저장 여부를 확인할 수 없음")
+
+    monkeypatch.setattr(
+        adapter,
+        "create_document_with_audit",
+        lose_metadata_response,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_owned_document",
+        fail_commit_recovery_lookup,
+    )
+
+    with pytest.raises(
+        ExternalStorageFailure,
+        match="저장 응답이 유실됨",
+    ):
+        await service.upload(
+            owner_id=OWNER_ID,
+            contract_id=CONTRACT_ID,
+            document_type=DocumentType.CONTRACT,
+            declared_content_type="application/pdf",
+            content=make_pdf(),
+        )
+
+    assert len(adapter.mock_objects) == 1
     assert adapter.mock_documents == {}
     assert adapter.mock_audit_events == ()
 

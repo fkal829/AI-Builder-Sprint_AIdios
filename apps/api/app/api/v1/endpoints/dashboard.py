@@ -17,7 +17,9 @@ router = APIRouter()
 @router.get(
     "",
     response_model=ApiResponse[Dashboard],
-    responses={401: {"model": ApiResponse[None], "description": "인증 실패"}},
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+    },
 )
 async def get_dashboard(
     request: Request,
@@ -25,4 +27,8 @@ async def get_dashboard(
     service: Annotated[DashboardService, Depends(get_dashboard_service)],
 ) -> ApiResponse[Dashboard]:
     dashboard = await service.get(owner_id=owner_id)
-    return ApiResponse(data=dashboard, error=None, request_id=request_id(request))
+    return ApiResponse(
+        data=dashboard,
+        error=None,
+        request_id=request_id(request),
+    )

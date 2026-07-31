@@ -40,14 +40,18 @@ cd apps/api
 
 Solar 검토 문구 live 검증은 외부 호출과 비용이 발생하므로 일반 평가와 분리한다.
 `apps/api/.env`에 `UPSTAGE_API_KEY`를 설정하고 명시적으로 실행한다.
+실행기는 production과 같은 `SolarReviewAdapter` 기본 1건 chunk 전략으로 세 입력을
+처리하며, 전체 출력 ID와 순서가 일치한 경우에만 보고서를 생성한다.
 
 ```bash
 cd apps/api
 .venv/bin/python -m evaluation.solar_live --confirm-live
+.venv/bin/python -m evaluation.counterproposal_live --confirm-live
 ```
 
 2026-07-31 실제 호출의 검증 문구와 실패·재시도 결과는
-`SOLAR_LIVE_RESULTS.md`에 기록되어 있다.
+`SOLAR_LIVE_RESULTS.md`, 역제안 비교 결과는
+`COUNTERPROPOSAL_LIVE_RESULTS.md`에 기록되어 있다.
 
 ## 지표 정의
 

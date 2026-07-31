@@ -2,6 +2,11 @@
 
 마이그레이션은 날짜 순서의 append-only SQL로 관리합니다.
 
+과거 병합에서 모두싸인 웹훅과 증빙 링크 파일이 같은 `20260730300000` 버전을 사용한
+충돌은 실제 원격 RPC 배포 전에 확인됐다. ADR-014에 따라 모두싸인은 기존 버전을
+유지하고 증빙 링크만 `20260730300001`로 고유화했다. 다른 환경에서 동일 버전이 이미
+적용됐다면 바로 push하지 말고 원격 migration 이력과 함수 정의를 먼저 확인한다.
+
 `202607300001_p0_document_upload.sql`은 4.1 업로드 수직 흐름에 필요한 `Contract`,
 `Document`, `AuditEvent`, private `contracts` bucket과 원자적
 `create_document_with_audit` RPC를 먼저 만든다. 이후 모델은 기존 마이그레이션을
@@ -34,9 +39,10 @@
 D-30·D-14·D-7 검토 구간을 다시 확인하고, 실제 선택 변경과
 `RENEWAL_DECISION_SAVED` 감사 이벤트를 한 트랜잭션으로 처리한다.
 
-`20260730300000_add_obligation_evidence_links.sql`은 7.3의 증빙 제출 링크용
+`20260730300001_add_obligation_evidence_links.sql`은 7.3의 증빙 제출 링크용
 `OBLIGATION_EVIDENCE` 공개 토큰 hash와 `EVIDENCE_LINK_CREATED` 감사 이벤트를
-소유권·`PENDING` 상태 확인과 함께 하나의 트랜잭션으로 저장한다.
+소유권, 계약 `SIGNED`·`IN_PROGRESS`, 대표 의무 `PENDING` 상태 확인과 함께 하나의
+트랜잭션으로 저장한다.
 
 `20260730310000_submit_obligation_evidence.sql`은 7.4의 공개 토큰 hash·scope·대상·
 만료를 다시 검증하고 증빙 URL, `PENDING → SUBMITTED` 상태와
@@ -45,6 +51,44 @@ D-30·D-14·D-7 검토 구간을 다시 확인하고, 실제 선택 변경과
 `20260730320000_review_obligation_evidence.sql`은 7.5의 소유권과 `SUBMITTED`
 상태를 잠금 검증하고 승인·이의 상태, 검토 시각, 지급 조건 표시와 대응 감사 이벤트를
 하나의 트랜잭션으로 저장한다.
+
+`20260730330000_make_idempotency_completion_recoverable.sql`은 비즈니스 처리가 끝난
+멱등 요청의 완료 기록을 같은 응답으로 안전하게 재시도할 수 있게 한다. 응답 저장이
+일시적으로 실패해도 처리 결과를 버리거나 동일 작업을 다시 실행하지 않는다.
+
+`20260730330002_enforce_representative_obligation_evidence.sql`은 대표 의무 insert 전에
+채널·콘텐츠 유형·수량·기한 네 필드가 같은 계약 원문에서 모두 `VERIFIED`인지 확인하고,
+하나라도 없거나 근거가 다르면 분석 완료를 실패시키지 않고 해당 의무 생성을 건너뛴다.
+2026-07-31 배포 전 원격 read-only 점검에서 기존 `obligations` 행이 0건임을 확인해
+잘못 생성된 과거 대표 의무를 삭제하거나 보정하는 backfill은 추가하지 않았다.
+
+`20260730330003_add_dashboard_aggregation.sql`은 소유자 계약 집합만 대상으로 계약 상태,
+만료 구간, 미해결 신호, distinct 조정 항목, 대표 의무와 canonical 총액을 결정적으로
+집계하는 `get_owner_dashboard` RPC를 추가한다. 최빈 신호 동률은
+`MISMATCH`, `NO_BASIS`, `UNCLEAR`, `MISSING`, `NEEDS_CHECK` 순서로 해소한다.
+
+`20260730330004_add_analysis_recovery_scan.sql`은 cutoff보다 오래된 `QUEUED`
+분석 작업을 소유자 ID와 함께 생성 순서대로 제한 조회하는 service-role 전용 RPC를
+추가한다. 별도 worker가 이 결과를 받아 기존 원자적 `QUEUED → PROCESSING` claim을
+거치므로 여러 worker가 같은 작업을 처리하지 않는다.
+
+`20260730330005_enforce_review_item_evidence_links.sql`은 검토 항목의 모든 관련 추출값이
+같은 분석 작업·계약에 속하는지 확인하고, 기본 계약 원문 `source_*`가 연결된
+`CONTRACT_DOCUMENT` 추출값과 정확히 일치하는지 insert·update 전에 강제한다. 기존 행도
+마이그레이션 적용 중 같은 검증을 거쳐 잘못된 근거 링크를 조용히 유지하지 않는다.
+
+`20260730330006_fail_stale_processing_analysis.sql`은 별도 worker가 처리 timeout보다
+오래 `PROCESSING`에 머문 분석을 제한된 batch로 잠그고, cutoff을 다시 확인한 뒤
+`FAILED/DOCUMENT_PARSE_FAILED`, 주 계약 문서와 선택 자료 `parse_status=FAILED`, `ANALYSIS_FAILED`
+감사 이벤트를 한 트랜잭션으로 기록한다. `FOR UPDATE SKIP LOCKED`와 상태·cutoff
+재검증으로 활성 처리 및 다른 worker와의 경쟁을 줄인다. 계약은 `ANALYZING`을
+유지하므로 사용자가 기존의 명시적 재시작 경로를 사용할 수 있다. 기존 일반 분석 실패
+RPC도 같은 작업의 주 계약 문서와 모든 선택 자료를 함께 `FAILED`로 정리하도록 보정한다.
+
+`20260730330007_make_evidence_link_idempotent.sql`은 증빙 링크의 멱등 예약·검증,
+공개 토큰과 감사 이벤트 생성, 안전한 replay payload 저장을 하나의 트랜잭션으로 묶는다.
+DB 커밋 뒤 RPC 응답이 유실돼도 같은 키 재시도는 최초 token ID와 만료시각을 재생하며
+두 번째 토큰이나 `EVIDENCE_LINK_CREATED` 이벤트를 만들지 않는다.
 
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.

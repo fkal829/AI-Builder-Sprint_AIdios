@@ -1,11 +1,10 @@
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import UUID
 
-from app.core.enums import IdempotencyOperation, ObligationStatus, PublicTokenScope
+from app.core.enums import ObligationStatus, PublicTokenScope
 from app.core.errors import ErrorCode
-from app.core.exceptions import PublicTokenExpired, ResourceNotFound
+from app.core.exceptions import IdempotencyConflict, PublicTokenExpired, ResourceNotFound
 from app.repositories.obligations import (
     EvidenceLinkCreateOutcome,
     EvidenceReviewOutcome,
@@ -21,7 +20,7 @@ from app.schemas.obligations import (
     PublicLink,
     PublicLinkCreate,
 )
-from app.services.idempotency import IdempotencyService, IdempotentOutcome
+from app.services.idempotency import request_fingerprint
 from app.services.public_tokens import PublicTokenService
 from app.services.state_machine import InvalidStatusTransition
 
@@ -31,13 +30,11 @@ class ObligationService:
         self,
         repository: ObligationRepository,
         *,
-        idempotency: IdempotencyService | None = None,
         public_tokens: PublicTokenService | None = None,
         public_app_base_url: str = "",
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
-        self._idempotency = idempotency
         self._public_tokens = public_tokens
         self._public_app_base_url = public_app_base_url.rstrip("/")
         self._now = now or (lambda: datetime.now(UTC))
@@ -63,53 +60,42 @@ class ObligationService:
         idempotency_key: UUID,
         payload: PublicLinkCreate,
     ) -> PublicLink:
-        idempotency, public_tokens = self._link_dependencies()
-
-        async def perform() -> IdempotentOutcome[PublicLink]:
-            created_at = self._utc_now()
-            expires_at = created_at + timedelta(hours=payload.expires_in_hours)
-            issued, token_record = public_tokens.prepare(
-                scope=PublicTokenScope.OBLIGATION_EVIDENCE,
-                resource_id=obligation_id,
-                expires_at=expires_at,
-                created_at=created_at,
-            )
-            outcome = await self._repository.create_obligation_evidence_link_with_audit(
-                owner_id=owner_id,
-                contract_id=contract_id,
-                obligation_id=obligation_id,
-                public_token=token_record,
-            )
-            if outcome == EvidenceLinkCreateOutcome.NOT_FOUND:
-                raise ResourceNotFound()
-            if outcome == EvidenceLinkCreateOutcome.INVALID_STATUS_TRANSITION:
-                raise InvalidStatusTransition(
-                    "PENDING 상태의 이행 항목에만 증빙 제출 링크를 생성할 수 있습니다."
-                )
-            link = PublicLink(
-                public_url=self._public_url(issued.token),
-                scope=PublicTokenScope.OBLIGATION_EVIDENCE,
-                expires_at=issued.expires_at,
-            )
-            return IdempotentOutcome(
-                status_code=201,
-                response=link,
-                replay_payload={
-                    "token_id": str(token_record.id),
-                    "expires_at": issued.expires_at.isoformat(),
-                },
-            )
-
-        result = await idempotency.execute(
-            owner_id=owner_id,
-            operation=IdempotencyOperation.EVIDENCE_LINK_CREATE,
+        public_tokens = self._link_dependency()
+        created_at = self._utc_now()
+        expires_at = created_at + timedelta(hours=payload.expires_in_hours)
+        _issued, token_record = public_tokens.prepare(
+            scope=PublicTokenScope.OBLIGATION_EVIDENCE,
             resource_id=obligation_id,
-            key=idempotency_key,
-            request_payload=payload,
-            perform=perform,
-            replay=self._replay_evidence_link,
+            expires_at=expires_at,
+            created_at=created_at,
         )
-        return result.response
+        result = await self._repository.create_obligation_evidence_link_idempotent(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            obligation_id=obligation_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_fingerprint(payload),
+            public_token=token_record,
+        )
+        if result.outcome == EvidenceLinkCreateOutcome.NOT_FOUND:
+            raise ResourceNotFound()
+        if result.outcome == EvidenceLinkCreateOutcome.INVALID_STATUS_TRANSITION:
+            raise InvalidStatusTransition(
+                "서명 완료 또는 이행 중 계약의 PENDING 이행 항목에만 "
+                "증빙 제출 링크를 생성할 수 있습니다."
+            )
+        if result.outcome in {
+            EvidenceLinkCreateOutcome.IDEMPOTENCY_CONFLICT,
+            EvidenceLinkCreateOutcome.IDEMPOTENCY_PENDING,
+        }:
+            raise IdempotencyConflict()
+        if result.token_id is None or result.expires_at is None:
+            raise RuntimeError("증빙 제출 링크 저장 결과가 없습니다.")
+        return PublicLink(
+            public_url=self._public_url(public_tokens.token_for_id(result.token_id)),
+            scope=PublicTokenScope.OBLIGATION_EVIDENCE,
+            expires_at=result.expires_at,
+        )
 
     async def submit_evidence(
         self,
@@ -160,28 +146,13 @@ class ObligationService:
             raise RuntimeError("증빙 검토 저장 결과가 없습니다.")
         return _obligation_from_record(result.obligation)
 
-    def _replay_evidence_link(self, stored: dict[str, Any]) -> PublicLink:
-        _, public_tokens = self._link_dependencies()
-        token = public_tokens.token_for_id(UUID(stored["token_id"]))
-        return PublicLink(
-            public_url=self._public_url(token),
-            scope=PublicTokenScope.OBLIGATION_EVIDENCE,
-            expires_at=datetime.fromisoformat(
-                stored["expires_at"].replace("Z", "+00:00")
-            ),
-        )
-
     def _public_url(self, token: str) -> str:
-        return f"{self._public_app_base_url}/obligations/{token}"
+        return f"{self._public_app_base_url}/r/{token}/evidence"
 
-    def _link_dependencies(self) -> tuple[IdempotencyService, PublicTokenService]:
-        if (
-            self._idempotency is None
-            or self._public_tokens is None
-            or not self._public_app_base_url
-        ):
+    def _link_dependency(self) -> PublicTokenService:
+        if self._public_tokens is None or not self._public_app_base_url:
             raise RuntimeError("증빙 제출 링크 생성 의존성이 구성되지 않았습니다.")
-        return self._idempotency, self._public_tokens
+        return self._public_tokens
 
     def _public_token_service(self) -> PublicTokenService:
         if self._public_tokens is None:

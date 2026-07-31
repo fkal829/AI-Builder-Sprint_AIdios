@@ -15,6 +15,7 @@ from app.core.enums import (
     DetectionMethod,
     ExtractedField,
     ExtractedSourceType,
+    ExtractedValueType,
     ReviewBasisType,
     ReviewItemStatus,
     ReviewSeverity,
@@ -307,15 +308,11 @@ class AnalysisService:
             if contract is None:
                 raise ResourceNotFound()
             documents = await self._load_task_documents(owner_id=owner_id, task=task)
+            candidates_by_document, attempt_count = await self._extract_documents_with_evaluator(
+                documents=documents
+            )
             all_terms: list[ExtractedTerm] = []
-            max_attempt_count = 1
             for document in documents:
-                content = await self.storage.download_private_object(path=document.storage_path)
-                candidates, used_attempts = await self._extract_with_evaluator(
-                    content=content,
-                    content_type=document.content_type,
-                )
-                max_attempt_count = max(max_attempt_count, used_attempts)
                 source_type = (
                     ExtractedSourceType.CONTRACT_DOCUMENT
                     if document.id == task.document_id
@@ -329,9 +326,8 @@ class AnalysisService:
                         source_type=source_type,
                         **candidate.model_dump(),
                     )
-                    for candidate in candidates
+                    for candidate in candidates_by_document[document.id]
                 )
-            attempt_count = max_attempt_count
             understood = await self.understood_terms.get_understood_term(
                 owner_id=owner_id,
                 contract_id=task.contract_id,
@@ -403,71 +399,87 @@ class AnalysisService:
             records.append(document)
         return records
 
-    async def _extract_with_evaluator(
+    async def _extract_documents_with_evaluator(
         self,
         *,
-        content: bytes,
-        content_type: str,
-    ) -> tuple[list[ExtractedTermCandidate], int]:
-        try:
-            parsed = await self.adapter.parse_document(
-                content=content,
-                content_type=content_type,
-            )
-        except UpstageDocumentParseError as error:
-            raise AnalysisPipelineFailure(
-                error_code=ErrorCode.DOCUMENT_PARSE_FAILED,
-                attempt_count=1,
-            ) from error
+        documents: list[DocumentRecord],
+    ) -> tuple[dict[UUID, list[ExtractedTermCandidate]], int]:
+        contents: dict[UUID, bytes] = {}
+        parsed_documents: dict[UUID, ParsedDocument] = {}
+        candidates_by_document: dict[UUID, dict[ExtractedField, ExtractedTermCandidate]] = {
+            document.id: {} for document in documents
+        }
+        target_fields_by_document = {document.id: ANALYSIS_FIELDS for document in documents}
 
-        candidates_by_field: dict[ExtractedField, ExtractedTermCandidate] = {}
-        target_fields = ANALYSIS_FIELDS
-        for attempt_count in (1, 2):
+        for document in documents:
+            content = await self.storage.download_private_object(path=document.storage_path)
             try:
-                extracted = await self.adapter.extract_terms(
+                parsed = await self.adapter.parse_document(
                     content=content,
-                    content_type=content_type,
-                    parsed_document=parsed,
-                    target_fields=target_fields,
+                    content_type=document.content_type,
                 )
-                _validate_unique_fields(extracted)
-            except (UpstageExtractionError, ValidationError, ValueError) as error:
-                if attempt_count == 2:
-                    raise AnalysisPipelineFailure(
-                        error_code=ErrorCode.ANALYSIS_SCHEMA_INVALID,
-                        attempt_count=attempt_count,
-                    ) from error
-                continue
+            except UpstageDocumentParseError as error:
+                raise AnalysisPipelineFailure(
+                    error_code=ErrorCode.DOCUMENT_PARSE_FAILED,
+                    attempt_count=1,
+                ) from error
+            contents[document.id] = content
+            parsed_documents[document.id] = parsed
 
-            for candidate in extracted:
-                candidates_by_field[candidate.field] = _verify_candidate_evidence(
-                    candidate,
-                    parsed,
-                )
-            unresolved = tuple(
-                field
-                for field in ANALYSIS_FIELDS
-                if field not in candidates_by_field
-                or candidates_by_field[field].verification_status
-                in {
-                    VerificationStatus.NOT_FOUND,
-                    VerificationStatus.MISSING_EVIDENCE,
-                    VerificationStatus.NEEDS_CHECK,
-                }
-            )
-            if not unresolved:
-                return list(candidates_by_field.values()), attempt_count
-            if attempt_count == 1:
-                target_fields = unresolved
-                continue
+        used_rounds = 1
+        for round_number in (1, 2):
+            used_rounds = round_number
+            for document in documents:
+                target_fields = target_fields_by_document[document.id]
+                if not target_fields:
+                    continue
+                try:
+                    extracted = await self.adapter.extract_terms(
+                        content=contents[document.id],
+                        content_type=document.content_type,
+                        parsed_document=parsed_documents[document.id],
+                        target_fields=target_fields,
+                    )
+                    _validate_unique_fields(extracted)
+                    _validate_target_fields(
+                        candidates=extracted,
+                        target_fields=target_fields,
+                    )
+                except (
+                    UpstageExtractionError,
+                    ValidationError,
+                    ValueError,
+                ) as error:
+                    if round_number == 2:
+                        raise AnalysisPipelineFailure(
+                            error_code=ErrorCode.ANALYSIS_SCHEMA_INVALID,
+                            attempt_count=round_number,
+                        ) from error
+                    continue
 
-            for field in unresolved:
+                candidates_by_field = candidates_by_document[document.id]
+                for candidate in extracted:
+                    candidates_by_field[candidate.field] = _verify_candidate_evidence(
+                        candidate,
+                        parsed_documents[document.id],
+                    )
+                _normalize_renewal_candidates(candidates_by_field)
+                target_fields_by_document[document.id] = _unresolved_fields(candidates_by_field)
+
+            if not any(target_fields_by_document.values()):
+                break
+
+        for document in documents:
+            candidates_by_field = candidates_by_document[document.id]
+            for field in _unresolved_fields(candidates_by_field):
                 candidates_by_field.setdefault(field, _not_found_candidate(field))
-            return list(candidates_by_field.values()), attempt_count
 
-        raise AnalysisPipelineFailure(
-            error_code=ErrorCode.ANALYSIS_SCHEMA_INVALID,
-            attempt_count=2,
+        return (
+            {
+                document.id: list(candidates_by_document[document.id].values())
+                for document in documents
+            },
+            used_rounds,
         )
 
 
@@ -490,6 +502,32 @@ def _validate_unique_fields(candidates: list[ExtractedTermCandidate]) -> None:
     fields = [candidate.field for candidate in candidates]
     if len(fields) != len(set(fields)):
         raise ValueError("한 번의 추출 결과에 같은 필드가 중복되었습니다.")
+
+
+def _validate_target_fields(
+    *,
+    candidates: list[ExtractedTermCandidate],
+    target_fields: tuple[ExtractedField, ...],
+) -> None:
+    unexpected = {candidate.field for candidate in candidates} - set(target_fields)
+    if unexpected:
+        raise ValueError("재추출 대상으로 요청하지 않은 필드가 반환되었습니다.")
+
+
+def _unresolved_fields(
+    candidates_by_field: dict[ExtractedField, ExtractedTermCandidate],
+) -> tuple[ExtractedField, ...]:
+    return tuple(
+        field
+        for field in ANALYSIS_FIELDS
+        if field not in candidates_by_field
+        or candidates_by_field[field].verification_status
+        in {
+            VerificationStatus.NOT_FOUND,
+            VerificationStatus.MISSING_EVIDENCE,
+            VerificationStatus.NEEDS_CHECK,
+        }
+    )
 
 
 def _verify_candidate_evidence(
@@ -520,6 +558,90 @@ def _verify_candidate_evidence(
     return candidate
 
 
+def _normalize_renewal_candidates(
+    candidates_by_field: dict[ExtractedField, ExtractedTermCandidate],
+) -> None:
+    """Apply renewal implications without promoting ambiguous or conflicting values."""
+
+    auto_renewal = candidates_by_field.get(ExtractedField.AUTO_RENEWAL)
+    if auto_renewal is None:
+        return
+
+    renewal_type = candidates_by_field.get(ExtractedField.CONTRACT_RENEWAL_TYPE)
+    if (
+        auto_renewal.verification_status == VerificationStatus.VERIFIED
+        and auto_renewal.value == "NO"
+        and renewal_type is not None
+        and renewal_type.verification_status == VerificationStatus.VERIFIED
+        and renewal_type.value == "AUTO"
+    ):
+        candidates_by_field[ExtractedField.AUTO_RENEWAL] = _candidate_with_status(
+            auto_renewal, VerificationStatus.NEEDS_CHECK
+        )
+        candidates_by_field[ExtractedField.CONTRACT_RENEWAL_TYPE] = _candidate_with_status(
+            renewal_type, VerificationStatus.NEEDS_CHECK
+        )
+        return
+
+    if auto_renewal.value != "YES" or auto_renewal.verification_status not in {
+        VerificationStatus.VERIFIED,
+        VerificationStatus.NEEDS_CHECK,
+    }:
+        return
+
+    if (
+        renewal_type is not None
+        and renewal_type.verification_status == VerificationStatus.VERIFIED
+        and renewal_type.value == "AUTO"
+    ):
+        return
+
+    if (
+        auto_renewal.verification_status == VerificationStatus.VERIFIED
+        and renewal_type is not None
+        and renewal_type.verification_status
+        in {VerificationStatus.VERIFIED, VerificationStatus.NEEDS_CHECK}
+        and renewal_type.value not in {"AUTO", None}
+    ):
+        candidates_by_field[ExtractedField.AUTO_RENEWAL] = _candidate_with_status(
+            auto_renewal, VerificationStatus.NEEDS_CHECK
+        )
+        if renewal_type.source_page is not None and renewal_type.source_text is not None:
+            candidates_by_field[ExtractedField.CONTRACT_RENEWAL_TYPE] = _candidate_with_status(
+                renewal_type,
+                VerificationStatus.NEEDS_CHECK,
+            )
+        return
+
+    if (
+        renewal_type is not None
+        and renewal_type.verification_status == VerificationStatus.NEEDS_CHECK
+    ):
+        return
+
+    candidates_by_field[ExtractedField.CONTRACT_RENEWAL_TYPE] = ExtractedTermCandidate(
+        field=ExtractedField.CONTRACT_RENEWAL_TYPE,
+        value_type=ExtractedValueType.TEXT,
+        value="AUTO",
+        source_page=auto_renewal.source_page,
+        source_text=auto_renewal.source_text,
+        confidence=auto_renewal.confidence,
+        verification_status=auto_renewal.verification_status,
+    )
+
+
+def _candidate_with_status(
+    candidate: ExtractedTermCandidate,
+    status: VerificationStatus,
+) -> ExtractedTermCandidate:
+    return ExtractedTermCandidate.model_validate(
+        {
+            **candidate.model_dump(),
+            "verification_status": status,
+        }
+    )
+
+
 def _not_found_candidate(field: ExtractedField) -> ExtractedTermCandidate:
     from app.core.enums import ExtractedValueType
     from app.schemas.analysis import EXPECTED_VALUE_TYPES
@@ -547,6 +669,7 @@ def _build_review_items(
         for term in terms
         if term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
     }
+    documented_terms = _documented_terms_by_field(terms)
     reviews: list[ReviewItem] = []
     for field in ANALYSIS_FIELDS:
         term = contract_terms.get(field)
@@ -591,7 +714,9 @@ def _build_review_items(
                             )
                         )
                         found_specific_signal = True
-            if not found_specific_signal:
+            if not found_specific_signal and not _documented_comparison_terms(
+                documented_terms.get(field, ())
+            ):
                 reviews.append(
                     _review_for_term(
                         contract_id=contract_id,
@@ -613,6 +738,14 @@ def _build_review_items(
                     )
                 )
 
+    reviews.extend(
+        _build_documented_explanation_reviews(
+            contract_id=contract_id,
+            contract_terms=contract_terms,
+            documented_terms=documented_terms,
+        )
+    )
+
     representative_terms = tuple(
         contract_terms[field]
         for field in REPRESENTATIVE_OBLIGATION_FIELDS
@@ -621,8 +754,7 @@ def _build_review_items(
     if (
         len(representative_terms) == len(REPRESENTATIVE_OBLIGATION_FIELDS)
         and all(
-            term.verification_status == VerificationStatus.VERIFIED
-            for term in representative_terms
+            term.verification_status == VerificationStatus.VERIFIED for term in representative_terms
         )
         and build_representative_obligation(
             contract_id=contract_id,
@@ -718,9 +850,7 @@ def _build_review_items(
                         term=term,
                         signal=ReviewSignalType.MISMATCH,
                         severity=ReviewSeverity.IMPORTANT,
-                        explanation=(
-                            f"저장된 {label}과 최신 계약 원문의 {label}이 다릅니다."
-                        ),
+                        explanation=(f"저장된 {label}과 최신 계약 원문의 {label}이 다릅니다."),
                     )
                 )
 
@@ -777,17 +907,14 @@ def _build_review_items(
                         term=term,
                         signal=ReviewSignalType.MISMATCH,
                         severity=ReviewSeverity.IMPORTANT,
-                        explanation=(
-                            f"사용자가 이해한 {label}과 계약 원문의 {label}이 다릅니다."
-                        ),
+                        explanation=(f"사용자가 이해한 {label}과 계약 원문의 {label}이 다릅니다."),
                     )
                 )
         refund = contract_terms.get(ExtractedField.REFUND_CONDITION)
         if (
             refund is not None
             and refund.verification_status == VerificationStatus.VERIFIED
-            and _normalized_text(understood.refund_text)
-            not in _normalized_text(str(refund.value))
+            and _normalized_text(understood.refund_text) not in _normalized_text(str(refund.value))
         ):
             reviews.append(
                 _review_for_term(
@@ -798,9 +925,7 @@ def _build_review_items(
                     explanation="사용자가 이해한 환불 조건과 계약 원문의 환불 조건이 다릅니다.",
                 )
             )
-        understood_termination = _understood_termination_value(
-            understood.termination_text
-        )
+        understood_termination = _understood_termination_value(understood.termination_text)
         termination = contract_terms.get(ExtractedField.EARLY_TERMINATION_ALLOWED)
         if (
             understood_termination is not None
@@ -820,6 +945,178 @@ def _build_review_items(
                 )
             )
     return reviews
+
+
+def _documented_terms_by_field(
+    terms: list[ExtractedTerm],
+) -> dict[ExtractedField, tuple[ExtractedTerm, ...]]:
+    grouped: dict[ExtractedField, list[ExtractedTerm]] = {}
+    for term in terms:
+        if term.source_type != ExtractedSourceType.DOCUMENTED_EXPLANATION:
+            continue
+        grouped.setdefault(term.field, []).append(term)
+    return {field: tuple(field_terms) for field, field_terms in grouped.items()}
+
+
+def _documented_comparison_terms(
+    terms: tuple[ExtractedTerm, ...],
+) -> tuple[ExtractedTerm, ...]:
+    # A supporting document may legitimately omit most contract fields. Only an
+    # extracted claim participates in comparison; NOT_FOUND alone is not a claim.
+    return tuple(term for term in terms if term.verification_status != VerificationStatus.NOT_FOUND)
+
+
+def _build_documented_explanation_reviews(
+    *,
+    contract_id: UUID,
+    contract_terms: dict[ExtractedField, ExtractedTerm],
+    documented_terms: dict[ExtractedField, tuple[ExtractedTerm, ...]],
+) -> list[ReviewItem]:
+    reviews: list[ReviewItem] = []
+    for field in ANALYSIS_FIELDS:
+        contract_term = contract_terms.get(field)
+        supporting_terms = _documented_comparison_terms(documented_terms.get(field, ()))
+        if contract_term is None or not supporting_terms:
+            continue
+
+        related_terms = (contract_term, *supporting_terms)
+        label = REVIEW_FIELD_LABELS[field]
+        supporting_evidence_is_verified = all(
+            term.verification_status == VerificationStatus.VERIFIED for term in supporting_terms
+        )
+        supporting_values = (
+            {_document_comparison_value(term) for term in supporting_terms}
+            if supporting_evidence_is_verified
+            else set()
+        )
+        if len(supporting_values) > 1:
+            reviews.append(
+                _review_for_term(
+                    contract_id=contract_id,
+                    term=contract_term,
+                    related_terms=related_terms,
+                    signal=ReviewSignalType.NEEDS_CHECK,
+                    severity=ReviewSeverity.IMPORTANT,
+                    verification_status=_comparison_review_verification_status(contract_term),
+                    explanation=(
+                        f"선택 자료마다 문서로 확인된 {label} 설명이 서로 달라 "
+                        "계약 문서와의 차이를 확정할 수 없습니다. "
+                        "어느 설명이 최종 조건인지 추가 확인이 필요합니다."
+                    ),
+                    basis_text=(
+                        "여러 선택 자료의 설명이 일치할 때만 계약 문서상 조건과 "
+                        "확정 비교하는 내부 확인 규칙"
+                    ),
+                )
+            )
+            continue
+
+        if (
+            contract_term.verification_status == VerificationStatus.NOT_FOUND
+            and supporting_evidence_is_verified
+        ):
+            reviews.append(
+                _review_for_term(
+                    contract_id=contract_id,
+                    term=contract_term,
+                    related_terms=related_terms,
+                    signal=ReviewSignalType.NO_BASIS,
+                    severity=ReviewSeverity.IMPORTANT,
+                    verification_status=VerificationStatus.NOT_FOUND,
+                    explanation=(
+                        f"선택 자료에는 문서로 확인된 {label} 설명이 있지만 "
+                        "계약 문서에서 같은 조건의 근거를 찾지 못했습니다. "
+                        "해당 설명이 계약 조건에 반영되는지 확인해야 합니다."
+                    ),
+                    basis_text=(
+                        "선택 자료에 검증된 설명이 있고 계약 문서에서는 같은 조건을 "
+                        "찾지 못한 경우 계약 반영 여부를 확인하는 내부 규칙"
+                    ),
+                )
+            )
+            continue
+
+        comparison_is_verified = (
+            contract_term.verification_status == VerificationStatus.VERIFIED
+            and supporting_evidence_is_verified
+        )
+        if not comparison_is_verified:
+            reviews.append(
+                _review_for_term(
+                    contract_id=contract_id,
+                    term=contract_term,
+                    related_terms=related_terms,
+                    signal=ReviewSignalType.NEEDS_CHECK,
+                    severity=ReviewSeverity.IMPORTANT,
+                    verification_status=_comparison_review_verification_status(contract_term),
+                    explanation=(
+                        f"계약 문서상 {label} 또는 선택 자료의 문서로 확인된 설명 중 "
+                        "원문 근거가 충분히 검증되지 않아 차이를 확정할 수 없습니다. "
+                        "양쪽 원문을 추가로 확인해야 합니다."
+                    ),
+                    basis_text=(
+                        "계약 문서상 조건과 선택 자료의 문서로 확인된 설명을 "
+                        "검증된 원문 근거끼리 비교하는 내부 확인 규칙"
+                    ),
+                )
+            )
+            continue
+
+        supporting_value = next(iter(supporting_values))
+        if supporting_value == _document_comparison_value(contract_term):
+            continue
+        reviews.append(
+            _review_for_term(
+                contract_id=contract_id,
+                term=contract_term,
+                related_terms=related_terms,
+                signal=ReviewSignalType.MISMATCH,
+                severity=ReviewSeverity.IMPORTANT,
+                verification_status=VerificationStatus.VERIFIED,
+                explanation=(
+                    f"선택 자료에서 문서로 확인된 {label} 설명과 계약 문서상 조건이 다릅니다."
+                ),
+                basis_text=(
+                    "검증된 계약 문서상 조건과 선택 자료의 문서로 확인된 설명을 "
+                    "날짜·금액·수량·분류·문구별로 결정적으로 비교하는 내부 확인 규칙"
+                ),
+            )
+        )
+    return reviews
+
+
+def _comparison_review_verification_status(
+    contract_term: ExtractedTerm,
+) -> VerificationStatus:
+    if contract_term.source_page is not None and contract_term.source_text is not None:
+        return VerificationStatus.NEEDS_CHECK
+    return contract_term.verification_status
+
+
+def _document_comparison_value(term: ExtractedTerm) -> object:
+    value = term.value
+    if value is None:
+        return None
+    if term.value_type == ExtractedValueType.DATE:
+        return date.fromisoformat(str(value))
+    if term.value_type in {
+        ExtractedValueType.MONEY_KRW,
+        ExtractedValueType.INTEGER,
+        ExtractedValueType.PERCENT,
+    }:
+        return int(value)
+    if (
+        term.value_type == ExtractedValueType.BOOLEAN
+        or term.field == ExtractedField.CONTRACT_RENEWAL_TYPE
+    ):
+        return str(value).strip().upper()
+    return _normalized_text(str(value))
+
+
+def _term_source_label(term: ExtractedTerm) -> str:
+    if term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT:
+        return "계약 문서상 조건"
+    return "문서로 확인된 설명"
 
 
 def _canonical_term_value(term: ExtractedTerm) -> object:
@@ -852,10 +1149,7 @@ def _unresolved_explanation(
             )
         return f"계약 원문에서 {label} 조건을 찾지 못했습니다."
     if verification_status == VerificationStatus.MISSING_EVIDENCE:
-        return (
-            f"{label} 값은 추출됐지만 이를 뒷받침하는 계약 원문 위치를 "
-            "확인하지 못했습니다."
-        )
+        return f"{label} 값은 추출됐지만 이를 뒷받침하는 계약 원문 위치를 확인하지 못했습니다."
     return f"계약 원문의 {label} 조건은 사용자 확인이 더 필요합니다."
 
 
@@ -887,11 +1181,10 @@ def _build_solar_review_inputs(
             if term is None:
                 raise ValueError("검토 항목의 관련 추출 필드를 찾을 수 없습니다.")
             related_terms.append(term)
-        labels = list(
-            dict.fromkeys(REVIEW_FIELD_LABELS[term.field] for term in related_terms)
-        )
+        labels = list(dict.fromkeys(REVIEW_FIELD_LABELS[term.field] for term in related_terms))
         contract_values = [
             _bounded_context(
+                f"{_term_source_label(term)} "
                 f"{REVIEW_FIELD_LABELS[term.field]}: "
                 f"{term.value if term.value is not None else '계약 원문에서 확인되지 않음'}",
                 limit=400,
@@ -1039,19 +1332,11 @@ def _review_for_term(
     signal: ReviewSignalType,
     severity: ReviewSeverity,
     explanation: str,
+    verification_status: VerificationStatus | None = None,
+    basis_text: str = ("계약 원문과 사용자가 저장한 이해조건을 분리해 비교하는 내부 확인 규칙"),
 ) -> ReviewItem:
     has_evidence = term.source_page is not None and term.source_text is not None
-    verification_status = (
-        term.verification_status
-        if term.verification_status
-        in {
-            VerificationStatus.VERIFIED,
-            VerificationStatus.NOT_FOUND,
-            VerificationStatus.MISSING_EVIDENCE,
-            VerificationStatus.NEEDS_CHECK,
-        }
-        else VerificationStatus.NEEDS_CHECK
-    )
+    review_verification_status = verification_status or term.verification_status
     related = related_terms or (term,)
     labels = list(dict.fromkeys(REVIEW_FIELD_LABELS[item.field] for item in related))
     label = "·".join(labels)
@@ -1069,18 +1354,16 @@ def _review_for_term(
         model_limitations=None,
         plain_explanation=explanation,
         basis_type=ReviewBasisType.INTERNAL_RULE,
-        basis_text="계약 원문과 사용자가 저장한 이해조건을 분리해 비교하는 내부 확인 규칙",
+        basis_text=basis_text,
         basis_citation=None,
         related_extracted_term_ids=[related_term.id for related_term in related],
         source_document_id=term.document_id if has_evidence else None,
         source_page=term.source_page if has_evidence else None,
         source_text=term.source_text if has_evidence else None,
         source_confidence=term.confidence if has_evidence else None,
-        verification_status=verification_status,
+        verification_status=review_verification_status,
         suggestion_accept=suggestion_accept,
-        suggestion_compromise=(
-            f"{label} 조건의 차이와 확인할 범위를 상대방과 협의해 조정합니다."
-        ),
+        suggestion_compromise=(f"{label} 조건의 차이와 확인할 범위를 상대방과 협의해 조정합니다."),
         suggestion_request=(
             f"{label} 조건의 주체·기준·시점을 계약 문구에 명확히 적어 달라고 요청합니다."
         ),

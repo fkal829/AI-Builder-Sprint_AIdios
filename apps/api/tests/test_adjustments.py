@@ -119,9 +119,7 @@ async def create_draft(
 async def test_draft_previews_selected_request_text_without_public_url(adjustment_context) -> None:
     client, adapter = adjustment_context
     contract_id = await reviewed_contract(client, adapter)
-    compromise = selected_review_item(
-        contract_id=contract_id, choice=SuggestionChoice.COMPROMISE
-    )
+    compromise = selected_review_item(contract_id=contract_id, choice=SuggestionChoice.COMPROMISE)
     request = selected_review_item(contract_id=contract_id, choice=SuggestionChoice.REQUEST)
     adapter._mock_review_items[compromise.id] = compromise
     adapter._mock_review_items[request.id] = request
@@ -150,8 +148,7 @@ async def test_draft_previews_selected_request_text_without_public_url(adjustmen
     ]
     assert "public_url" not in draft
     assert all(
-        draft[field] is None
-        for field in ("sent_at", "expires_at", "opened_at", "responded_at")
+        draft[field] is None for field in ("sent_at", "expires_at", "opened_at", "responded_at")
     )
     replay = await client.post(
         f"/api/v1/contracts/{contract_id}/adjustment-requests",
@@ -181,9 +178,7 @@ async def test_send_freezes_items_transitions_contract_and_replays_safely(
 ) -> None:
     client, adapter = adjustment_context
     contract_id = await reviewed_contract(client, adapter)
-    review_item = selected_review_item(
-        contract_id=contract_id, choice=SuggestionChoice.COMPROMISE
-    )
+    review_item = selected_review_item(contract_id=contract_id, choice=SuggestionChoice.COMPROMISE)
     adapter._mock_review_items[review_item.id] = review_item
     draft = await create_draft(client, contract_id, [review_item.id])
     send_key = uuid4()
@@ -208,13 +203,12 @@ async def test_send_freezes_items_transitions_contract_and_replays_safely(
     body = sent.json()["data"]
     assert body["id"] == draft["id"]
     assert body["status"] == "SENT"
-    assert body["public_url"].startswith("http://localhost:3000/adjustments/")
+    assert body["public_url"].startswith("http://localhost:3000/r/")
     assert body["expires_at"] is not None
     assert adapter.mock_contracts[contract_id].status == ContractStatus.NEGOTIATING
     assert adapter.mock_review_items[review_item.id].status == ReviewItemStatus.SENT
     assert (
-        adapter.mock_adjustment_requests[UUID(draft["id"])].status
-        == AdjustmentRequestStatus.SENT
+        adapter.mock_adjustment_requests[UUID(draft["id"])].status == AdjustmentRequestStatus.SENT
     )
     assert len(adapter.mock_public_tokens) == 1
 

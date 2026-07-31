@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
+import { publicRouteHeaders } from "./public-route-headers.mjs";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  headers: publicRouteHeaders,
 };
 
 export default nextConfig;

@@ -105,8 +105,7 @@ def build_live_solar_inputs(
         document_id = _stable_uuid(case.case_id, "document")
         parsed = ParsedDocument(
             pages=tuple(
-                ParsedPage(number=page.page, text=page.text)
-                for page in case.contract_pages
+                ParsedPage(number=page.page, text=page.text) for page in case.contract_pages
             ),
             model="offline-evaluation-snapshot-v1",
         )
@@ -135,10 +134,7 @@ def build_live_solar_inputs(
             for review in reviews
             if review.type == target.signal
             and target.field
-            in {
-                fields_by_term_id[term_id]
-                for term_id in review.related_extracted_term_ids
-            }
+            in {fields_by_term_id[term_id] for term_id in review.related_extracted_term_ids}
         ]
         if len(matching_reviews) != 1:
             raise ValueError(
@@ -173,11 +169,7 @@ async def run_live_solar_review(
         timeout_seconds=settings.upstage_solar_timeout_seconds,
         model=settings.upstage_solar_model,
     )
-    outputs: list[SolarReviewOutput] = []
-    for solar_input in inputs:
-        outputs.extend(
-            await adapter.generate_review_content(items=[solar_input])
-        )
+    outputs = await adapter.generate_review_content(items=inputs)
     outputs_by_id = {output.review_item_id: output for output in outputs}
     items = [
         LiveSolarItemResult(
@@ -189,9 +181,7 @@ async def run_live_solar_review(
         )
         for target, category, solar_input in selected
     ]
-    easy_explanations_generated = all(
-        item.output.plain_explanation.strip() for item in items
-    )
+    easy_explanations_generated = all(item.output.plain_explanation.strip() for item in items)
     three_distinct_suggestions_generated = all(
         len(
             {
@@ -208,7 +198,7 @@ async def run_live_solar_review(
         endpoint_path=SOLAR_CHAT_PATH,
         request_model=settings.upstage_solar_model,
         prompt_version=SOLAR_PROMPT_VERSION,
-        request_count=len(inputs),
+        request_count=(len(inputs) + adapter.review_chunk_size - 1) // adapter.review_chunk_size,
         item_count=len(items),
         schema_valid=True,
         easy_explanations_generated=bool(easy_explanations_generated),

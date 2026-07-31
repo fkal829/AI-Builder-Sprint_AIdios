@@ -12,10 +12,21 @@ from app.adapters.solar import SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
 from app.adapters.upstage import UpstageAdapter, UpstageExtractionError
 from app.api.dependencies import get_analysis_service, get_supabase_adapter
-from app.core.enums import AnalysisStatus, ContractStatus, ExtractedField, ObligationStatus
+from app.core.enums import (
+    AnalysisStatus,
+    ContractStatus,
+    ExtractedField,
+    ExtractedSourceType,
+    ExtractedValueType,
+    ObligationStatus,
+    ReviewSignalType,
+    VerificationStatus,
+)
+from app.core.exceptions import ExternalStorageFailure
 from app.main import app
 from app.repositories.analysis import AnalysisTaskRecord
-from app.services.analysis import AnalysisService
+from app.schemas.analysis import ExtractedTermCandidate
+from app.services.analysis import ANALYSIS_FIELDS, AnalysisService
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000013")
 DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000041")
@@ -55,6 +66,49 @@ class AlwaysInvalidExtractAdapter:
 class MissingSolarOutputAdapter:
     async def generate_review_content(self, *, items):
         return []
+
+
+class RoundTrackingExtractAdapter:
+    def __init__(self) -> None:
+        self.extract_calls: list[tuple[str, tuple[ExtractedField, ...]]] = []
+
+    async def parse_document(
+        self,
+        *,
+        content: bytes,
+        content_type: str,
+    ) -> ParsedDocument:
+        del content_type
+        text = content.decode("utf-8")
+        return ParsedDocument(
+            pages=(ParsedPage(number=1, text=text),),
+            model="round-tracking-parse",
+        )
+
+    async def extract_terms(
+        self,
+        *,
+        content: bytes,
+        content_type: str,
+        parsed_document: ParsedDocument,
+        target_fields,
+    ):
+        del content_type
+        label = content.decode("utf-8")
+        self.extract_calls.append((label, target_fields))
+        if ExtractedField.CONTRACT_START_DATE not in target_fields:
+            return []
+        return [
+            ExtractedTermCandidate(
+                field=ExtractedField.CONTRACT_START_DATE,
+                value_type=ExtractedValueType.DATE,
+                value=("2026-08-01" if label == "contract-evidence" else "2026-09-01"),
+                source_page=1,
+                source_text=parsed_document.pages[0].text,
+                confidence=0.9,
+                verification_status=VerificationStatus.VERIFIED,
+            )
+        ]
 
 
 @pytest.fixture
@@ -207,21 +261,22 @@ async def test_starts_idempotent_analysis_and_processes_mock_result(analysis_con
         and item.model_limitations is not None
         for item in completed.result.review_items
     )
-    assert len(
-        {
-            (
-                item.suggestion_accept,
-                item.suggestion_compromise,
-                item.suggestion_request,
-            )
-            for item in completed.result.review_items
-        }
-    ) > 1
+    assert (
+        len(
+            {
+                (
+                    item.suggestion_accept,
+                    item.suggestion_compromise,
+                    item.suggestion_request,
+                )
+                for item in completed.result.review_items
+            }
+        )
+        > 1
+    )
     assert {term.field for term in completed.result.extracted_terms} == set(ExtractedField)
     assert any(
-        term.source_page is not None
-        and term.source_text is not None
-        and term.confidence > 0
+        term.source_page is not None and term.source_text is not None and term.confidence > 0
         for term in completed.result.extracted_terms
     )
     assert repository.mock_contracts[contract_id].status == ContractStatus.REVIEW_REQUIRED
@@ -259,6 +314,87 @@ async def test_starts_idempotent_analysis_and_processes_mock_result(analysis_con
     assert len(repository.mock_analysis_tasks) == 1
 
 
+async def test_analysis_start_failure_is_persisted_and_replayed_with_request_id(
+    analysis_context,
+    monkeypatch,
+) -> None:
+    client, repository, _service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    key = uuid4()
+    calls = 0
+
+    async def fail_start(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise ExternalStorageFailure("private database detail")
+
+    monkeypatch.setattr(repository, "start_analysis_with_audit", fail_start)
+    request = {
+        "document_id": str(document_id),
+        "supporting_document_ids": [],
+    }
+
+    first = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=key),
+        json=request,
+    )
+    replay = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=key),
+        json=request,
+    )
+
+    assert first.status_code == replay.status_code == 503
+    assert replay.json() == first.json()
+    assert first.json()["error"] == {
+        "code": "ANALYSIS_START_FAILED",
+        "message": "분석 작업을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    }
+    assert first.json()["requestId"] == first.headers["X-Request-ID"]
+    assert replay.json()["requestId"] == replay.headers["X-Request-ID"]
+    assert calls == 1
+    assert repository.mock_analysis_tasks == {}
+
+
+async def test_get_queued_analysis_is_read_only(
+    analysis_context,
+    monkeypatch,
+) -> None:
+    client, repository, service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    now = datetime.now(UTC)
+    task = AnalysisTaskRecord(
+        id=uuid4(),
+        contract_id=contract_id,
+        document_id=document_id,
+        supporting_document_ids=(),
+        status=AnalysisStatus.QUEUED,
+        attempt_count=0,
+        error_code=None,
+        result=None,
+        created_at=now,
+        updated_at=now,
+    )
+    repository._mock_analysis_tasks[task.id] = task
+
+    async def fail_if_processed(**_kwargs) -> None:
+        raise AssertionError("최근 분석 조회는 작업을 실행하면 안 됩니다.")
+
+    monkeypatch.setattr(service, "process", fail_if_processed)
+
+    response = await client.get(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "QUEUED"
+    assert repository.mock_analysis_tasks[task.id].status == AnalysisStatus.QUEUED
+
+
 async def test_compares_understood_duration_and_termination(analysis_context) -> None:
     client, repository, _service = analysis_context
     contract_id = await create_contract(client)
@@ -280,15 +416,11 @@ async def test_compares_understood_duration_and_termination(analysis_context) ->
     assert task.result is not None
     explanations = [item.plain_explanation for item in task.result.review_items]
     assert any(
-        explanation.startswith(
-            "사용자가 이해한 계약기간과 계약 원문의 계약기간이 다릅니다."
-        )
+        explanation.startswith("사용자가 이해한 계약기간과 계약 원문의 계약기간이 다릅니다.")
         for explanation in explanations
     )
     assert any(
-        explanation.startswith(
-            "사용자가 이해한 중도해지 가능 여부와 계약 원문의 조건이 다릅니다."
-        )
+        explanation.startswith("사용자가 이해한 중도해지 가능 여부와 계약 원문의 조건이 다릅니다.")
         for explanation in explanations
     )
 
@@ -383,6 +515,83 @@ async def test_failed_analysis_can_only_be_restarted_explicitly_with_new_key(
     assert [event.event_type for event in repository.mock_audit_events].count(
         "ANALYSIS_RESTARTED"
     ) == 1
+
+
+async def test_evaluator_uses_two_task_rounds_across_supporting_documents(
+    analysis_context,
+) -> None:
+    client, repository, service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    support_id = await upload_document(
+        client,
+        contract_id=contract_id,
+        document_type="PROPOSAL",
+    )
+    contract_document = repository.mock_documents[document_id]
+    support_document = repository.mock_documents[support_id]
+    repository._mock_objects[contract_document.storage_path] = b"contract-evidence"
+    repository._mock_objects[support_document.storage_path] = b"support-evidence"
+    tracking_adapter = RoundTrackingExtractAdapter()
+    service.adapter = tracking_adapter
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={
+            "document_id": str(document_id),
+            "supporting_document_ids": [str(support_id)],
+        },
+    )
+
+    task = repository.mock_analysis_tasks[UUID(response.json()["data"]["id"])]
+    assert response.status_code == 202
+    assert task.status == AnalysisStatus.COMPLETED
+    assert task.attempt_count == 2
+    assert [label for label, _fields in tracking_adapter.extract_calls] == [
+        "contract-evidence",
+        "support-evidence",
+        "contract-evidence",
+        "support-evidence",
+    ]
+    first_round = tracking_adapter.extract_calls[:2]
+    second_round = tracking_adapter.extract_calls[2:]
+    assert all(fields == ANALYSIS_FIELDS for _label, fields in first_round)
+    assert all(ExtractedField.CONTRACT_START_DATE not in fields for _label, fields in second_round)
+    assert task.result is not None
+    start_date_terms = [
+        term
+        for term in task.result.extracted_terms
+        if term.field == ExtractedField.CONTRACT_START_DATE
+    ]
+    assert {term.source_type for term in start_date_terms} == {
+        ExtractedSourceType.CONTRACT_DOCUMENT,
+        ExtractedSourceType.DOCUMENTED_EXPLANATION,
+    }
+    contract_term = next(
+        term
+        for term in start_date_terms
+        if term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
+    )
+    support_term = next(
+        term
+        for term in start_date_terms
+        if term.source_type == ExtractedSourceType.DOCUMENTED_EXPLANATION
+    )
+    comparison = next(
+        item
+        for item in task.result.review_items
+        if support_term.id in item.related_extracted_term_ids
+    )
+    assert comparison.type == ReviewSignalType.MISMATCH
+    assert comparison.related_extracted_term_ids == [
+        contract_term.id,
+        support_term.id,
+    ]
+    assert comparison.source_document_id == document_id
+    assert comparison.plain_explanation.startswith(
+        "선택 자료에서 문서로 확인된 계약 시작일 설명과 계약 문서상 조건이 다릅니다."
+    )
 
 
 async def test_invalid_solar_output_fails_analysis_without_partial_review_items(
@@ -723,9 +932,9 @@ async def test_rejects_review_selection_after_adjustment_send(
     assert repository.mock_review_item_details[item_id].status.value == "SENT"
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
-    assert [
-        event.event_type for event in repository.mock_audit_events
-    ].count("REVIEW_ITEM_SELECTION_UPDATED") == 1
+    assert [event.event_type for event in repository.mock_audit_events].count(
+        "REVIEW_ITEM_SELECTION_UPDATED"
+    ) == 1
 
 
 async def test_review_selection_handles_not_found_auth_and_validation(
@@ -769,9 +978,9 @@ async def test_review_selection_handles_not_found_auth_and_validation(
 
 
 def test_fastapi_openapi_exposes_review_item_update_contract() -> None:
-    operation = app.openapi()["paths"][
-        "/api/v1/contracts/{contract_id}/review-items/{item_id}"
-    ]["patch"]
+    operation = app.openapi()["paths"]["/api/v1/contracts/{contract_id}/review-items/{item_id}"][
+        "patch"
+    ]
 
     assert operation["responses"]["200"]
     assert operation["responses"]["401"]

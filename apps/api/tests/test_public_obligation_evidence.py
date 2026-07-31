@@ -8,10 +8,10 @@ from httpx import ASGITransport, AsyncClient
 
 from app.adapters.supabase import MockObligation, SupabaseAdapter
 from app.api.dependencies import get_obligation_service, get_supabase_adapter
-from app.core.enums import ObligationStatus, PublicTokenScope
+from app.core.enums import ContractStatus, ObligationStatus, PublicTokenScope
 from app.main import app
+from app.repositories.contracts import ContractRecord
 from app.repositories.obligations import EvidenceSubmissionOutcome
-from app.services.idempotency import IdempotencyService
 from app.services.obligations import ObligationService
 from app.services.public_tokens import PublicTokenService
 
@@ -53,6 +53,27 @@ def pending_obligation() -> MockObligation:
     )
 
 
+def signed_contract() -> ContractRecord:
+    return ContractRecord(
+        id=CONTRACT_ID,
+        owner_id=OWNER_ID,
+        title="광안리 카페 SNS 광고대행 계약",
+        counterparty_name="부산홍보대행",
+        status=ContractStatus.SIGNED,
+        signed_date=None,
+        start_date=None,
+        end_date=None,
+        termination_notice_date=None,
+        renewal_type=None,
+        total_amount=None,
+        understood_term=None,
+        renewal_decision=None,
+        modusign_document_id=None,
+        created_at=STARTED_AT,
+        updated_at=STARTED_AT,
+    )
+
+
 @pytest.fixture
 async def public_evidence_context():
     clock = [STARTED_AT]
@@ -66,6 +87,7 @@ async def public_evidence_context():
         demo_bearer_token=BEARER_TOKEN,
     )
     obligation = pending_obligation()
+    adapter._mock_contracts[CONTRACT_ID] = signed_contract()
     adapter._mock_obligations[CONTRACT_ID] = obligation
     token_service = PublicTokenService(
         adapter,
@@ -74,7 +96,6 @@ async def public_evidence_context():
     )
     service = ObligationService(
         adapter,
-        idempotency=IdempotencyService(adapter, now=lambda: clock[0]),
         public_tokens=token_service,
         public_app_base_url="http://localhost:3000",
         now=lambda: clock[0],
@@ -105,15 +126,12 @@ async def create_evidence_token(
     expires_in_hours: int = 72,
 ) -> str:
     response = await client.post(
-        (
-            f"/api/v1/contracts/{CONTRACT_ID}/obligations/"
-            f"{obligation_id}/evidence-link"
-        ),
+        (f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation_id}/evidence-link"),
         headers=owner_headers(),
         json={"expires_in_hours": expires_in_hours},
     )
     assert response.status_code == 201, response.text
-    return response.json()["data"]["public_url"].rsplit("/", 1)[-1]
+    return response.json()["data"]["public_url"].split("/r/", 1)[1].removesuffix("/evidence")
 
 
 async def test_submits_url_once_and_records_state_with_audit(
@@ -136,9 +154,7 @@ async def test_submits_url_once_and_records_state_with_audit(
     assert saved.reviewed_at is None
     assert saved.payment_condition_met is False
     assert [
-        event.event_type
-        for event in adapter.mock_audit_events
-        if event.contract_id == CONTRACT_ID
+        event.event_type for event in adapter.mock_audit_events if event.contract_id == CONTRACT_ID
     ] == ["EVIDENCE_LINK_CREATED", "EVIDENCE_SUBMITTED"]
     submitted_event = adapter.mock_audit_events[-1]
     assert submitted_event.actor_type == "AGENCY"
@@ -149,10 +165,9 @@ async def test_submits_url_once_and_records_state_with_audit(
     assert repeated.status_code == 409
     assert repeated.headers["Cache-Control"] == "no-store"
     assert repeated.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
-    assert [
-        event.event_type
-        for event in adapter.mock_audit_events
-    ].count("EVIDENCE_SUBMITTED") == 1
+    assert [event.event_type for event in adapter.mock_audit_events].count(
+        "EVIDENCE_SUBMITTED"
+    ) == 1
 
 
 async def test_hides_malformed_scope_target_and_revoked_tokens(
@@ -252,10 +267,7 @@ async def test_rejects_invalid_evidence_urls_without_changing_state(
     assert response.status_code == 422
     assert response.headers["Cache-Control"] == "no-store"
     assert adapter.mock_obligations[CONTRACT_ID].status == ObligationStatus.PENDING
-    assert not any(
-        event.event_type == "EVIDENCE_SUBMITTED"
-        for event in adapter.mock_audit_events
-    )
+    assert not any(event.event_type == "EVIDENCE_SUBMITTED" for event in adapter.mock_audit_events)
 
 
 async def test_live_adapter_calls_atomic_submission_rpc(monkeypatch) -> None:
@@ -344,15 +356,13 @@ def test_submission_migration_validates_token_and_updates_atomically() -> None:
 
 def test_openapi_exposes_public_obligation_submission_contract() -> None:
     openapi = app.openapi()
-    operation = openapi["paths"][
-        "/api/v1/public/obligations/{token}/evidence"
-    ]["post"]
+    operation = openapi["paths"]["/api/v1/public/obligations/{token}/evidence"]["post"]
 
     assert set(operation["responses"]) >= {"200", "404", "409", "410", "422"}
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
     assert request_schema["$ref"].endswith("/EvidenceSubmission")
-    evidence_schema = openapi["components"]["schemas"]["EvidenceSubmission"][
-        "properties"
-    ]["evidence_url"]
+    evidence_schema = openapi["components"]["schemas"]["EvidenceSubmission"]["properties"][
+        "evidence_url"
+    ]
     assert evidence_schema["format"] == "uri"
     assert evidence_schema["maxLength"] == 2048

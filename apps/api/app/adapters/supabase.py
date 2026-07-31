@@ -33,6 +33,7 @@ from app.core.enums import (
 )
 from app.core.errors import ErrorCode
 from app.core.exceptions import ExternalStorageFailure
+from app.domain.obligations import build_representative_obligation
 from app.repositories.adjustments import (
     AdjustmentDetailRecord,
     AdjustmentRequestItemRecord,
@@ -2619,56 +2620,23 @@ def _representative_obligation(
     result: Analysis,
     now: datetime,
 ) -> MockObligation | None:
-    contract_terms = [
-        term
-        for term in result.extracted_terms
-        if term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
-        and term.verification_status == VerificationStatus.VERIFIED
-    ]
-    due_dates = [
-        term
-        for term in contract_terms
-        if term.field == ExtractedField.DELIVERABLE_DUE_DATE
-    ]
-    if len(due_dates) != 1:
-        return None
-    due = due_dates[0]
-    title_fields = (
-        ExtractedField.ADVERTISING_CHANNEL,
-        ExtractedField.CONTENT_TYPE,
-        ExtractedField.CONTENT_QUANTITY,
+    draft = build_representative_obligation(
+        contract_id=result.contract_id,
+        terms=result.extracted_terms,
     )
-    title_terms = [
-        term
-        for field in title_fields
-        for term in contract_terms
-        if term.field == field
-        and term.document_id == due.document_id
-        and term.source_page == due.source_page
-        and term.source_text == due.source_text
-    ]
-    if not title_terms or due.source_page is None or due.source_text is None:
+    if draft is None:
         return None
-    values = {
-        term.field: (
-            f"{term.value}건"
-            if term.field == ExtractedField.CONTENT_QUANTITY
-            else str(term.value)
-        )
-        for term in title_terms
-    }
-    title = " ".join(values[field] for field in title_fields if field in values)
     return MockObligation(
         id=uuid4(),
-        contract_id=result.contract_id,
-        title=title,
-        due_date=date.fromisoformat(str(due.value)),
+        contract_id=draft.contract_id,
+        title=draft.title,
+        due_date=draft.due_date,
         assignee="AGENCY",
         evidence_type="URL",
-        source_document_id=due.document_id,
-        source_page=due.source_page,
-        source_text=due.source_text,
-        confidence=min(term.confidence for term in (due, *title_terms)),
+        source_document_id=draft.source_document_id,
+        source_page=draft.source_page,
+        source_text=draft.source_text,
+        confidence=draft.confidence,
         status=ObligationStatus.PENDING,
         created_at=now,
         updated_at=now,

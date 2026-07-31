@@ -28,6 +28,11 @@ from app.core.exceptions import (
     InvalidDocument,
     ResourceNotFound,
 )
+from app.domain.obligations import (
+    REPRESENTATIVE_OBLIGATION_FIELDS,
+    REPRESENTATIVE_TITLE_FIELDS,
+    build_representative_obligation,
+)
 from app.repositories.analysis import AnalysisRepository, AnalysisTaskRecord
 from app.repositories.contracts import ContractRecord, ContractRepository
 from app.repositories.documents import DocumentRecord, DocumentRepository, PrivateStorage
@@ -607,6 +612,46 @@ def _build_review_items(
                         ),
                     )
                 )
+
+    representative_terms = tuple(
+        contract_terms[field]
+        for field in REPRESENTATIVE_OBLIGATION_FIELDS
+        if field in contract_terms
+    )
+    if (
+        len(representative_terms) == len(REPRESENTATIVE_OBLIGATION_FIELDS)
+        and all(
+            term.verification_status == VerificationStatus.VERIFIED
+            for term in representative_terms
+        )
+        and build_representative_obligation(
+            contract_id=contract_id,
+            terms=terms,
+        )
+        is None
+    ):
+        due = contract_terms[ExtractedField.DELIVERABLE_DUE_DATE]
+        ordered_terms = tuple(
+            contract_terms[field]
+            for field in (
+                *REPRESENTATIVE_TITLE_FIELDS,
+                ExtractedField.DELIVERABLE_DUE_DATE,
+            )
+        )
+        reviews.append(
+            _review_for_term(
+                contract_id=contract_id,
+                term=due,
+                related_terms=ordered_terms,
+                signal=ReviewSignalType.NEEDS_CHECK,
+                severity=ReviewSeverity.IMPORTANT,
+                explanation=(
+                    "산출물 제목과 기한이 서로 다른 계약 원문 근거에서 확인되어 "
+                    "하나의 대표 이행 항목으로 확정할 수 없습니다. 같은 산출물의 "
+                    "조건인지 추가 확인이 필요합니다."
+                ),
+            )
+        )
 
     for term in contract_terms.values():
         if term.verification_status != VerificationStatus.VERIFIED:

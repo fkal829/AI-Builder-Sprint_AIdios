@@ -5,12 +5,14 @@ from uuid import UUID
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.adapters.modusign import ModusignAdapter
 from app.adapters.solar import SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
 from app.adapters.upstage import UpstageAdapter
 from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedAccess
 from app.services.adjustments import AdjustmentService
+from app.services.agreement_pdf import AgreementPdfRenderer
 from app.services.agreements import AgreementService
 from app.services.analysis import AnalysisService
 from app.services.contracts import ContractService
@@ -18,6 +20,7 @@ from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
+from app.services.signatures import SignatureService
 from app.services.understood_terms import UnderstoodTermService
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -73,6 +76,20 @@ def _get_solar_review_adapter() -> SolarReviewAdapter:
 
 async def get_solar_review_adapter() -> SolarReviewAdapter:
     return _get_solar_review_adapter()
+
+
+@lru_cache
+def _get_modusign_adapter() -> ModusignAdapter:
+    settings = get_settings()
+    return ModusignAdapter(
+        account_email=settings.modusign_account_email,
+        api_key=settings.modusign_api_key,
+        mode=settings.modusign_mode,
+    )
+
+
+async def get_modusign_adapter() -> ModusignAdapter:
+    return _get_modusign_adapter()
 
 
 async def get_document_upload_service(
@@ -167,6 +184,19 @@ async def get_agreement_service(
     return AgreementService(
         repository=supabase,
         idempotency=IdempotencyService(supabase),
+    )
+
+
+async def get_signature_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    modusign: Annotated[ModusignAdapter, Depends(get_modusign_adapter)],
+) -> SignatureService:
+    return SignatureService(
+        repository=supabase,
+        agreements=supabase,
+        modusign=modusign,
+        agreement_pdf=AgreementPdfRenderer(font_path=get_settings().agreement_pdf_font_path),
+        embedded_redirect_url=get_settings().modusign_embedded_redirect_url,
     )
 
 

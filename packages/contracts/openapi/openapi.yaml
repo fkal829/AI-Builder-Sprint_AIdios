@@ -545,19 +545,24 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
         "422": {$ref: "#/components/responses/ValidationError"}
-  /contracts/{contract_id}/signature-requests:
+  # C-7 API CHANGE (2026-07-31): replaces the template-based, immediate-send
+  # endpoint /signature-requests. This endpoint creates only a short-lived
+  # Modusign embedded editor draft; the user places fields and sends in the editor.
+  /contracts/{contract_id}/signature-embedded-drafts:
     parameters:
       - $ref: "#/components/parameters/ContractId"
     post:
-      summary: 모두싸인 서명 요청 생성
-      operationId: createSignatureRequest
+      summary: 모두싸인 임베디드 서명 초안 생성
+      operationId: createSignatureEmbeddedDraft
       tags: [signatures]
       description: |
-        사용자의 명시적 확인 후에만 호출하며 로컬 요청 상태와 SIGNATURE_REQUESTED
-        감사 이벤트를 하나의 트랜잭션으로 기록한다. 외부 문서 생성 전 실패는
-        Signature=FAILED로 보존하되 Contract는 READY_TO_SIGN을 유지하거나 되돌리고
-        502를 반환한다. ABORTED 또는 FAILED였던 이전 시도 뒤 재요청은 자동 실행하지
-        않으며 사용자가 새 Idempotency-Key와 confirmed=true로 명시해야 한다.
+        [C-7 changed] 템플릿을 사용하거나 서명을 즉시 발송하지 않는다. 사용자의
+        명시적 확인 후 합의서 PDF와 서명자 기본값으로 모두싸인 임베디드 초안을 만들고,
+        사용자가 반환된 editor_url에서 서명란을 배치한 뒤 직접 발송한다. Contract는
+        READY_TO_SIGN을 유지하고 Signature만 EDITING으로 전환한다. editor_url은 2시간
+        이내의 민감한 링크이므로 Cache-Control: no-store 응답으로만 반환하며 DB·로그·
+        멱등성 재생 결과에 저장하지 않는다. 같은 Idempotency-Key를 재전송하면 URL을
+        재발급하지 않고 409을 반환한다.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -565,14 +570,17 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SignatureRequestCreate"
+              $ref: "#/components/schemas/EmbeddedSignatureDraftCreate"
       responses:
         "201":
-          description: 모두싸인 서명 요청 생성
+          description: 모두싸인 임베디드 편집 URL 생성
+          headers:
+            Cache-Control:
+              schema: {type: string, example: no-store}
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SignatureResponse"
+                $ref: "#/components/schemas/EmbeddedSignatureDraftResponse"
         "409":
           $ref: "#/components/responses/InvalidTransition"
         "401": {$ref: "#/components/responses/Unauthorized"}
@@ -969,7 +977,7 @@ components:
       enum: [DRAFT, SENT, OPENED, RESPONDED, CONFIRMED, EXPIRED]
     InternalSignatureStatus:
       type: string
-      enum: [REQUEST_READY, REQUESTING, SIGNING, COMPLETED, ABORTED, FAILED]
+      enum: [REQUEST_READY, REQUESTING, EDITING, SIGNING, COMPLETED, ABORTED, FAILED]
     ModusignDocumentStatus:
       type: string
       description: DRAFT와 SCHEDULED도 원본 보존을 위해 허용하지만 P0 정상 흐름은 ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED다.
@@ -1127,6 +1135,7 @@ components:
         - ADJUSTMENT_CONFIRMED
         - ADJUSTMENT_EXPIRED
         - AGREEMENT_CREATED
+        - SIGNATURE_DRAFT_CREATED
         - SIGNATURE_REQUESTED
         - SIGNATURE_STARTED
         - SIGNATURE_COMPLETED
@@ -2010,7 +2019,7 @@ components:
     Signature:
       type: object
       additionalProperties: false
-      required: [id, contract_id, status, modusign_status, modusign_document_id, last_event_id, requested_at, completed_at]
+      required: [id, contract_id, status, modusign_status, modusign_draft_id, modusign_document_id, last_event_id, requested_at, completed_at]
       properties:
         id: {type: string, format: uuid}
         contract_id: {type: string, format: uuid}
@@ -2019,6 +2028,7 @@ components:
           oneOf:
             - {$ref: "#/components/schemas/ModusignDocumentStatus"}
             - {type: "null"}
+        modusign_draft_id: {type: [string, "null"]}
         modusign_document_id: {type: [string, "null"]}
         last_event_id:
           type: [string, "null"]
@@ -2032,6 +2042,7 @@ components:
           then:
             properties:
               modusign_status: {type: "null"}
+              modusign_draft_id: {type: "null"}
               modusign_document_id: {type: "null"}
               last_event_id: {type: "null"}
               requested_at: {type: "null"}
@@ -2046,18 +2057,32 @@ components:
             oneOf:
               - properties:
                   modusign_status: {type: "null"}
+                  modusign_draft_id: {type: "null"}
                   modusign_document_id: {type: "null"}
                   last_event_id: {type: "null"}
               - properties:
                   modusign_status: {type: string, enum: [DRAFT, SCHEDULED, ON_PROCESSING]}
+                  modusign_draft_id: {type: "null"}
                   modusign_document_id: {type: string, minLength: 1}
                   last_event_id: {type: [string, "null"], minLength: 1}
+        - if:
+            properties:
+              status: {const: EDITING}
+          then:
+            properties:
+              modusign_status: {const: DRAFT}
+              modusign_draft_id: {type: string, minLength: 1}
+              modusign_document_id: {type: "null"}
+              last_event_id: {type: "null"}
+              requested_at: {type: string, format: date-time}
+              completed_at: {type: "null"}
         - if:
             properties:
               status: {const: SIGNING}
           then:
             properties:
               modusign_status: {const: ON_GOING}
+              modusign_draft_id: {type: [string, "null"]}
               modusign_document_id: {type: string, minLength: 1}
               last_event_id: {type: string, minLength: 1}
               requested_at: {type: string, format: date-time}
@@ -2068,6 +2093,7 @@ components:
           then:
             properties:
               modusign_status: {const: COMPLETED}
+              modusign_draft_id: {type: [string, "null"]}
               modusign_document_id: {type: string, minLength: 1}
               last_event_id: {type: string, minLength: 1}
               requested_at: {type: string, format: date-time}
@@ -2078,6 +2104,7 @@ components:
           then:
             properties:
               modusign_status: {const: ABORTED}
+              modusign_draft_id: {type: [string, "null"]}
               modusign_document_id: {type: string, minLength: 1}
               last_event_id: {type: string, minLength: 1}
               requested_at: {type: string, format: date-time}
@@ -2092,10 +2119,12 @@ components:
             oneOf:
               - properties:
                   modusign_status: {type: "null"}
+                  modusign_draft_id: {type: "null"}
                   modusign_document_id: {type: "null"}
                   last_event_id: {type: "null"}
               - properties:
                   modusign_status: {const: PROCESSING_FAILED}
+                  modusign_draft_id: {type: [string, "null"]}
                   modusign_document_id: {type: string, minLength: 1}
                   last_event_id: {type: string, minLength: 1}
     SignatureMethod:
@@ -2135,7 +2164,7 @@ components:
         role: {type: string, enum: [OWNER, AGENCY]}
         name: {type: string, minLength: 2, maxLength: 30}
         signing_method: {$ref: "#/components/schemas/SignatureMethod"}
-    SignatureRequestCreate:
+    EmbeddedSignatureDraftCreate:
       type: object
       additionalProperties: false
       required: [agreement_id, agreement_version, signers, confirmed]
@@ -2173,6 +2202,23 @@ components:
         - type: object
           properties:
             data: {$ref: "#/components/schemas/Signature"}
+    EmbeddedSignatureDraft:
+      type: object
+      additionalProperties: false
+      required: [signature, editor_url, expires_at]
+      properties:
+        signature: {$ref: "#/components/schemas/Signature"}
+        editor_url:
+          type: string
+          format: uri
+          description: Short-lived Modusign editor URL. Do not store, log, or cache it.
+        expires_at: {type: string, format: date-time}
+    EmbeddedSignatureDraftResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/EmbeddedSignatureDraft"}
     OriginalContractReference:
       type: object
       additionalProperties: false

@@ -46,9 +46,11 @@ class Settings(BaseSettings):
     upstage_solar_timeout_seconds: float = Field(default=120, ge=1, le=300)
     upstage_solar_model: str = "solar-pro3"
 
-    modusign_mode: str = "mock"
+    modusign_mode: Literal["mock", "live"] = "mock"
+    modusign_account_email: str = ""
     modusign_api_key: str = ""
-    modusign_template_id: str = ""
+    modusign_embedded_redirect_url: str = ""
+    agreement_pdf_font_path: str = ""
     modusign_webhook_secret: str = ""
 
     @property
@@ -69,6 +71,13 @@ class Settings(BaseSettings):
             )
         if self.upstage_mode == "live" and not self.upstage_api_key:
             raise ValueError("UPSTAGE_MODE=live에는 UPSTAGE_API_KEY가 필요합니다.")
+        if self.modusign_mode == "live" and (
+            not self.modusign_account_email
+            or not self.modusign_api_key
+        ):
+            raise ValueError(
+                "MODUSIGN_MODE=live requires account email and API key"
+            )
         if self.app_env == "production" and self.supabase_mode == "mock":
             raise ValueError("production에서는 SUPABASE_MODE=mock을 사용할 수 없습니다.")
         if (

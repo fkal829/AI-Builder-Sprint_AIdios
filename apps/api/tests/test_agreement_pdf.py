@@ -44,7 +44,9 @@ def test_renders_confirmed_agreement_to_in_memory_pdf() -> None:
         signature_roles=["OWNER", "AGENCY"],
     )
 
-    pdf = AgreementPdfRenderer().render(agreement)
+    renderer = AgreementPdfRenderer()
+    pdf = renderer.render(agreement)
 
     assert pdf.startswith(b"%PDF-")
     assert len(PdfReader(BytesIO(pdf)).pages) >= 1
+    assert renderer.render(agreement) == pdf

@@ -2057,11 +2057,15 @@ class SupabaseAdapter:
             "p_agreement_id": str(record.agreement.id),
             "p_adjustment_request_id": str(record.adjustment_request_id),
             "p_agreement": record.agreement.model_dump(mode="json"),
+            "p_pdf_storage_path": record.pdf_storage_path,
+            "p_pdf_sha256": record.pdf_sha256,
+            "p_pdf_size_bytes": record.pdf_size_bytes,
+            "p_pdf_page_count": record.pdf_page_count,
             "p_created_at": record.created_at.isoformat(),
         }
         try:
             response = await asyncio.to_thread(
-                lambda: client.rpc("create_agreement_with_audit", params).execute()
+                lambda: client.rpc("create_rendered_agreement_with_audit", params).execute()
             )
         except Exception as error:
             raise ExternalStorageFailure("합의서 저장에 실패했습니다.") from error
@@ -2860,6 +2864,10 @@ def _agreement_record_from_row(row: dict) -> AgreementRecord:
     return AgreementRecord(
         agreement=Agreement.model_validate(row["agreement"]),
         adjustment_request_id=UUID(str(row["adjustment_request_id"])),
+        pdf_storage_path=str(row["pdf_storage_path"]),
+        pdf_sha256=str(row["pdf_sha256"]),
+        pdf_size_bytes=int(row["pdf_size_bytes"]),
+        pdf_page_count=int(row["pdf_page_count"]),
         created_at=_parse_datetime(row["created_at"]),
     )
 

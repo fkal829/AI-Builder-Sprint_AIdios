@@ -518,7 +518,12 @@ paths:
       summary: 변경·확인 합의서 생성
       operationId: createAgreement
       tags: [agreements]
-      description: 원계약 문서 ID와 검증된 canonical signed_date가 없으면 INVALID_STATUS_TRANSITION으로 거부한다. 생성된 버전과 AGREEMENT_CREATED 감사 이벤트를 하나의 트랜잭션으로 기록한다.
+      description: |
+        원계약 문서 ID와 검증된 canonical signed_date가 없으면 INVALID_STATUS_TRANSITION으로
+        거부한다. 원본 계약서는 수정하지 않으며, 확정된 조항으로 새 변경·확인 합의서 PDF를
+        private Storage에 한 번 렌더링한다. PDF의 위치·SHA-256·합의서 레코드와
+        AGREEMENT_CREATED 감사 이벤트는 하나의 DB 트랜잭션으로 기록한다. 응답에는 private
+        Storage 경로나 해시를 노출하지 않는다.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:

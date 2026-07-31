@@ -2,6 +2,7 @@ import json
 from base64 import b64decode
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 import pytest
@@ -122,7 +123,16 @@ async def ready_contract_with_agreement(
     adapter._mock_agreements[contract_id] = AgreementRecord(
         agreement=agreement,
         adjustment_request_id=uuid4(),
+        pdf_storage_path=f"{OWNER_ID}/{contract_id}/agreements/{agreement.id}/v1/source.pdf",
+        pdf_sha256=sha256(b"%PDF-1.4 test PDF").hexdigest(),
+        pdf_size_bytes=17,
+        pdf_page_count=1,
         created_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    await adapter.upload_private_object(
+        path=adapter._mock_agreements[contract_id].pdf_storage_path,
+        content=b"%PDF-1.4 test PDF",
+        content_type="application/pdf",
     )
     return contract_id, agreement
 
@@ -239,6 +249,24 @@ async def test_vendor_failure_is_recorded_without_starting_contract(signature_co
     assert len(adapter.mock_signatures) == 1
 
 
+async def test_tampered_stored_agreement_pdf_is_never_sent_to_modusign(signature_context) -> None:
+    client, adapter = signature_context
+    contract_id, agreement = await ready_contract_with_agreement(client, adapter)
+    stored = adapter.mock_agreements[contract_id]
+    adapter._mock_objects[stored.pdf_storage_path] = b"%PDF-1.4 altered artifact"
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/signature-embedded-drafts",
+        headers=owner_headers(idempotency_key=uuid4()),
+        json=request_payload(agreement),
+    )
+
+    assert response.status_code == 502
+    signature = next(iter(adapter.mock_signatures.values())).signature
+    assert signature.status == InternalSignatureStatus.FAILED
+    assert signature.modusign_draft_id is None
+
+
 async def test_live_adapter_creates_embedded_draft_with_pdf_and_basic_auth() -> None:
     captured: dict[str, object] = {}
 
@@ -283,4 +311,7 @@ async def test_live_adapter_creates_embedded_draft_with_pdf_and_basic_auth() -> 
     assert body["redirectUrl"] == "https://app.example.com/contracts/signature-complete"
     assert body["file"]["extension"] == "pdf"
     assert b64decode(body["file"]["base64"]).startswith(b"%PDF-")
-    assert "role" not in body["participants"][0]
+    participant = body["participants"][0]
+    assert participant["type"] == "SIGNER"
+    assert participant["role"] == "OWNER"
+    assert participant["signingOrder"] == 1

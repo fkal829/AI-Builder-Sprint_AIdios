@@ -15,3 +15,10 @@ FastAPI 구현에서 추출한 OpenAPI와 TypeScript 생성물은 추후 별도 
 발송하지 않습니다. `editor_url`은 약 2시간 동안 유효한 민감한 URL이라 `no-store` 응답으로만
 전달하며 DB, 로그, 멱등성 재생값에 저장하지 않습니다. `Signature`에는 새 `EDITING` 상태와
 `modusign_draft_id`가 추가됐고, 계약은 이 단계에서 `READY_TO_SIGN`을 유지합니다.
+
+## C-6 extension — rendered agreement artifact (2026-07-31)
+
+`POST /contracts/{contract_id}/agreement`는 원계약 파일을 수정하지 않습니다. 확정된 합의서
+데이터로 PDF를 한 번 생성해 private Storage에 보관하고, 해당 파일의 위치·SHA-256과 합의서
+레코드를 원자적으로 연결합니다. 이 내부 메타데이터와 Storage 경로는 공개 API 응답에 포함하지
+않으며, C-7은 이 저장본만 모두싸인 임베디드 초안에 전달합니다.

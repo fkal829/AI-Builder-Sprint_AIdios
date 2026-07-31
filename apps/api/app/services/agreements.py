@@ -1,7 +1,11 @@
+import hashlib
 from collections.abc import Callable
 from datetime import UTC, datetime
+from io import BytesIO
 from typing import Any
 from uuid import UUID, uuid4
+
+from pypdf import PdfReader
 
 from app.core.enums import (
     AgreementClauseCategory,
@@ -10,12 +14,13 @@ from app.core.enums import (
     ContractStatus,
     IdempotencyOperation,
 )
-from app.core.exceptions import ResourceNotFound
+from app.core.exceptions import ExternalStorageFailure, ResourceNotFound
 from app.repositories.agreements import (
     AgreementCreationContext,
     AgreementRecord,
     AgreementRepository,
 )
+from app.repositories.documents import PrivateStorage
 from app.schemas.agreements import (
     AGREEMENT_TITLE,
     Agreement,
@@ -23,6 +28,7 @@ from app.schemas.agreements import (
     AgreementConditionSummary,
     OriginalContractReference,
 )
+from app.services.agreement_pdf import AgreementPdfRenderer
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
 from app.services.state_machine import InvalidStatusTransition
 
@@ -36,10 +42,14 @@ class AgreementService:
         self,
         *,
         repository: AgreementRepository,
+        storage: PrivateStorage,
+        pdf_renderer: AgreementPdfRenderer,
         idempotency: IdempotencyService,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
+        self._storage = storage
+        self._pdf_renderer = pdf_renderer
         self._idempotency = idempotency
         self._now = now or (lambda: datetime.now(UTC))
 
@@ -64,16 +74,40 @@ class AgreementService:
             if existing is not None:
                 raise InvalidStatusTransition("이미 생성된 합의서가 있습니다.")
             agreement = _agreement_from_context(context)
+            pdf_content = self._pdf_renderer.render(agreement)
+            pdf_id = uuid4()
+            pdf_storage_path = (
+                f"{owner_id}/{contract_id}/agreements/{agreement.id}/v{agreement.version}/{pdf_id}.pdf"
+            )
             record = AgreementRecord(
                 agreement=agreement,
                 adjustment_request_id=_confirmed_request_id(context),
+                pdf_storage_path=pdf_storage_path,
+                pdf_sha256=hashlib.sha256(pdf_content).hexdigest(),
+                pdf_size_bytes=len(pdf_content),
+                pdf_page_count=len(PdfReader(BytesIO(pdf_content), strict=True).pages),
                 created_at=self._utc_now(),
             )
-            saved = await self._repository.create_agreement_with_audit(
-                owner_id=owner_id,
-                record=record,
+            await self._storage.upload_private_object(
+                path=record.pdf_storage_path,
+                content=pdf_content,
+                content_type="application/pdf",
             )
+            try:
+                saved = await self._repository.create_agreement_with_audit(
+                    owner_id=owner_id,
+                    record=record,
+                )
+            except ExternalStorageFailure as error:
+                try:
+                    await self._storage.delete_private_object(path=record.pdf_storage_path)
+                except ExternalStorageFailure as rollback_error:
+                    raise ExternalStorageFailure(
+                        "합의서 메타데이터 저장과 Storage 롤백에 실패했습니다."
+                    ) from rollback_error
+                raise error
             if saved is None:
+                await self._storage.delete_private_object(path=record.pdf_storage_path)
                 raise InvalidStatusTransition("합의서를 생성할 수 없는 상태입니다.")
             return IdempotentOutcome(
                 status_code=201,

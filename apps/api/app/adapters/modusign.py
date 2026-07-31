@@ -62,7 +62,10 @@ class ModusignAdapter:
             },
             "participants": [
                 {
+                    "type": "SIGNER",
+                    "role": signer.role,
                     "name": signer.name,
+                    "signingOrder": 1,
                     "signingMethod": signer.signing_method.model_dump(),
                 }
                 for signer in signers

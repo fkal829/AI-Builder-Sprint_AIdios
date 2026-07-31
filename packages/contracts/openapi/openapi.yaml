@@ -364,6 +364,7 @@ paths:
           $ref: "#/components/responses/NotFound"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "422": {$ref: "#/components/responses/ValidationError"}
+        "502": {$ref: "#/components/responses/CounterproposalComparisonFailed"}
   /contracts/{contract_id}/adjustment-requests/{adjustment_request_id}/send:
     parameters:
       - $ref: "#/components/parameters/ContractId"
@@ -887,6 +888,11 @@ components:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
     ExternalServiceUnavailable:
       description: 분석 작업을 시작할 수 없음
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    CounterproposalComparisonFailed:
+      description: Solar 역제안 비교 요청 또는 출력 검증 실패
       content:
         application/json:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -1955,11 +1961,12 @@ components:
       required: [review_item_id, changed_summary, remaining_checks, final_confirmation]
       properties:
         review_item_id: {type: string, format: uuid}
-        changed_summary: {type: string}
+        changed_summary: {type: string, minLength: 1, maxLength: 1200}
         remaining_checks:
           type: array
-          items: {type: string}
-        final_confirmation: {type: string}
+          maxItems: 6
+          items: {type: string, minLength: 1}
+        final_confirmation: {type: string, minLength: 1, maxLength: 600}
     OwnerAdjustmentDetail:
       type: object
       additionalProperties: false

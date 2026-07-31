@@ -605,6 +605,10 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
   구현한다.
 - C가 조정 상세 endpoint를 담당하지만 역제안 쉬운 설명이 AI를 사용하면 B의 내부
   비교 서비스를 호출한다.
+- 대행사 응답은 먼저 영속화한다. B의 `CounterproposalComparator`는 저장된 실제
+  요청 문구, `counter_text`, `reason`만 비교하며 수락·거절은 결정적 코드로,
+  역제안은 Solar 구조화 출력으로 설명한다. 비교 실패는 저장된 응답을 삭제하거나
+  덮어쓰지 않고 `502 ANALYSIS_SCHEMA_INVALID`로 노출한다.
 - B는 repository와 감사 이벤트를 제공하지만 C의 계약·조정·서명 전이 규칙을
   우회하지 않는다. C도 B의 AI 스키마와 근거 검증을 우회하지 않는다.
 - D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하지 않고

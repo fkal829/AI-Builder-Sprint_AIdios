@@ -5,8 +5,12 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.adapters.solar import SolarCounterproposalError, SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
-from app.api.dependencies import get_supabase_adapter
+from app.api.dependencies import (
+    get_counterproposal_comparator,
+    get_supabase_adapter,
+)
 from app.core.enums import (
     AdjustmentRequestStatus,
     AdjustmentResponseDecision,
@@ -16,10 +20,21 @@ from app.core.enums import (
 )
 from app.main import app
 from app.repositories.adjustments import ReviewItemForAdjustment
+from app.schemas.adjustments import CounterproposalComparisonInput
+from app.services.counterproposal import CounterproposalComparator
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000024")
 DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000043")
 BEARER_TOKEN = "local-demo-owner-token"
+
+
+class FailingComparisonAdapter:
+    async def compare_counterproposals(
+        self,
+        *,
+        items: list[CounterproposalComparisonInput],
+    ):
+        raise SolarCounterproposalError(f"failed items={len(items)}")
 
 
 @pytest.fixture
@@ -37,7 +52,17 @@ async def public_adjustment_context():
     async def override_adapter():
         return adapter
 
+    async def override_comparator():
+        return CounterproposalComparator(
+            SolarReviewAdapter(
+                mode="mock",
+                api_key="",
+                base_url="https://api.upstage.ai",
+            )
+        )
+
     app.dependency_overrides[get_supabase_adapter] = override_adapter
+    app.dependency_overrides[get_counterproposal_comparator] = override_comparator
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
@@ -250,7 +275,13 @@ async def test_direct_response_sets_opened_and_responded_and_updates_owner_detai
         str(item.id) for item in review_items
     ]
     assert detail_body["comparisons"][0]["remaining_checks"] == []
-    assert "역제안" in detail_body["comparisons"][1]["changed_summary"]
+    counter_comparison = detail_body["comparisons"][1]
+    assert "수정 요청 문구 2" in counter_comparison["changed_summary"]
+    assert "월 보고서 제공을 전제로 위약금을 10%로 조정" in counter_comparison[
+        "changed_summary"
+    ]
+    assert "운영 일정과 제작 비용" in counter_comparison["remaining_checks"][0]
+    assert counter_comparison["changed_summary"] != "대행사가 역제안을 제시했습니다."
 
     repeat = await client.post(
         f"/api/v1/public/adjustment-requests/{token}/responses",
@@ -274,3 +305,47 @@ async def test_direct_response_sets_opened_and_responded_and_updates_owner_detai
     assert repeat.status_code == 409
     assert repeat.headers["Cache-Control"] == "no-store"
     assert len(adapter.mock_adjustment_responses[adjustment_id]) == 2
+
+
+async def test_comparison_failure_keeps_persisted_agency_response(
+    public_adjustment_context,
+) -> None:
+    client, adapter = public_adjustment_context
+    contract_id, adjustment_id, _review_items, token = await sent_adjustment(
+        client,
+        adapter,
+    )
+    public = await client.get(f"/api/v1/public/adjustment-requests/{token}")
+    item_id = public.json()["data"]["items"][0]["item_id"]
+    submitted = await client.post(
+        f"/api/v1/public/adjustment-requests/{token}/responses",
+        json={
+            "responses": [
+                {
+                    "item_id": item_id,
+                    "decision": "COUNTER",
+                    "counter_text": "위약금을 10%로 조정하겠습니다.",
+                    "reason": "제작비가 이미 집행되었습니다.",
+                }
+            ]
+        },
+    )
+    assert submitted.status_code == 201
+
+    async def override_failing_comparator():
+        return CounterproposalComparator(FailingComparisonAdapter())
+
+    app.dependency_overrides[
+        get_counterproposal_comparator
+    ] = override_failing_comparator
+    detail = await client.get(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests/{adjustment_id}",
+        headers=owner_headers(),
+    )
+
+    assert detail.status_code == 502
+    assert detail.json()["error"]["code"] == "ANALYSIS_SCHEMA_INVALID"
+    assert len(adapter.mock_adjustment_responses[adjustment_id]) == 1
+    persisted = adapter.mock_adjustment_responses[adjustment_id][0]
+    assert persisted.counter_text == "위약금을 10%로 조정하겠습니다."
+    assert persisted.reason == "제작비가 이미 집행되었습니다."

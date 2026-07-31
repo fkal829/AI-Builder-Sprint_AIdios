@@ -154,3 +154,20 @@
 - 참고:
   - https://console.upstage.ai/api/docs/for-agents/raw
   - https://console.upstage.ai/docs/capabilities/generate/structured-outputs
+
+## ADR-013 Solar 역제안 비교
+
+- 상태: P0 확정
+- 결정: C가 대행사 응답 원본을 먼저 저장하고, 소유자용 조정 상세 조회에서 B의
+  `CounterproposalComparator`를 호출한다. 수락·거절은 결정적 코드로 설명하고
+  `COUNTER` 응답만 실제 요청 문구, 역제안 문구와 사유를 Solar에 전달한다.
+- live 호출은 ADR-012와 같은 Solar Chat 모델·timeout을 사용하며 프롬프트 버전은
+  `counterproposal-comparison-v1`이다. 출력은 달라진 점, 남은 확인사항, 최종 확인
+  세 필드로 제한하고 strict JSON Schema와 Pydantic으로 검증한다.
+- 입력·출력 UUID 불일치, 중복, 빈 확인사항, 추가 필드, 금지된 단정 표현과 입력에
+  없는 숫자는 거부한다. 모델은 역제안을 자동 수락하거나 새 협상 문구를 만들지 않는다.
+- timeout, HTTP 오류 또는 출력 검증 실패는 고정 성공 문구로 대체하지 않고
+  `502 ANALYSIS_SCHEMA_INVALID`로 반환한다. 비교 실패는 먼저 저장된 대행사 응답,
+  조정 상태와 감사 이벤트를 변경하지 않는다.
+- mock 비교는 실제 입력을 직접 반영하는 규칙 기반 예시이며 live Solar 성공으로
+  간주하지 않는다.

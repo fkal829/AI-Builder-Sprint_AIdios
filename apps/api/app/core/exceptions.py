@@ -63,6 +63,15 @@ class AnalysisStartUnavailable(ApiException):
         )
 
 
+class CounterproposalComparisonUnavailable(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=502,
+            code=ErrorCode.ANALYSIS_SCHEMA_INVALID,
+            message="역제안 비교를 완료하지 못했습니다. 잠시 후 다시 확인해 주세요.",
+        )
+
+
 class ModusignRequestFailed(ApiException):
     def __init__(self) -> None:
         super().__init__(

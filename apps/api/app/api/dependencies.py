@@ -16,6 +16,7 @@ from app.services.agreement_pdf import AgreementPdfRenderer
 from app.services.agreements import AgreementService
 from app.services.analysis import AnalysisService
 from app.services.contracts import ContractService
+from app.services.counterproposal import CounterproposalComparator
 from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.public_tokens import PublicTokenService
@@ -163,12 +164,23 @@ async def get_idempotency_service(
     return IdempotencyService(supabase)
 
 
+async def get_counterproposal_comparator(
+    solar: Annotated[SolarReviewAdapter, Depends(get_solar_review_adapter)],
+) -> CounterproposalComparator:
+    return CounterproposalComparator(solar)
+
+
 async def get_adjustment_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    counterproposal_comparator: Annotated[
+        CounterproposalComparator,
+        Depends(get_counterproposal_comparator),
+    ],
 ) -> AdjustmentService:
     settings = get_settings()
     return AdjustmentService(
         repository=supabase,
+        counterproposal_comparator=counterproposal_comparator,
         idempotency=IdempotencyService(supabase),
         public_tokens=PublicTokenService(
             supabase,

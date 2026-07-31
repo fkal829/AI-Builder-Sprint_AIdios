@@ -1,8 +1,9 @@
+import re
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.enums import (
     AdjustmentRequestStatus,
@@ -114,11 +115,87 @@ class PublicSubmission(BaseModel):
     submitted: Literal[True]
 
 
+UNSAFE_COUNTERPROPOSAL_PATTERNS = (
+    r"사기(?:의심)?업체",
+    r"불법계약",
+    r"안전한업체",
+    r"승소(?:할)?가능",
+    r"승소확률",
+    r"법률자문.{0,12}(?:대체|대신)(?:합니다|한다|할수있|가능)",
+)
+
+
+class StrictAdjustmentModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CounterproposalComparisonInput(StrictAdjustmentModel):
+    review_item_id: UUID
+    request_text: str = Field(min_length=1)
+    counter_text: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_non_blank_text(self) -> "CounterproposalComparisonInput":
+        if any(
+            not value.strip()
+            for value in (self.request_text, self.counter_text, self.reason)
+        ):
+            raise ValueError("역제안 비교 입력 문자열은 비어 있을 수 없습니다.")
+        return self
+
+
+class CounterproposalComparisonBatchInput(StrictAdjustmentModel):
+    items: list[CounterproposalComparisonInput] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_unique_ids(self) -> "CounterproposalComparisonBatchInput":
+        item_ids = [item.review_item_id for item in self.items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("역제안 비교 입력 ID는 중복될 수 없습니다.")
+        return self
+
+
+class GeneratedCounterproposalComparison(StrictAdjustmentModel):
+    review_item_id: UUID
+    changed_summary: str = Field(min_length=1, max_length=1200)
+    remaining_checks: list[str] = Field(min_length=1, max_length=6)
+    final_confirmation: str = Field(min_length=1, max_length=600)
+
+    @model_validator(mode="after")
+    def validate_safe_copy(self) -> "GeneratedCounterproposalComparison":
+        text_values = (
+            self.changed_summary,
+            *self.remaining_checks,
+            self.final_confirmation,
+        )
+        if any(not value.strip() for value in text_values):
+            raise ValueError("역제안 비교 출력 문자열은 비어 있을 수 없습니다.")
+        normalized = re.sub(r"[\W_]+", "", " ".join(text_values)).lower()
+        if any(
+            re.search(pattern, normalized)
+            for pattern in UNSAFE_COUNTERPROPOSAL_PATTERNS
+        ):
+            raise ValueError("역제안 비교 출력에 허용되지 않은 단정 표현이 있습니다.")
+        return self
+
+
+class CounterproposalComparisonBatchOutput(StrictAdjustmentModel):
+    items: list[GeneratedCounterproposalComparison] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_unique_ids(self) -> "CounterproposalComparisonBatchOutput":
+        item_ids = [item.review_item_id for item in self.items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("역제안 비교 출력 ID는 중복될 수 없습니다.")
+        return self
+
+
 class CounterproposalComparison(BaseModel):
     review_item_id: UUID
-    changed_summary: str
-    remaining_checks: list[str]
-    final_confirmation: str
+    changed_summary: str = Field(min_length=1, max_length=1200)
+    remaining_checks: list[str] = Field(max_length=6)
+    final_confirmation: str = Field(min_length=1, max_length=600)
 
 
 class OwnerAdjustmentDetail(BaseModel):

@@ -5,7 +5,6 @@ from uuid import UUID, uuid4
 
 from app.core.enums import (
     AdjustmentRequestStatus,
-    AdjustmentResponseDecision,
     IdempotencyOperation,
     PublicTokenScope,
     ReviewItemStatus,
@@ -26,7 +25,6 @@ from app.schemas.adjustments import (
     AdjustmentRequestSent,
     AdjustmentResponseItem,
     AdjustmentResponsesSubmit,
-    CounterproposalComparison,
     OwnerAdjustmentDetail,
     PublicAdjustment,
     PublicAdjustmentItem,
@@ -34,6 +32,7 @@ from app.schemas.adjustments import (
     PublicSubmission,
 )
 from app.schemas.agreements import AdjustmentConfirmation
+from app.services.counterproposal import CounterproposalComparator
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
 from app.services.public_tokens import PublicTokenService
 from app.services.state_machine import InvalidStatusTransition
@@ -46,12 +45,14 @@ class AdjustmentService:
         self,
         *,
         repository: AdjustmentRepository,
+        counterproposal_comparator: CounterproposalComparator,
         idempotency: IdempotencyService,
         public_tokens: PublicTokenService,
         public_app_base_url: str,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
+        self._counterproposal_comparator = counterproposal_comparator
         self._idempotency = idempotency
         self._public_tokens = public_tokens
         self._public_app_base_url = public_app_base_url.rstrip("/")
@@ -123,10 +124,14 @@ class AdjustmentService:
         )
         if detail is None:
             raise ResourceNotFound()
+        comparisons = await self._counterproposal_comparator.compare(
+            request_items=detail.request.items,
+            responses=detail.responses,
+        )
         return OwnerAdjustmentDetail(
             request=_adjustment_from_record(detail.request),
             responses=[_response_from_record(response) for response in detail.responses],
-            comparisons=[_comparison_from_response(response) for response in detail.responses],
+            comparisons=comparisons,
         )
 
     async def send(
@@ -414,29 +419,4 @@ def _response_from_record(response: AdjustmentResponseRecord) -> AdjustmentRespo
         decision=response.decision,
         counter_text=response.counter_text,
         reason=response.reason,
-    )
-
-
-def _comparison_from_response(
-    response: AdjustmentResponseRecord,
-) -> CounterproposalComparison:
-    if response.decision == AdjustmentResponseDecision.ACCEPT:
-        return CounterproposalComparison(
-            review_item_id=response.review_item_id,
-            changed_summary="대행사가 요청 문구를 수락했습니다.",
-            remaining_checks=[],
-            final_confirmation="요청안을 최종 반영할 수 있습니다.",
-        )
-    if response.decision == AdjustmentResponseDecision.REJECT:
-        return CounterproposalComparison(
-            review_item_id=response.review_item_id,
-            changed_summary="대행사가 요청을 거절했습니다.",
-            remaining_checks=["거절 사유를 확인하세요."],
-            final_confirmation="원안 유지 또는 추가 협의가 필요합니다.",
-        )
-    return CounterproposalComparison(
-        review_item_id=response.review_item_id,
-        changed_summary="대행사가 역제안을 제시했습니다.",
-        remaining_checks=["역제안 문구가 요청 취지에 맞는지 확인하세요."],
-        final_confirmation="역제안 채택 여부를 선택하세요.",
     )

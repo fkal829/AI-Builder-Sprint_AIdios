@@ -127,6 +127,14 @@ Pydantic으로 검증하며 잘못된 응답은 고정 문구로 대체하지 �
 `FAILED/ANALYSIS_SCHEMA_INVALID`로 처리합니다. mock의 Solar 문구는 실제 API
 응답이 아닙니다.
 
+소유자용 조정 상세 조회의 역제안 비교도 같은 Solar Chat 설정을 사용합니다.
+`CounterproposalComparator`가 실제 요청 문구와 저장된 역제안·사유만
+`counterproposal-comparison-v1` 프롬프트에 전달하고, 달라진 점·남은 확인사항·
+최종 확인 내용을 strict JSON Schema로 검증합니다. mock은 입력을 직접 인용한
+비교 예시이며 실제 Solar 응답이 아닙니다. live 비교 실패 시 고정 성공 문구로
+대체하지 않고 `502 ANALYSIS_SCHEMA_INVALID`를 반환하며 저장된 대행사 응답은
+유지합니다.
+
 ## Modusign embedded-draft mode (C-7 API change)
 
 The default `MODUSIGN_MODE=mock` never calls Modusign and is used by automated tests.

@@ -5,8 +5,10 @@ import httpx
 import pytest
 
 from app.adapters.solar import (
+    COUNTERPROPOSAL_PROMPT_VERSION,
     SOLAR_CHAT_PATH,
     SOLAR_PROMPT_VERSION,
+    SolarCounterproposalError,
     SolarReviewAdapter,
     SolarReviewError,
 )
@@ -15,6 +17,7 @@ from app.core.enums import (
     ReviewSignalType,
     VerificationStatus,
 )
+from app.schemas.adjustments import CounterproposalComparisonInput
 from app.schemas.analysis import SolarReviewInput, SolarReviewOutput
 
 FIRST_ID = UUID("10000000-0000-4000-8000-000000000001")
@@ -78,6 +81,36 @@ def make_output(
     }
 
 
+def make_counterproposal_input(
+    *,
+    item_id: UUID = FIRST_ID,
+    request_text: str = "위약금 20% 조항을 삭제해 주세요.",
+    counter_text: str = "위약금을 10%로 낮추고 월 보고서를 제공하겠습니다.",
+    reason: str = "이미 집행한 제작비를 고려해야 합니다.",
+) -> CounterproposalComparisonInput:
+    return CounterproposalComparisonInput(
+        review_item_id=item_id,
+        request_text=request_text,
+        counter_text=counter_text,
+        reason=reason,
+    )
+
+
+def make_counterproposal_output(
+    *,
+    item_id: UUID = FIRST_ID,
+    changed_summary: str = "원 요청의 위약금 20% 삭제가 역제안의 위약금 10%로 변경되었습니다.",
+) -> dict:
+    return {
+        "review_item_id": str(item_id),
+        "changed_summary": changed_summary,
+        "remaining_checks": [
+            "월 보고서 제공 범위와 시점이 구체적인지 확인하세요.",
+        ],
+        "final_confirmation": "위약금 10%와 월 보고서 조건을 반영할지 최종 확인하세요.",
+    }
+
+
 def response_with_items(items: list[dict], *, status_code: int = 200) -> httpx.Response:
     request = httpx.Request("POST", f"https://api.upstage.ai{SOLAR_CHAT_PATH}")
     if status_code != 200:
@@ -136,6 +169,35 @@ async def test_mock_generates_item_specific_copy_without_network(monkeypatch) ->
     assert "실제 Solar 응답이 아닙니다" in outputs[0].model_limitations
 
 
+async def test_mock_compares_actual_counterproposal_without_network(monkeypatch) -> None:
+    def fail_if_called(**_kwargs):
+        raise AssertionError("mock 모드는 네트워크를 호출하면 안 됩니다.")
+
+    monkeypatch.setattr(httpx, "AsyncClient", fail_if_called)
+    adapter = SolarReviewAdapter(
+        mode="mock",
+        api_key="",
+        base_url="https://api.upstage.ai",
+    )
+    first = make_counterproposal_input()
+    second = make_counterproposal_input(
+        item_id=SECOND_ID,
+        request_text="계약기간을 1년으로 조정해 주세요.",
+        counter_text="계약기간을 2년으로 조정하겠습니다.",
+        reason="초기 촬영 비용 회수 기간이 필요합니다.",
+    )
+
+    outputs = await adapter.compare_counterproposals(items=[first, second])
+
+    assert [output.review_item_id for output in outputs] == [FIRST_ID, SECOND_ID]
+    assert "위약금 20%" in outputs[0].changed_summary
+    assert "위약금을 10%" in outputs[0].changed_summary
+    assert "계약기간을 1년" in outputs[1].changed_summary
+    assert "계약기간을 2년" in outputs[1].changed_summary
+    assert outputs[0].changed_summary != outputs[1].changed_summary
+    assert "mock 모드" in outputs[0].final_confirmation
+
+
 async def test_live_uses_current_chat_endpoint_and_strict_structured_output(
     monkeypatch,
 ) -> None:
@@ -166,6 +228,70 @@ async def test_live_uses_current_chat_endpoint_and_strict_structured_output(
     assert FakeAsyncClient.init_kwargs["timeout"] == 45
     assert FakeAsyncClient.init_kwargs["headers"]["Authorization"] == "Bearer test-key"
     assert outputs[0].self_reported_confidence == 0.84
+
+
+async def test_live_counterproposal_uses_strict_structured_output(monkeypatch) -> None:
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.responses = [
+        response_with_items([make_counterproposal_output()])
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    adapter = SolarReviewAdapter(
+        mode="live",
+        api_key="test-key",
+        base_url="https://api.upstage.ai",
+        timeout_seconds=45,
+        model="solar-pro3",
+    )
+
+    outputs = await adapter.compare_counterproposals(
+        items=[make_counterproposal_input()]
+    )
+
+    path, body = FakeAsyncClient.calls[0]
+    assert path == SOLAR_CHAT_PATH
+    assert body["model"] == "solar-pro3"
+    assert body["temperature"] == 0.2
+    assert body["response_format"]["type"] == "json_schema"
+    assert body["response_format"]["json_schema"]["strict"] is True
+    assert body["response_format"]["json_schema"]["name"] == "counterproposal_comparison"
+    assert COUNTERPROPOSAL_PROMPT_VERSION in body["messages"][1]["content"]
+    assert "위약금 20%" in outputs[0].changed_summary
+    assert outputs[0].remaining_checks
+
+
+@pytest.mark.parametrize(
+    "invalid_output",
+    [
+        make_counterproposal_output(item_id=SECOND_ID),
+        make_counterproposal_output(
+            changed_summary="입력에 없는 위약금 30% 조건으로 변경되었습니다."
+        ),
+        make_counterproposal_output(
+            changed_summary="이 대행사는 사기 업체이므로 역제안을 거절해야 합니다."
+        ),
+        {**make_counterproposal_output(), "remaining_checks": []},
+        {**make_counterproposal_output(), "unexpected": "field"},
+    ],
+)
+async def test_live_counterproposal_rejects_invalid_or_ungrounded_output(
+    monkeypatch,
+    invalid_output: dict,
+) -> None:
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.responses = [response_with_items([invalid_output])]
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    adapter = SolarReviewAdapter(
+        mode="live",
+        api_key="test-key",
+        base_url="https://api.upstage.ai",
+        retry_delay_seconds=0,
+    )
+
+    with pytest.raises(SolarCounterproposalError):
+        await adapter.compare_counterproposals(
+            items=[make_counterproposal_input()]
+        )
 
 
 async def test_live_retries_transient_status_once(monkeypatch) -> None:

@@ -319,3 +319,193 @@ B와의 의존성은 세 가지로 정리됩니다. B가 제공하는 `ReviewIte
 - C-7~C-8은 Modusign mock Adapter로 임베디드 초안·상태 전이·웹훅 테스트를 먼저
   완료하고, live 모드에서는 발송 없는 초안 생성부터 검증한다.
 - B의 실제 분석·추출 결과가 준비되면 fixture를 실제 repository 조회로 교체하고 통합 테스트를 수행한다.
+
+## P2 신규 작업: 6.14 광고효과 리포트 확인·집계 (P2-C)
+
+> 근거: `docs/api-명세서.md` 15~19절(6.14 P2-0 확정 설계, 2026-08-01 기준 OpenAPI·
+> runtime·DB migration 미반영). 기존 P0 번호 체계(C-1~C-11)와 독립적으로
+> `P2-C-*`를 쓴다. P2-B(리포트 업로드·Upstage/Solar 추출)가 만든
+> `PerformanceReport`/`extracted_payload`를 P2-C가 소비한다.
+>
+> **선행 조건:** 17.4의 확정값 7개가 `docs/단디계약최종기획안.md`, OpenAPI,
+> `api-data-contract.md`, 공통 enum·오류에 먼저 반영되는 P2-0 공통 계약 PR이
+> 병합되기 전에는 runtime을 구현하지 않는다. 그 전까지는 같은 스키마의 fake로
+> 병행 개발한다.
+
+담당 API:
+
+```text
+PATCH /contracts/{contract_id}/performance-reports/{report_id}
+GET   /contracts/{contract_id}/performance
+```
+
+제품 원칙(15.1): 서버는 광고 성과를 직접 측정하지 않고 대행사가 보고한 값을
+소상공인이 확인·기록한 것만 다룬다. 대행사는 이 흐름의 사용자가 아니며 공개
+토큰 API를 만들지 않는다. AI `extracted_payload`는 초안이고, 소상공인이 확정한
+`confirmed_payload`만 대조·문의 문안·재계약 근거에 쓴다. 전환율·CPA·ROAS·매출
+기여도·위변조 판정·법적 이행 판정은 다루지 않는다.
+
+### P2-C-1. Revision·Flag·문의 snapshot 데이터 모델
+
+**목적:** 추출값(초안)과 소상공인 확정값(진실)을 분리하고, 과거 확정 이력을
+절대 덮어쓰지 않는 append-only 구조를 만든다.
+
+구현 기능:
+
+- `PerformanceReportRevision`: `report_id` 안에서 1부터 시작하는 `version`,
+  확정 payload, 결정 계산한 반응률, 상태, nullable
+  `corrected_from_revision_id`·`correction_reason`, `confirmed_at`을 보존한다.
+  `(report_id, version)`은 유일하다.
+- revision에 종속된 `PerformanceFlag`(`report_revision_id`, `flag_type`, 근거
+  문서 ID·페이지·문장·confidence·기대 수량·단위 snapshot, nullable
+  `basis_extracted_term_ids`)
+- `PerformanceInquiryDraft`(고유 `flag_id`, `text`, `template_version`,
+  `created_at`) — flag와 1:1 snapshot
+- report의 `current_revision_id`와 현재 표시 상태(projection)
+
+완료 조건:
+
+- 확정 즉시 추출값(`EXTRACTED`)과 확정값(`CONFIRMED`/`FLAGGED`)이 완전히
+  분리된다.
+- 과거 revision·flag·문의 문안이 어떤 경로로도 UPDATE·DELETE되지 않는 것을
+  테스트로 증명한다.
+- `PerformanceFlagBasisTerm(flag_id, extracted_term_id)` 연결로 기존
+  `ExtractedTerm.id`만 참조하고 가상 Clause를 만들지 않는다.
+
+### P2-C-2. 반응률·수량 부족·전월 대비 하락 결정 규칙
+
+**목적:** AI가 아닌 결정적 코드와 DB 제약으로만 신호를 만든다(판정·성과 점수
+아님).
+
+구현 기능:
+
+- `engagement_rate = (likes+comments+saves+shares)/impressions`를 저장된
+  반올림값이 아니라 원본 정수에서 매번 `Decimal`로 재계산한다(반올림 전 값으로
+  판정, 저장·응답은 소수 6자리 `ROUND_HALF_UP`).
+- `DELIVERABLE_COUNT_SHORTFALL`: `CONTENT_QUANTITY`·`POSTING_FREQUENCY`
+  근거가 모두 `VERIFIED`인 검증된 계약 수량보다 확정 `published_content_count`가
+  적을 때만 생성한다. 같거나 많으면 생성하지 않는다.
+- `ENGAGEMENT_RATE_DROP`: 달력상 연속 전월 대비, 두 달 모두 노출 ≥1,000·이전
+  반응률>0·`saves`/`shares` 포함 구성 동일·절대 하락 ≥1.0%p·상대 하락 ≥25%를
+  **모두** 충족할 때만 생성한다.
+- `OWNER_REPORTED_ISSUE`: `has_issue=true`와 비어 있지 않은 `issue_note`.
+
+완료 조건:
+
+- 노출 1,000·절대 1.0%p·상대 25% 경계값 테스트를 통과한다.
+- 첫 달, 전월 공백, 노출 0, 표본 미달, `saves`/`shares` 구성 차이는
+  `ENGAGEMENT_RATE_DROP`을 만들지 않는 것을 테스트로 증명한다.
+- 실제 게시 수가 약정과 같거나 많으면 수량 신호를 만들지 않는 것을 테스트로
+  증명한다.
+
+### P2-C-3. 최초 확정·정정 PATCH API와 migration/RPC
+
+대상 API:
+
+```text
+PATCH /contracts/{contract_id}/performance-reports/{report_id}
+```
+
+구현 기능:
+
+- `EXTRACTED`에서 `expected_revision=0`, `correction_reason=null`로 version 1을
+  최초 확정한다.
+- `CONFIRMED`/`FLAGGED`에서는 현재 version과 같은 `expected_revision`과
+  비어 있지 않은 `correction_reason`을 받아 version N+1 정정 revision을
+  추가한다(기존 revision·flag·문의 문안은 불변).
+- `impressions`/`likes`/`comments`는 확정 필수, 나머지 지표는 nullable이며
+  `published_content_count`는 `0`과 알 수 없음(`null`)을 구분한다.
+- 같은 멱등 요청 재생을 상태·revision 검사보다 먼저 수행하고, report 행을
+  `FOR UPDATE`로 잠근 뒤 상태·현재 version·더 뒤의 확정 월 존재 여부를
+  재검사한다.
+
+완료 조건:
+
+- `expected_revision` 불일치는 `409 REPORT_REVISION_CONFLICT`, 더 뒤의 확정
+  월이 있으면 `409 REPORT_CORRECTION_DEPENDENCY_EXISTS`로 거부한다.
+- 최초 확정은 `PERFORMANCE_REPORT_CONFIRMED`/`PERFORMANCE_REPORT_FLAGGED`,
+  정정은 `PERFORMANCE_REPORT_CORRECTED` 감사 이벤트를 revision·flag·문의
+  snapshot·현재 projection과 같은 트랜잭션에 원자 저장한다.
+- 동시 정정 요청 레이스(행 잠금) 테스트를 통과한다.
+
+### P2-C-4. 월별 기록·집계·계약 대조 조회 API
+
+대상 API:
+
+```text
+GET /contracts/{contract_id}/performance
+```
+
+구현 기능:
+
+- `reports`(상태·`source_document_id`·현재 revision과 version 오름차순
+  append-only 이력), `confirmed_series`(월별 최신 `CONFIRMED`/`FLAGGED`
+  revision만 `period` 오름차순 집계), `flags`, `inquiry_drafts` 4개 구역을
+  응답한다.
+- `UPLOADED`/`EXTRACTED` 값은 확인 화면용으로만 노출하고 `confirmed_series`·
+  계약 대조·재계약 근거에서 제외한다.
+- 원본은 `source_document_id`를 기존 소유자 전용 문서 접근 API에 전달해
+  열람한다.
+
+완료 조건:
+
+- GET은 상태·기록·감사 이벤트를 변경하지 않고 AI나 문안 생성기를 실행하지
+  않는 것을 테스트로 증명한다(순수 조회).
+- 과거 revision은 이력으로만 노출하고 현재 집계에 중복 포함하지 않는다.
+- 소유권 검증, 정렬, `basis_extracted_term_ids` 테스트를 통과한다.
+
+### P2-C-5. 결정적 문의 문안 snapshot(`performance-inquiry-copy-v1`)
+
+구현 기능:
+
+- 유형별 고정 템플릿 3종(수량 부족·반응률 하락·이상 신고)을 확정·정정
+  시점에 생성해 flag별로 snapshot 저장한다(Solar 미사용, 조회 시 재생성 안 함).
+- 반응률 placeholder는 백분율 소수 2자리, 수량은 10진 정수로 포맷하고 결과는
+  최대 1,000자, `issue_note`는 앞뒤 공백·제어문자 제거 후 최대 500자다.
+- "확인이 필요합니다" 톤을 유지하고 대행사 성과·계약 위반·지급 여부를
+  단정하지 않으며 서버가 외부로 발송하지 않는다.
+
+완료 조건:
+
+- 템플릿 3종 exact-match, 길이·포맷 제한, GET에서 재생성 없이 snapshot만
+  반환하는 테스트를 통과한다.
+
+### P2-C 완료 기준(19절 발췌, C 소관)
+
+- `REPORT_REVISION_CONFLICT`, `REPORT_CORRECTION_DEPENDENCY_EXISTS` 상태·
+  멱등 테스트
+- `EXTRACTED → CONFIRMED / FLAGGED`, terminal PATCH의 최신 월 revision 추가·
+  stale/dependency 409 테스트
+- 각 월의 최신 확정 revision만 광고효과 화면·계약 대조·재계약 근거에 집계
+- 수량 부족만 신호, 검증된 수량·월 주기 근거, 양월 1,000 노출·1.0%p·25%·
+  `saves`/`shares` 구성 경계 테스트
+- 문의 문안 3종 exact template·길이·포맷·snapshot·GET 무생성·무AI·미발송·
+  비판정 톤 테스트
+- revision·flag·문의 snapshot·현재 projection·감사 이벤트 원자 저장과 중복
+  방지
+
+## P2-B와의 의존성
+
+18.4 규칙에 따라 P2-B와 아래를 나눈다.
+
+| 항목 | 담당 | 비고 |
+| --- | --- | --- |
+| `PerformanceReport` 기본·AI 추출 스키마, `DocumentType.PERFORMANCE_REPORT` 경계 | P2-B | P2-C-1이 소비하는 report 기반 |
+| 리포트 업로드·Upstage/Solar 추출 API, migration(계약·월·source Document 고유 제약) | P2-B | P2-C-3이 참조하는 `source_document_id` FK |
+| `PerformanceReportRevision`·`PerformanceFlag`·문의 snapshot·현재 projection, 확인·집계 API | P2-C | 이 문서의 P2-C-1~5 |
+
+병렬 개발 원칙:
+
+- P2-0 공통 계약 PR에서 확정한 필드명·enum·임계값·revision 규칙을 각자
+  runtime에서 다르게 바꾸지 않는다.
+- 신규 router는 기존 `contracts.py`에 섞지 않고 `endpoints/performance.py`로
+  분리한다.
+- P2-B는 업로드·추출 service, P2-C는 확인·집계 service와 규칙 파일을 별도로
+  두어 같은 파일을 동시 편집하지 않는다.
+- migration은 P2-B가 `PERFORMANCE_REPORT` Document type·report identity·
+  계약/월 고유 제약을 먼저 배치하고, P2-C가 revision·flag·문의 snapshot·현재
+  projection·PATCH RPC를 후속 migration으로 더한다. 이미 merge된 migration
+  파일은 수정하지 않는다.
+- P2-C는 P2-B 기반이 merge되기 전까지 repository fake로 최초 확정·정정
+  동시성·최신 revision 계산·상태·집계 테스트를 먼저 진행하고, merge 후 실제
+  저장 연결만 작은 PR로 추가한다.

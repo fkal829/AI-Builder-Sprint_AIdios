@@ -52,6 +52,7 @@ from app.repositories.contracts import (
 )
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
+from app.repositories.obligations import ObligationRecord
 from app.repositories.public_tokens import PublicTokenRecord
 from app.repositories.review_items import (
     ReviewItemSelectionOutcome,
@@ -106,6 +107,10 @@ class MockObligation:
     status: ObligationStatus
     created_at: datetime
     updated_at: datetime
+    evidence_url: str | None = None
+    submitted_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    payment_condition_met: bool = False
 
 
 def utc_now() -> datetime:
@@ -763,6 +768,42 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("계약 목록 조회에 실패했습니다.") from error
         return [_contract_record_from_row(row, owner_id=owner_id) for row in response.data or []]
+
+    async def list_owned_obligations(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> Sequence[ObligationRecord] | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                obligation = self._mock_obligations.get(contract_id)
+                return [] if obligation is None else [_obligation_record_from_mock(obligation)]
+
+        if not await self.is_contract_owned(owner_id=owner_id, contract_id=contract_id):
+            return None
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("obligations")
+                    .select(
+                        "id,contract_id,title,due_date,assignee,evidence_type,"
+                        "source_document_id,source_page,source_text,confidence,"
+                        "evidence_url,status,submitted_at,reviewed_at,"
+                        "payment_condition_met"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .order("due_date")
+                    .order("id")
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("이행 항목 목록 조회에 실패했습니다.") from error
+        return [_obligation_record_from_row(row) for row in response.data or []]
 
     async def list_audit_events(
         self,
@@ -2477,6 +2518,57 @@ def _parse_date(value: str | date | None) -> date | None:
     if value is None or isinstance(value, date):
         return value
     return date.fromisoformat(value)
+
+
+def _obligation_record_from_mock(obligation: MockObligation) -> ObligationRecord:
+    return ObligationRecord(
+        id=obligation.id,
+        contract_id=obligation.contract_id,
+        title=obligation.title,
+        due_date=obligation.due_date,
+        assignee=obligation.assignee,
+        evidence_type=obligation.evidence_type,
+        source_document_id=obligation.source_document_id,
+        source_page=obligation.source_page,
+        source_text=obligation.source_text,
+        confidence=obligation.confidence,
+        evidence_url=obligation.evidence_url,
+        status=obligation.status,
+        submitted_at=obligation.submitted_at,
+        reviewed_at=obligation.reviewed_at,
+        payment_condition_met=obligation.payment_condition_met,
+    )
+
+
+def _obligation_record_from_row(row: dict) -> ObligationRecord:
+    due_date = _parse_date(row["due_date"])
+    if due_date is None:
+        raise ValueError("이행 항목 기한이 없습니다.")
+    return ObligationRecord(
+        id=UUID(str(row["id"])),
+        contract_id=UUID(str(row["contract_id"])),
+        title=row["title"],
+        due_date=due_date,
+        assignee=row["assignee"],
+        evidence_type=row["evidence_type"],
+        source_document_id=UUID(str(row["source_document_id"])),
+        source_page=int(row["source_page"]),
+        source_text=row["source_text"],
+        confidence=float(row["confidence"]),
+        evidence_url=row.get("evidence_url"),
+        status=ObligationStatus(row["status"]),
+        submitted_at=(
+            _parse_datetime(row["submitted_at"])
+            if row.get("submitted_at") is not None
+            else None
+        ),
+        reviewed_at=(
+            _parse_datetime(row["reviewed_at"])
+            if row.get("reviewed_at") is not None
+            else None
+        ),
+        payment_condition_met=bool(row["payment_condition_met"]),
+    )
 
 
 def _promote_verified_canonical_values(

@@ -5,7 +5,7 @@
 > 버전: `0.2.0`<br>
 > Base URL: `/api/v1`<br>
 > 상세 기계 판독 명세: `packages/contracts/openapi/openapi.yaml`<br>
-> 적용 범위: 해커톤 P0
+> 적용 범위: 1~14절은 현재 P0 구현 계약, 15~19절은 6.14 P2 설계 초안
 
 이 문서는 백엔드 API와 개발 순서를 사람이 읽을 수 있도록 정리한다. 제품 범위와 사용자
 흐름의 최상위 기준은 `docs/기획안.md`다.
@@ -13,6 +13,11 @@
 `packages/contracts/openapi/openapi.yaml`, 영속·전이 불변식의 기준은
 `docs/api-data-contract.md`다. 세 문서는 같은 변경에서 함께 맞춘다. 이 문서의 파일
 경로 표기는 모두 저장소 루트 기준이다.
+
+15~19절은 `docs/단디계약최종기획안.md` 6.14의 변경분을 준비하는 P2
+설계 구역이다. 현재 OpenAPI·FastAPI runtime·DB에는 등록하지 않았다.
+구현을 시작할 때 15~19절의 결정 게이트를 먼저 확정하고 OpenAPI와
+`docs/api-data-contract.md`를 같은 계약 PR에서 갱신한 뒤 runtime을 추가한다.
 
 ## 1. 담당 구분
 
@@ -26,12 +31,16 @@
 - **D — 배포·QA 검증:** 배포·환경변수 확인, E2E 실행, 데모 데이터와 테스트 증빙;
   백엔드 endpoint·service·repository 구현은 맡지 않음
 
-API 29개의 구현 주 담당은 B 11개, C 18개이며 D가 직접 구현하는 API는 0개다.
-B는 기존 6개 문서·AI API에 공통 health와 이행·증빙 4개를 더 맡고, C는 기존 17개
-계약 API에 대시보드 1개를 더 맡는다. D는 모든 endpoint의 배포본 E2E와 데모 검증
-결과를 제공하지만 코드 구현 소유자는 아니다.
+현재 활성 API 30개의 구현 주 담당은 B 11개, C 19개이며 D가 직접
+구현하는 API는 0개다. 이전 데이터 호환용 deprecated `/agreement` 2개는
+이 활성 개수에 포함하지 않는다. D는 모든 endpoint의 배포본 E2E와 데모
+검증 결과를 제공하지만 코드 구현 소유자는 아니다.
 
-### 1.1 전체 API 담당표
+15~19절의 P2 예정 API 4개는 위 현재 구현 개수와 기존 B·C 개발 번호에
+포함하지 않는다. P2를 구현하면 활성 API는 34개, 담당은 B 13개·C
+21개가 된다.
+
+### 1.1 현재 활성 API 담당표
 
 | 담당 | Method | Path | 기능 |
 | --- | --- | --- | --- |
@@ -1322,3 +1331,327 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 - [ ] 계약 전문·연락처·공개 토큰·서명 URL 로그 제외
 - [ ] mock과 live 결과를 문서에서 명확히 구분
 - [ ] AI 변경 시 fixture·프롬프트 버전·`AI_USAGE.md` 갱신
+
+--------------------------------------------------------------------------------
+
+## 15. ⬇️ 여기부터 신규 기획안 6.14 작업 시작 — P2 설계 구역
+
+--------------------------------------------------------------------------------
+
+> **기존 1~14절과 신규 P2 작업을 섞어서 카운트하지 않는다.**
+>
+> - 기준: `docs/단디계약최종기획안.md` 6.14·10장·11장·12장·13장
+> - 우선순위: P2 발표 로드맵
+> - 현재 상태: 프론트엔드 화면 목업만 존재, 백엔드 0/4
+> - 기계 계약: OpenAPI 0/4, runtime 0/4, DB migration 미작성
+> - 선행 의존성: 이행·증빙 API와 기존 대시보드 API는 현재 구현됨
+> - 신규 번호: `P2-B-*`, `P2-C-*`; 기존 B-1~B-16·C-1~C-10과 독립
+
+### 15.1 제품 원칙
+
+- 제품이 광고 성과를 직접 측정하지 않는다. 대행사가 리포트에 보고한 값을
+  소상공인이 확인해 기록하고 계약 조건과 대조할 뿐이다.
+- 대행사를 이 흐름의 사용자로 추가하지 않는다. 모든 신규 API는 소상공인
+  Bearer 인증 API이며 공개 토큰 API를 만들지 않는다.
+- AI `extracted_payload`는 초안이다. 소상공인이 확인·수정한
+  `confirmed_payload`만 대시보드·비교·재계약 검토에 사용한다.
+- 신호와 문의 문안은 판정·위법성·성과 점수가 아니다. 서버는 문안을 발송하지
+  않고 소상공인이 복사해 기존 채널로 직접 보낸다.
+- 전환율·CPA·ROAS, 플랫폼 API 직접 수집, 매출 기여도, 위·변조 판정은
+  요청·추출·저장·응답하지 않는다.
+
+### 15.2 코드 작성 전 시작 순서
+
+1. **P2-0 공통 계약 PR:** 17.4의 미확정 결정을 B·C가 함께 확정한다.
+2. 확정한 16~17절을 `openapi.yaml`, `api-data-contract.md`, 공통 enum·오류에
+   먼저 반영하고 구조 검증을 통과시킨다.
+3. B는 업로드·추출 기반을 구현하고, C는 같은 스키마의 fake로 확인·집계
+   규칙과 테스트를 병렬 작성한다.
+4. B의 `PerformanceReport` 기반과 두 API가 merge된 뒤 C가 확인·집계 두 API를
+   실제 repository에 연결한다.
+5. `업로드 → 추출 → 확인 → 조회 → 문의 문안 복사` E2E와 기존 P0 회귀를
+   모두 통과한 뒤에만 P2 미구현 표시를 제거한다.
+
+## 16. 6.14 광고효과 API 초안
+
+### 16.1 공통 계약
+
+| 항목 | 규칙 |
+| --- | --- |
+| 인증 | 모두 소상공인 Bearer 인증 |
+| 권한 | `contract_id`의 소유자만 접근 |
+| `report_id` | UUID, 경로의 계약과 같은 계약에 속해야 함 |
+| 응답 헤더 | 민감한 계약·성과 자료이므로 성공·오류 모두 `Cache-Control: no-store` |
+| 멱등성 | 업로드·추출·확인 쓰기에 `Idempotency-Key` 필수 |
+| 원본 파일 | private Storage 보관, 공개 URL·Storage 경로를 일반 응답에 포함하지 않음 |
+| 현재 등록 상태 | 아래 4개는 P2 설계이며 OpenAPI·runtime에는 아직 없음 |
+
+P2 초안은 계약당 `period` 한 건만 저장한다. 여러 플랫폼·채널의 개별
+리포트를 같은 달에 따로 저장해야 한다면 구현 전 `channel_key` 등 구분 필드를
+기획안과 17.4에 먼저 추가한다.
+
+### 16.2 리포트 업로드 — P2-B
+
+`POST /api/v1/contracts/{contract_id}/performance-reports`
+
+- 인증: Bearer
+- 담당: P2-B
+- 필수 헤더: `Idempotency-Key`
+- Content-Type: `multipart/form-data`
+- 성공: `201 PerformanceReportResponse`
+- 오류: `401`, `404`, `409`, `422`, `503`
+
+Form:
+
+| 필드 | 타입 | 필수 | 규칙 |
+| --- | --- | --- | --- |
+| `period` | string | 예 | `YYYY-MM` |
+| `file` | binary | 예 | PDF·PNG·JPEG, MIME·magic bytes·크기·빈 파일 검증 |
+
+응답은 `id`, `contract_id`, `period`, `source_file_id`, `status=UPLOADED`, nullable
+`extracted_payload`, nullable `confirmed_payload`, nullable `confirmed_at`을 포함한다.
+원본 파일과 메타데이터, `PERFORMANCE_REPORT_UPLOADED` 감사 이벤트를 손실 없이
+저장한다. 같은 계약·`period`의 두 번째 생성은 P2 초안에서
+`409 INVALID_STATUS_TRANSITION`으로 거부한다.
+
+### 16.3 리포트 지표 추출 — P2-B
+
+`POST /api/v1/contracts/{contract_id}/performance-reports/{report_id}/extract`
+
+- 인증: Bearer
+- 담당: P2-B
+- 필수 헤더: `Idempotency-Key`
+- 요청 body: 없음
+- 성공: `200 PerformanceReportResponse`
+- 오류: `401`, `404`, `409`, `422`, `502 REPORT_EXTRACT_FAILED`
+
+`UPLOADED`에서만 시작한다. 원본 파일을 Upstage Document Parse로 읽고 Solar가
+지표명과 숫자 후보를 매핑한다. 외부 호출은 긴 DB 트랜잭션 밖에서 수행하고,
+검증된 완전한 결과와 `PERFORMANCE_REPORT_EXTRACTED` 감사 이벤트만 원자적으로
+저장한다.
+
+`extracted_payload`의 각 AI 추출 필드는 `value`, `source_page`, `source_text`,
+`confidence`, `verification_status`를 가진다. 필수 지표를 리포트에서 찾지 못해도
+가짜 값을 만들지 않고 `NOT_FOUND`로 반환해 소상공인이 확인 단계에서 입력하게
+한다.
+
+성공하면 `EXTRACTED`로 전이하지만 이 값을 대시보드·비교에 사용하지 않는다.
+timeout·HTTP 오류·Parse 실패·AI 스키마 오류는 고정 샘플로 대체하지 않고
+`502 REPORT_EXTRACT_FAILED`를 반환한다. 이때 상태는 `UPLOADED`를 유지하며 사용자의
+명시적 재시도만 허용한다.
+
+### 16.4 추출값 확인·수정 — P2-C
+
+`PATCH /api/v1/contracts/{contract_id}/performance-reports/{report_id}`
+
+- 인증: Bearer
+- 담당: P2-C
+- 필수 헤더: `Idempotency-Key`
+- 성공: `200 PerformanceReportResponse`
+- 오류: `401`, `404`, `409`, `422`
+
+요청 초안:
+
+```json
+{
+  "confirmed_payload": {
+    "impressions": 12500,
+    "likes": 430,
+    "comments": 37,
+    "reach": 9800,
+    "saves": 82,
+    "shares": 24,
+    "follower_net_change": 61,
+    "published_content_count": 4,
+    "inquiries": 16,
+    "reservations": 7,
+    "purchases": null
+  },
+  "has_issue": false,
+  "issue_note": null
+}
+```
+
+`EXTRACTED`에서만 한 번 확정한다. `impressions`, `likes`, `comments`는 확정
+시 필수며 이외 지표는 nullable이다. `published_content_count`는 기획안의
+“약정 수량과 실제 게시물 수 대조”를 위한 선택 보조 필드로, 리포트에 명시되었거나
+소상공인이 확인한 경우에만 저장한다.
+
+`engagement_rate`는 요청으로 받지 않고 서버가
+`(likes + comments + saves + shares) / impressions`로 결정 계산한다. nullable 세부
+지표는 0으로 계산하고 `impressions=0`이면 0으로 단정하지 않고
+`engagement_rate=null`로 둔다.
+
+`has_issue=true`면 비어 있지 않은 `issue_note`가 필요하다. 사용자 이상 기록
+또는 17.3의 결정적 확인 신호가 하나 이상이면 `FLAGGED`, 그렇지 않으면
+`CONFIRMED`다. `confirmed_payload`, `confirmed_at`, `PerformanceFlag`,
+`PERFORMANCE_REPORT_CONFIRMED` 또는 `PERFORMANCE_REPORT_FLAGGED` 감사 이벤트를 같은
+트랜잭션에 저장한다.
+
+### 16.5 월별 기록·대조 조회 — P2-C
+
+`GET /api/v1/contracts/{contract_id}/performance`
+
+- 인증: Bearer
+- 담당: P2-C
+- 성공: `200 ContractPerformanceResponse`
+- 오류: `401`, `404`, `422`
+
+응답은 다음 네 구역을 포함한다.
+
+| 구역 | 내용 |
+| --- | --- |
+| `reports` | 소유자가 확인·수정할 수 있는 상태별 리포트 |
+| `confirmed_series` | `CONFIRMED`·`FLAGGED`의 `confirmed_payload`만 `period` 오름차순으로 집계 |
+| `flags` | 확인 신호, 소상공인 이상 사유·날짜, nullable 근거 조항 |
+| `inquiry_drafts` | flag, 근거 조항·리포트 근거와 연결된 복사용 문의 문안 |
+
+`UPLOADED`·`EXTRACTED`의 값은 `reports`에서 확인 화면을 위해 보일 수 있지만
+`confirmed_series`, 계약 대조, 재계약 근거에는 포함하지 않는다. GET은 상태,
+기록, 감사 이벤트를 변경하지 않고 AI를 실행하지 않는다. 문의 문안은
+응답으로만 제공하고 서버가 외부로 발송하지 않는다.
+
+## 17. 데이터·상태·비교 규칙 초안
+
+### 17.1 지표 범위
+
+| 구분 | 필드 | 규칙 |
+| --- | --- | --- |
+| 확정 필수 | `impressions`, `likes`, `comments` | 0 이상 정수 |
+| 리포트 선택 | `reach`, `saves`, `shares` | nullable, 값이 있으면 0 이상 정수 |
+| 리포트 선택 | `follower_net_change` | nullable 정수, 감소는 음수 허용 |
+| 계약 대조 보조 | `published_content_count` | nullable, 0 이상 정수 |
+| 소상공인 선택 입력 | `inquiries`, `reservations`, `purchases` | nullable, 0 이상 정수 |
+| 서버 파생 | `engagement_rate` | 확정값으로만 계산, 클라이언트 입력 금지 |
+
+요청·AI 출력 스키마는 `additionalProperties=false`로 제한하여 CPA·ROAS·매출
+기여도·성과 점수가 실수로 저장되지 않게 한다.
+
+### 17.2 `PerformanceReport` 상태 불변식
+
+| 상태 | 저장 규칙 | 허용 전이 |
+| --- | --- | --- |
+| `UPLOADED` | 원본·`source_file_id` 존재, 두 payload·`confirmed_at` null | `EXTRACTED` |
+| `EXTRACTED` | `extracted_payload` 존재, `confirmed_payload`·`confirmed_at` null | `CONFIRMED`, `FLAGGED` |
+| `CONFIRMED` | 두 payload·`confirmed_at` 존재, flag 0개 | 종료 |
+| `FLAGGED` | 두 payload·`confirmed_at` 존재, flag 1개 이상 | 종료 |
+
+추출 실패는 새로운 성과 값이나 상태를 만들지 않고 `UPLOADED`를 유지한다.
+확정 후 수정 이력 정책은 17.4에서 확정하기 전까지 terminal 상태를 덮어쓰지
+않는다.
+
+### 17.3 `PerformanceFlag`·문의 문안
+
+P2 초안의 `flag_type`은 다음 범위로 제한한다.
+
+- `DELIVERABLE_COUNT_MISMATCH`: 검증된 계약 원문 약정 수량과 확정된
+  `published_content_count`가 모두 있고 다를 때만 생성
+- `ENGAGEMENT_RATE_DROP`: 직전 확정 월과 현재 확정 월의 결정 계산값이 모두
+  있고 17.4에서 확정한 임계값을 넘은 하락일 때만 생성
+- `OWNER_REPORTED_ISSUE`: 소상공인이 `has_issue=true`와 사유를 명시한 경우
+
+`basis_clause_id`는 새로운 가상 Clause 엔티티를 만들지 않고 계약 문서에서 나온
+`ExtractedTerm.id`를 참조하는 안을 우선 사용한다. 약정 수량 신호에서는 반드시
+검증된 근거 페이지·문장으로 연결한다. 사용자 이상 기록과 전월 대비 신호에
+적절한 계약 조항이 없으면 `basis_clause_id=null`로 두고 계약 위반으로 표현하지
+않는다.
+
+문의 문안은 flag의 확정값·비교 기준·nullable 근거 조항만 사용한다. “확인이
+필요합니다” 톤을 사용하고 대행사 성과·계약 위반·지급 여부를 단정하지 않는다.
+
+### 17.4 P2-0에서 반드시 확정할 결정
+
+- [ ] 같은 계약·월에 리포트 한 건만 허용할지, 채널별 여러 건을 허용할지
+- [ ] 실제 게시물 수를 `published_content_count`로 추가하는 안을 제품 필드로 확정할지
+- [ ] “반응률의 뚜렷한 하락”의 비율·최소 노출 수·반올림 규칙
+- [ ] `basis_clause_id`를 `ExtractedTerm.id`로 볼지, 별도 조항 모델을 만들지
+- [ ] 확정 후 오기 수정을 금지할지, append-only 정정 버전을 추가할지
+- [ ] `source_file_id`를 기존 `Document.id`로 보관할지, 리포트 전용 private 파일을 만들지
+- [ ] 문의 문안을 확정 트랜잭션에서 스냅샷으로 저장할지, 조회 시 생성할지
+
+이 일곱 가지는 API·DB 방식을 바꾸므로 임의로 추정해 runtime을 먼저 구현하지
+않는다. 16절의 구체 필드 규칙 중 이 목록과 관련된 부분은 구현 계약이 아닌
+추천 초안이다.
+
+### 17.5 감사·보안·AI 경계
+
+- 계획 감사 이벤트:
+  `PERFORMANCE_REPORT_UPLOADED`, `PERFORMANCE_REPORT_EXTRACTED`,
+  `PERFORMANCE_REPORT_CONFIRMED`, `PERFORMANCE_REPORT_FLAGGED`
+- 상태·payload·flag 변경과 해당 감사 이벤트는 같은 DB 트랜잭션에
+  저장하고 멱등 재생은 이벤트를 중복 생성하지 않는다.
+- 원본 리포트·전체 OCR 텍스트·AI 입출력·문의 문안·소상공인 입력을 로그에
+  남기지 않는다.
+- Upstage·Solar는 기존 Adapter 규칙을 따라 `mock`/`live`를 분리한다. 일반
+  `pytest`는 외부 네트워크를 호출하지 않는다.
+- 반응률·월 정렬·수량 비교·상태 전이는 AI가 아닌 결정적 코드와 DB 제약으로
+  수행한다.
+
+## 18. 신규 P2 백엔드 B·C 독립 역할 분담
+
+### 18.1 API 담당 — 2개 : 2개
+
+| 신규 담당 | Method | Path | 핵심 책임 |
+| --- | --- | --- | --- |
+| P2-B | `POST` | `/contracts/{contract_id}/performance-reports` | private 리포트 업로드·메타데이터 |
+| P2-B | `POST` | `/contracts/{contract_id}/performance-reports/{report_id}/extract` | Upstage·Solar 지표 추출 |
+| P2-C | `PATCH` | `/contracts/{contract_id}/performance-reports/{report_id}` | 소상공인 확인·수정·flag 확정 |
+| P2-C | `GET` | `/contracts/{contract_id}/performance` | 확정값 집계·계약 대조·문의 문안 |
+
+B는 파일·AI 호출·추출 스키마·재시도 경계를, C는 사용자 확정·결정 계산·대조·
+조회 집계를 맡는다. API 개수는 2:2이고 B의 외부 AI 경계와 C의 상태·집계
+규칙을 감안하면 구현 분량도 대략 동등하다.
+
+### 18.2 P2-B 작업 순서
+
+| 순서 | 작업 | 완료 조건 |
+| --- | --- | --- |
+| P2-B-1 | `PerformanceReport` 기본·AI 추출 스키마, private 파일 경계 | payload 교차 저장 금지, 파일 검증 테스트 |
+| P2-B-2 | 기반 migration·repository·mock/live Storage | 소유권, 월 중복, 업로드 롤백·응답 유실 테스트 |
+| P2-B-3 | 리포트 업로드 API | `UPLOADED`, 멱등 재생, 감사 이벤트 |
+| P2-B-4 | Upstage Parse·Solar 매핑·추출 API | 근거·confidence, strict schema, `REPORT_EXTRACT_FAILED` |
+| P2-B-5 | AI fixture·mock/live 분리·`AI_USAGE.md` | 일반 테스트 무네트워크, 명시적 live 재현 절차 |
+
+### 18.3 P2-C 작업 순서
+
+| 순서 | 작업 | 완료 조건 |
+| --- | --- | --- |
+| P2-C-1 | `confirmed_payload`·`PerformanceFlag`·상태 불변식 | 추출값과 확정값 분리, terminal 전이 테스트 |
+| P2-C-2 | 반응률·수량·전월 대비 결정 규칙 | 0 노출·null·첫 달·임계값 경계 테스트 |
+| P2-C-3 | 확인·수정 API와 확정 migration/RPC | 확정값·flag·감사 이벤트 원자 저장 |
+| P2-C-4 | 월별 조회·집계·계약 대조 | 미확정 제외, 정렬·소유권·근거 조항 테스트 |
+| P2-C-5 | 문의 문안·재계약 근거 연결 | 미발송, 판정 금지 문구, flag·날짜 재조회 |
+
+### 18.4 병렬 개발·명세 충돌 방지
+
+- P2-0 공통 계약 PR이 merge되기 전에 각자가 다른 필드·enum을 runtime에 만들지
+  않는다.
+- 신규 router는 기존의 큰 `contracts.py`에 섞지 않고 `endpoints/performance.py`로
+  분리한다.
+- B는 업로드·추출 service, C는 확인·집계 service와 규칙 파일을 별도로 두어
+  같은 파일을 동시 편집하지 않는다.
+- `openapi.yaml`, `api-data-contract.md`, 공통 enum·오류, router include,
+  `SupabaseAdapter`는 병합 충돌 위험이 크므로 계약 PR 담당 1명이 통합하고 나머지 1명이
+  교차 리뷰한다.
+- migration은 B의 기반 테이블/RPC 버전을 먼저 배치하고 C의 확정·flag·집계
+  후속 버전을 더한다. 이미 merge된 migration 파일을 수정하지 않는다.
+- C는 B 기반 merge 전에 repository fake로 계산·상태·집계 테스트를 진행하고,
+  merge 후 실제 저장 연결만 작은 PR로 추가한다.
+
+## 19. P2 구현 완료 기준
+
+- [ ] 17.4 결정 7개를 기획·API·DB 문서에 같은 값으로 확정
+- [ ] 활성 OpenAPI 4개와 FastAPI runtime method·path·operationId·응답 일치
+- [ ] 구현 후 활성 API 34개, B 13개, C 21개 담당표 일치
+- [ ] `PerformanceReport`, `PerformanceFlag`, 상태·payload 불변식·DB 제약 일치
+- [ ] `REPORT_EXTRACT_FAILED`의 HTTP 상태·재시도·무가짜 대체 테스트
+- [ ] 원본 파일·AI 추출값·소유자 확정값 교차 혼용 금지
+- [ ] `UPLOADED → EXTRACTED → CONFIRMED / FLAGGED` 허용·거부 전이 테스트
+- [ ] 확정값만 대시보드·계약 대조·재계약 근거에 집계
+- [ ] 계약 수량·전월 반응률·사용자 이상 신호의 경계·근거 테스트
+- [ ] 문의 문안 미발송·비판정 톤·근거 조항 연결 테스트
+- [ ] 소유권·private Storage·`no-store`·멱등성·로그 마스킹 테스트
+- [ ] 상태 변경·flag·감사 이벤트 원자 저장과 중복 방지
+- [ ] B·C 단위·통합·API 테스트와 기존 P0 전체 회귀 통과
+- [ ] Upstage·Solar mock/live 분리, 명시적 live 결과, `AI_USAGE.md` 갱신
+- [ ] 프론트 목업의 임시 데이터를 실제 API로 교체한 E2E 통과

@@ -36,6 +36,31 @@ type ApiPublicAdjustment = {
   items: { item_id: string; request_text: string }[];
 };
 
+type ApiDashboard = {
+  total: number;
+  signing: number;
+  in_progress: number;
+  completed: number;
+  expiring_soon: number;
+  unresolved_signals: number;
+  obligation_pending: number;
+  obligation_submitted: number;
+  obligation_approved: number;
+  total_committed: number;
+  payment_condition_met_amount: number;
+  most_common_signal: string | null;
+};
+
+type ApiContractListItem = {
+  id: string;
+  title: string;
+  counterparty_name: string;
+  status: ContractSummary["status"];
+  total_amount: number | null;
+  end_date: string | null;
+  expiry_d_day: number | null;
+};
+
 export class PublicApiError extends Error {
   constructor(
     readonly status: number,
@@ -130,9 +155,48 @@ class MockAdapter implements DataAdapter {
   }
 }
 
-class PublicApiAdapter extends MockAdapter {
-  constructor(private readonly apiBaseUrl: string) {
+class ApiAdapter extends MockAdapter {
+  constructor(
+    private readonly apiBaseUrl: string,
+    private readonly demoBearerToken?: string,
+  ) {
     super();
+  }
+
+  async getDashboard(): Promise<{ stats: DashboardStats; contracts: ContractSummary[] }> {
+    const ownerHeaders = this.ownerHeaders();
+    const [dashboard, contracts] = await Promise.all([
+      this.request<ApiDashboard>("/api/v1/dashboard", { headers: ownerHeaders }),
+      this.request<ApiContractListItem[]>("/api/v1/contracts", { headers: ownerHeaders }),
+    ]);
+
+    return {
+      stats: {
+        total: dashboard.total,
+        signing: dashboard.signing,
+        inProgress: dashboard.in_progress,
+        completed: dashboard.completed,
+        expiringSoon: dashboard.expiring_soon,
+        unresolvedSignals: dashboard.unresolved_signals,
+        obligationPending: dashboard.obligation_pending,
+        obligationSubmitted: dashboard.obligation_submitted,
+        obligationApproved: dashboard.obligation_approved,
+        totalCommitted: dashboard.total_committed,
+        paymentConditionMet: dashboard.payment_condition_met_amount,
+        mostCommonSignalLabel: dashboard.most_common_signal ?? "없음",
+      },
+      contracts: contracts.map((contract) => ({
+        id: contract.id,
+        title: contract.title,
+        counterpartyName: contract.counterparty_name,
+        status: contract.status,
+        totalAmount: contract.total_amount,
+        date: contract.end_date ? `만료 ${contract.end_date}` : undefined,
+        stage: contractStage(contract.status),
+        hint: contract.expiry_d_day === null ? undefined : dDayLabel(contract.expiry_d_day),
+        dDay: contract.expiry_d_day ?? undefined,
+      })),
+    };
   }
 
   async getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic> {
@@ -184,6 +248,17 @@ class PublicApiAdapter extends MockAdapter {
     );
   }
 
+  private ownerHeaders(): HeadersInit {
+    if (!this.demoBearerToken) {
+      throw new PublicApiError(
+        401,
+        "OWNER_AUTH_REQUIRED",
+        "소유자 API를 사용하려면 로컬 데모 Bearer 토큰을 설정해 주세요.",
+      );
+    }
+    return { Authorization: `Bearer ${this.demoBearerToken}` };
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let response: Response;
     try {
@@ -213,11 +288,35 @@ class PublicApiAdapter extends MockAdapter {
   }
 }
 
+function contractStage(status: ContractSummary["status"]): string {
+  const labels: Record<ContractSummary["status"], string> = {
+    DRAFT: "계약서 준비",
+    ANALYZING: "분석 중",
+    REVIEW_REQUIRED: "검토 필요",
+    NEGOTIATING: "조정 진행",
+    READY_TO_SIGN: "서명 준비",
+    SIGNING: "서명 중",
+    SIGNED: "서명 완료",
+    IN_PROGRESS: "이행 중",
+    COMPLETED: "완료",
+    RENEWAL_DUE: "재계약 검토",
+  };
+  return labels[status];
+}
+
+function dDayLabel(dDay: number): string {
+  if (dDay === 0) return "오늘 만료";
+  return dDay > 0 ? `만료 D-${dDay}` : `만료 ${Math.abs(dDay)}일 지남`;
+}
+
 /**
- * NEXT_PUBLIC_USE_MOCK=false와 NEXT_PUBLIC_API_BASE_URL을 함께 설정하면
- * 공개 조정 요청 화면만 실 API를 호출한다. 다른 화면은 기존 목업을 유지한다.
+ * NEXT_PUBLIC_USE_MOCK=false와 NEXT_PUBLIC_API_BASE_URL을 함께 설정하면 공개 API와
+ * 대시보드가 실 API를 호출한다. 소유자 API의 로컬 mock 검증에는 데모 Bearer 토큰만 쓴다.
  */
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
+const demoBearerToken = process.env.NEXT_PUBLIC_DEMO_BEARER_TOKEN;
 const useMock = process.env.NEXT_PUBLIC_USE_MOCK !== "false" || !apiBaseUrl;
 
-export const adapter: DataAdapter = useMock ? new MockAdapter() : new PublicApiAdapter(apiBaseUrl);
+export const adapter: DataAdapter = useMock
+  ? new MockAdapter()
+  : new ApiAdapter(apiBaseUrl, demoBearerToken);

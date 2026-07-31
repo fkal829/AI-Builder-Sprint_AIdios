@@ -18,9 +18,12 @@ const NAV = [
     label: "재계약 검토",
     href: `/contracts/${DEMO_CONTRACT_ID}/renewal`,
   },
+  // 광고효과는 계약 하나에 묶이지 않으므로 전역 경로를 쓴다
+  { key: "performance", label: "광고효과", href: "/performance" },
 ];
 
 function activeKey(pathname: string): string {
+  if (pathname.startsWith("/performance")) return "performance";
   if (pathname.includes("/obligations")) return "obligations";
   if (pathname.includes("/renewal")) return "renewal";
   if (pathname.startsWith("/dashboard") || pathname.startsWith("/contracts"))

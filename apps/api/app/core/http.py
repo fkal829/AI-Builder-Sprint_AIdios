@@ -98,7 +98,7 @@ def request_id(request: Request) -> str:
 
 
 def set_no_store(response: Response) -> Response:
-    """Mark public-token responses as non-cacheable without logging their value."""
+    """Mark public-token or sensitive performance responses as non-cacheable."""
 
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -159,6 +159,7 @@ def install_http_contract(app: FastAPI) -> None:
         response.headers["X-Request-ID"] = request.state.request_id
         if (
             "/public/" in request.url.path
+            or "/performance" in request.url.path
             or request.url.path.endswith("/send")
             or request.url.path.endswith("/evidence-link")
         ):

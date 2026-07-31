@@ -26,6 +26,7 @@ from app.core.enums import (
     InternalSignatureStatus,
     ModusignStatus,
     ObligationStatus,
+    PerformanceReportStatus,
     PublicTokenScope,
     RenewalDecisionType,
     ReviewItemStatus,
@@ -34,7 +35,7 @@ from app.core.enums import (
     VerificationStatus,
 )
 from app.core.errors import ErrorCode
-from app.core.exceptions import ExternalStorageFailure
+from app.core.exceptions import ExternalStorageFailure, InvalidDocument
 from app.domain.obligations import build_representative_obligation
 from app.repositories.adjustments import (
     AdjustmentDetailRecord,
@@ -63,6 +64,10 @@ from app.repositories.obligations import (
     EvidenceReviewResult,
     EvidenceSubmissionOutcome,
     ObligationRecord,
+)
+from app.repositories.performance import (
+    PerformanceContractAccess,
+    PerformanceReportAccess,
 )
 from app.repositories.public_tokens import PublicTokenRecord
 from app.repositories.review_items import (
@@ -170,6 +175,7 @@ class SupabaseAdapter:
         self._mock_objects: dict[str, bytes] = {}
         self._mock_object_content_types: dict[str, str] = {}
         self._mock_documents: dict[UUID, DocumentRecord] = {}
+        self._mock_performance_reports: dict[UUID, PerformanceReportAccess] = {}
         self._mock_understood_terms: dict[UUID, UnderstoodTerm] = {}
         self._mock_renewal_decisions: dict[UUID, RenewalDecision] = {}
         self._mock_audit_events: list[MockAuditEvent] = []
@@ -199,6 +205,10 @@ class SupabaseAdapter:
     @property
     def mock_documents(self) -> dict[UUID, DocumentRecord]:
         return dict(self._mock_documents)
+
+    @property
+    def mock_performance_reports(self) -> dict[UUID, PerformanceReportAccess]:
+        return dict(self._mock_performance_reports)
 
     @property
     def mock_understood_terms(self) -> dict[UUID, UnderstoodTerm]:
@@ -373,6 +383,10 @@ class SupabaseAdapter:
         owner_id: UUID,
         record: DocumentRecord,
     ) -> DocumentRecord | None:
+        if record.type is DocumentType.PERFORMANCE_REPORT:
+            raise InvalidDocument(
+                "광고효과 리포트는 전용 업로드 API에서만 생성할 수 있습니다."
+            )
         if self.mode == "mock":
             async with self._mock_lock:
                 if (owner_id, record.contract_id) not in self._mock_owned_contracts:
@@ -498,6 +512,156 @@ class SupabaseAdapter:
         if not response.data:
             return None
         return self._document_record_from_row(response.data[0])
+
+    async def get_owned_performance_contract(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> PerformanceContractAccess | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                contract = self._mock_contracts.get(contract_id)
+                if contract is None or contract.owner_id != owner_id:
+                    return None
+                return PerformanceContractAccess(
+                    id=contract.id,
+                    owner_id=contract.owner_id,
+                    status=contract.status,
+                )
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("contracts")
+                    .select("id,owner_id,status")
+                    .eq("id", str(contract_id))
+                    .eq("owner_id", str(owner_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("광고효과 계약 소유권 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        try:
+            row = response.data[0]
+            return PerformanceContractAccess(
+                id=UUID(str(row["id"])),
+                owner_id=UUID(str(row["owner_id"])),
+                status=ContractStatus(row["status"]),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "광고효과 계약 소유권 조회 결과가 올바르지 않습니다."
+            ) from error
+
+    async def get_owned_performance_report(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+    ) -> PerformanceReportAccess | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                contract = self._mock_contracts.get(contract_id)
+                report = self._mock_performance_reports.get(report_id)
+                if (
+                    contract is None
+                    or contract.owner_id != owner_id
+                    or report is None
+                    or report.contract_id != contract_id
+                ):
+                    return None
+                return report
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("performance_reports")
+                    .select(
+                        "id,contract_id,period,source_document_id,status,"
+                        "contracts!inner(owner_id)"
+                    )
+                    .eq("id", str(report_id))
+                    .eq("contract_id", str(contract_id))
+                    .eq("contracts.owner_id", str(owner_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("광고효과 리포트 소유권 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        try:
+            return _performance_report_access_from_row(response.data[0])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "광고효과 리포트 소유권 조회 결과가 올바르지 않습니다."
+            ) from error
+
+    async def get_owned_performance_source_document(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        document_id: UUID,
+    ) -> DocumentRecord | None:
+        document = await self.get_owned_document(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            document_id=document_id,
+        )
+        if document is None or document.type is not DocumentType.PERFORMANCE_REPORT:
+            return None
+        return document
+
+    async def has_performance_report_for_period(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        period: str,
+    ) -> bool:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if (
+                    (owner_id, contract_id) not in self._mock_owned_contracts
+                    or contract is None
+                    or contract.owner_id != owner_id
+                ):
+                    return False
+                return any(
+                    report.contract_id == contract_id and report.period == period
+                    for report in self._mock_performance_reports.values()
+                )
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("performance_reports")
+                    .select("id,contracts!inner(owner_id)")
+                    .eq("contract_id", str(contract_id))
+                    .eq("period", period)
+                    .eq("contracts.owner_id", str(owner_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("광고효과 리포트 월 중복 조회에 실패했습니다.") from error
+        return bool(response.data)
 
     async def create_signed_access_url(
         self,
@@ -3897,6 +4061,16 @@ def _idempotency_record_from_row(row: dict) -> IdempotencyRecord:
         response_status=row.get("response_status"),
         response_payload=row.get("response_payload"),
         created_at=_parse_datetime(row["created_at"]),
+    )
+
+
+def _performance_report_access_from_row(row: dict) -> PerformanceReportAccess:
+    return PerformanceReportAccess(
+        id=UUID(str(row["id"])),
+        contract_id=UUID(str(row["contract_id"])),
+        period=str(row["period"]),
+        source_document_id=UUID(str(row["source_document_id"])),
+        status=PerformanceReportStatus(row["status"]),
     )
 
 

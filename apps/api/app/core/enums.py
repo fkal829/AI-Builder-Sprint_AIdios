@@ -85,7 +85,7 @@ class StateEntityType(StrEnum):
 
 
 class PerformanceStateEntityType(StrEnum):
-    """Planned P2 entity, separate until audit persistence supports it."""
+    """Planned P2 entity, separate until 16.4 revision persistence supports it."""
 
     PERFORMANCE_REPORT = "PERFORMANCE_REPORT"
 
@@ -146,11 +146,6 @@ class AuditEventType(StrEnum):
     EVIDENCE_APPROVED = "EVIDENCE_APPROVED"
     EVIDENCE_DISPUTED = "EVIDENCE_DISPUTED"
     RENEWAL_DECISION_SAVED = "RENEWAL_DECISION_SAVED"
-
-
-class PerformanceAuditEventType(StrEnum):
-    """Planned P2 events, separate until the audit-event DB constraint is migrated."""
-
     PERFORMANCE_REPORT_UPLOADED = "PERFORMANCE_REPORT_UPLOADED"
     PERFORMANCE_REPORT_EXTRACTED = "PERFORMANCE_REPORT_EXTRACTED"
     PERFORMANCE_REPORT_CONFIRMED = "PERFORMANCE_REPORT_CONFIRMED"

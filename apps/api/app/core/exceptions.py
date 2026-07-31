@@ -57,6 +57,15 @@ class IdempotencyConflict(ApiException):
         )
 
 
+class PerformanceReportPeriodAlreadyExists(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=409,
+            code=ErrorCode.REPORT_PERIOD_ALREADY_EXISTS,
+            message="해당 계약과 월의 광고효과 리포트가 이미 존재합니다.",
+        )
+
+
 class AnalysisStartUnavailable(ApiException):
     def __init__(self) -> None:
         super().__init__(

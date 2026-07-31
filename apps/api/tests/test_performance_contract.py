@@ -12,7 +12,6 @@ from app.core.enums import (
     ExtractedField,
     ExtractedSourceType,
     IdempotencyOperation,
-    PerformanceAuditEventType,
     PerformanceFlagType,
     PerformanceMetricVerificationStatus,
     PerformanceReportStatus,
@@ -184,7 +183,7 @@ def test_performance_common_enums_match_the_planned_contract() -> None:
     } <= set(IdempotencyOperation)
 
 
-def test_performance_events_remain_planned_until_the_audit_migration() -> None:
+def test_performance_events_are_public_after_the_foundation_migration() -> None:
     expected = {
         "PERFORMANCE_REPORT_UPLOADED",
         "PERFORMANCE_REPORT_EXTRACTED",
@@ -194,8 +193,12 @@ def test_performance_events_remain_planned_until_the_audit_migration() -> None:
         "PERFORMANCE_REPORT_EXTRACTION_RECOVERED",
     }
 
-    assert {event.value for event in PerformanceAuditEventType} == expected
-    assert expected.isdisjoint({event.value for event in AuditEventType})
+    assert expected <= {event.value for event in AuditEventType}
+
+    openapi = OPENAPI_PATH.read_text(encoding="utf-8")
+    assert "PerformanceAuditEventType:" not in openapi
+    for event in expected:
+        assert f"        - {event}" in openapi
 
 
 def test_performance_error_codes_match_the_five_approved_codes() -> None:

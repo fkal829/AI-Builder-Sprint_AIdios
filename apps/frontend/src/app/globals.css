@@ -1,27 +1,36 @@
 @import "tailwindcss";
 
 /* ===========================================================================
-   단디계약 — 디자인 토큰 (기획안/와이어프레임 0번 섹션 기준)
-   경고색·빨강 없음. 거절/원안유지는 amber가 아닌 gray 계열.
+   Dandi — 디자인 토큰
+   흰 바탕 · 검은 글씨 · 하늘색 포인트. 그라데이션 없음. 경고색·빨강 없음.
+   brand 스케일은 로고 3색에 고정한다:
+     brand300 #9ed8f7 · brand500 #4d9bdb · brand800 #10365a
    =========================================================================== */
 @theme {
-  --color-ink: #2a2a2a;
-  --color-paper: #f6f4ef;
+  --color-ink: #16191d;
+  --color-surface: #ffffff; /* 페이지 배경 */
+  --color-subtle: #f7f9fb; /* 카드 안 옅은 채움. 흰 카드 위에서 한 단 내려앉는 영역 */
 
-  --color-gray100: #eeece5;
-  --color-gray200: #e5e2d8;
-  --color-gray300: #d8d4c8;
-  --color-gray400: #c9c4b6;
-  --color-gray500: #8f8a7c;
-  --color-gray700: #4a463c;
+  /* 중립 — 대기·거절·원안유지. 텍스트와 테두리. */
+  --color-neutral50: #f8f9fa;
+  --color-neutral100: #f1f3f5;
+  --color-neutral200: #e5e8ec;
+  --color-neutral300: #cdd3da;
+  --color-neutral400: #9aa3ae;
+  --color-neutral500: #656e7a;
+  --color-neutral700: #434b56;
 
-  --color-amber50: #fdf8ee;
-  --color-amber100: #faeed0;
-  --color-amber200: #f3dca3;
-  --color-amber400: #e0af4c;
-  --color-amber600: #b8842a;
-  --color-amber700: #a9752a;
-  --color-amber800: #7a561a;
+  /* 브랜드(하늘) — 진행·합의·AI 추정. 포인트로만 쓴다. */
+  --color-brand50: #f2f8fd;
+  --color-brand100: #e3f0fb;
+  --color-brand200: #c7e3f7;
+  --color-brand300: #9ed8f7; /* 로고 밝은 하늘 */
+  --color-brand400: #77bce6;
+  --color-brand500: #4d9bdb; /* 로고 중간 하늘 */
+  --color-brand600: #2b7cbd;
+  --color-brand700: #1a5a94;
+  --color-brand800: #10365a; /* 로고 남색 */
+  --color-brand900: #0a2540;
 
   --font-sans: var(--font-noto), ui-sans-serif, system-ui, "Apple SD Gothic Neo",
     "Malgun Gothic", sans-serif;
@@ -36,7 +45,7 @@ html {
 }
 
 body {
-  background: var(--color-paper);
+  background: var(--color-surface);
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -45,7 +54,7 @@ body {
 }
 
 ::selection {
-  background: var(--color-amber200);
+  background: var(--color-brand200);
 }
 
 /* 스크롤 가능한 가로 영역(발표용 데스크탑 흐름도 등) */
@@ -55,6 +64,40 @@ body {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ---------------------------------------------------------------------------
+   카드 — 흰 배경 + 옅은 테두리 + 아주 얕은 그림자.
+   그림자는 배경 색조로 착색하되 거의 보이지 않을 만큼만 준다.
+   @layer components 에 둬야 Tailwind 유틸리티(bg-*, border-* 등)가 이긴다.
+   --------------------------------------------------------------------------- */
+@layer components {
+  .card {
+    background: #fff;
+    border: 1px solid var(--color-neutral200);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(16, 54, 90, 0.04);
+  }
+
+  /* 클릭 가능한 카드·행의 공통 반응 */
+  .tappable {
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease;
+  }
+  .tappable:hover {
+    background-color: var(--color-brand50);
+    border-color: var(--color-brand200);
+  }
+  .tappable:active {
+    background-color: var(--color-brand100);
+  }
+}
+
+/* 키보드 포커스 — 흰 바탕에서도 확실히 보이도록 */
+:focus-visible {
+  outline: 2px solid var(--color-brand500);
+  outline-offset: 2px;
 }
 
 /* 분석 진행 스피너 */
@@ -79,4 +122,14 @@ body {
 }
 .animate-fade-up {
   animation: acc-fade-up 0.35s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tappable {
+    transition: none;
+  }
+  .animate-fade-up,
+  .animate-acc-spin {
+    animation: none;
+  }
 }

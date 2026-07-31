@@ -81,7 +81,7 @@ export default function PerformancePage() {
       size="wide"
       backHref={`/contracts/${id}/obligations`}
       right={
-        <span className="rounded bg-amber200 px-1.5 py-0.5 text-[10px] font-bold text-amber800">
+        <span className="rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
           화면 목업 · 개발 예정
         </span>
       }
@@ -92,32 +92,32 @@ export default function PerformancePage() {
       }
     >
       <div className="flex flex-col gap-5">
-        <p className="text-[13px] leading-relaxed text-gray700">
+        <p className="text-[13px] leading-relaxed text-neutral700">
           대행사에게 받은 광고 리포트를 올려두면, 계약에서 약속한 조건대로
           진행되고 있는지 한눈에 확인할 수 있어요.
         </p>
 
         {/* 계약 단계 ↔ 관리 단계 연결 — 무엇을 근거로 대조하는지 밝힌다 */}
         <Card>
-          <p className="text-[12px] leading-relaxed text-gray700">
+          <p className="text-[12px] leading-relaxed text-neutral700">
             <b className="text-ink">계약서를 기준으로 확인해요.</b> 제3조(서비스의
             범위)에 적힌 <b className="text-ink">월 4건 게시</b> 약정과 리포트를
             대조합니다.
           </p>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-gray500">
+          <p className="mt-1.5 text-[11px] leading-relaxed text-neutral500">
             이 계약에는 성과 보고 조항이 따로 없어요. 조정 요청에 &lsquo;월 1회 성과
             보고&rsquo;를 넣어두면, 다음부터는 받을 지표와 주기가 계약으로 정해져요.
           </p>
           <div className="mt-2.5 flex flex-wrap gap-2">
             <a
               href={`/contracts/${id}`}
-              className="rounded-lg border border-gray300 bg-white px-3 py-1.5 text-[12px] font-bold text-ink hover:bg-paper"
+              className="rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-ink hover:bg-subtle"
             >
               계약서에서 보기 →
             </a>
             <a
               href={`/contracts/${id}#req`}
-              className="rounded-lg border border-amber400 bg-amber50 px-3 py-1.5 text-[12px] font-bold text-amber700 hover:bg-amber100"
+              className="rounded-lg border border-brand400 bg-brand50 px-3 py-1.5 text-[12px] font-bold text-brand700 hover:bg-brand100"
             >
               성과 보고 조항 추가 요청 →
             </a>
@@ -131,13 +131,13 @@ export default function PerformancePage() {
           <SectionTitle>① 대행사 리포트 올리기</SectionTitle>
           <Card>
             {stage === "idle" ? (
-              <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-gray300 bg-paper px-6 py-8 text-center">
+              <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-neutral300 bg-subtle px-6 py-8 text-center">
                 <span className="text-3xl">📄</span>
                 <div>
                   <div className="text-[13px] font-bold text-ink">
                     월간 리포트나 인사이트 화면을 올려주세요
                   </div>
-                  <div className="mt-1 text-[11px] text-gray500">
+                  <div className="mt-1 text-[11px] text-neutral500">
                     PDF · 이미지 캡처 모두 괜찮아요
                   </div>
                 </div>
@@ -156,14 +156,14 @@ export default function PerformancePage() {
                     <div className="text-[13px] font-bold text-ink">
                       브릿지웨이브_7월_광고리포트.pdf
                     </div>
-                    <div className="text-[11px] text-gray500">
+                    <div className="text-[11px] text-neutral500">
                       2026-07-31 업로드 · 대행사 제공
                     </div>
                   </div>
                 </div>
                 <button
                   onClick={() => setStage("idle")}
-                  className="flex-none rounded-lg border border-gray300 bg-white px-3 py-1.5 text-[12px] font-bold text-gray700 hover:bg-paper"
+                  className="flex-none rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-neutral700 hover:bg-subtle"
                 >
                   다시 올리기
                 </button>
@@ -173,7 +173,7 @@ export default function PerformancePage() {
         </section>
 
         {stage === "parsing" && (
-          <p className="py-8 text-center text-sm text-gray500">
+          <p className="py-8 text-center text-sm text-neutral500">
             리포트에서 숫자를 읽는 중…
           </p>
         )}
@@ -191,10 +191,10 @@ export default function PerformancePage() {
                         key={f.label}
                         className="flex items-center justify-between gap-3 text-[13px]"
                       >
-                        <span className="text-gray700">{f.label}</span>
+                        <span className="text-neutral700">{f.label}</span>
                         <span className="flex items-center gap-2">
                           <b className="text-ink">{f.value}</b>
-                          <span className="text-[10px] font-bold text-amber700">
+                          <span className="text-[10px] font-bold text-brand700">
                             확신도 {f.confidence}%
                           </span>
                         </span>
@@ -206,11 +206,11 @@ export default function PerformancePage() {
                   <button className="h-10 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white">
                     맞아요, 저장할게요
                   </button>
-                  <button className="h-10 flex-1 rounded-lg border border-gray300 bg-white text-[13px] font-bold text-gray700">
+                  <button className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral700">
                     숫자를 고칠게요
                   </button>
                 </div>
-                <p className="mt-2 text-[11px] text-gray500">
+                <p className="mt-2 text-[11px] text-neutral500">
                   잘못 읽은 숫자가 있으면 직접 고칠 수 있어요. 확인한 값만
                   대시보드에 쌓여요.
                 </p>
@@ -238,20 +238,20 @@ export default function PerformancePage() {
 
               <div className="mt-1 grid gap-2.5 lg:grid-cols-2">
                 <Card>
-                  <div className="mb-3 text-[12px] font-bold text-gray700">
+                  <div className="mb-3 text-[12px] font-bold text-neutral700">
                     월별 노출 추이
                   </div>
                   <MonthlyChart />
                 </Card>
 
                 <Card>
-                  <div className="mb-2.5 text-[12px] font-bold text-gray700">
+                  <div className="mb-2.5 text-[12px] font-bold text-neutral700">
                     7월 게시물별 성과
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[360px] text-[12px]">
                       <thead>
-                        <tr className="border-b border-gray200 text-left text-gray500">
+                        <tr className="border-b border-neutral200 text-left text-neutral500">
                           <th className="pb-2 font-medium">게시물</th>
                           <th className="pb-2 text-right font-medium">노출</th>
                           <th className="pb-2 text-right font-medium">좋아요</th>
@@ -261,22 +261,22 @@ export default function PerformancePage() {
                       </thead>
                       <tbody>
                         {JULY_POSTS.map((p) => (
-                          <tr key={p.title} className="border-b border-gray100">
+                          <tr key={p.title} className="border-b border-neutral100">
                             <td className="py-2.5">
-                              <span className="mr-1.5 rounded bg-gray100 px-1.5 py-0.5 text-[10px] font-bold text-gray700">
+                              <span className="mr-1.5 rounded bg-neutral100 px-1.5 py-0.5 text-[10px] font-bold text-neutral700">
                                 {p.kind}
                               </span>
                               <span className="font-bold text-ink">{p.title}</span>
-                              <span className="ml-1.5 text-gray500">{p.date}</span>
+                              <span className="ml-1.5 text-neutral500">{p.date}</span>
                             </td>
                             <td className="py-2.5 text-right font-bold text-ink">
                               {p.impressions.toLocaleString()}
                             </td>
-                            <td className="py-2.5 text-right text-gray700">{p.likes}</td>
-                            <td className="py-2.5 text-right text-gray700">
+                            <td className="py-2.5 text-right text-neutral700">{p.likes}</td>
+                            <td className="py-2.5 text-right text-neutral700">
                               {p.comments}
                             </td>
-                            <td className="py-2.5 text-right text-gray700">{p.saves}</td>
+                            <td className="py-2.5 text-right text-neutral700">{p.saves}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -315,13 +315,13 @@ function StepFlow({ stage }: { stage: Stage }) {
           <span
             className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${
               i < reached
-                ? "bg-amber100 text-amber800"
-                : "bg-gray100 text-gray500"
+                ? "bg-brand100 text-brand800"
+                : "bg-neutral100 text-neutral500"
             }`}
           >
             {i + 1}. {s}
           </span>
-          {i < steps.length - 1 && <span className="text-gray300">›</span>}
+          {i < steps.length - 1 && <span className="text-neutral300">›</span>}
         </span>
       ))}
     </div>
@@ -342,12 +342,12 @@ function MonthlyChart() {
             </span>
             <div className="flex h-28 w-full items-end">
               <div
-                className={`w-full rounded-t-lg ${last ? "bg-amber400" : "bg-gray200"}`}
+                className={`w-full rounded-t-lg ${last ? "bg-brand400" : "bg-neutral200"}`}
                 style={{ height: `${(m.impressions / max) * 100}%` }}
               />
             </div>
-            <span className="text-[11px] font-medium text-gray700">{m.label}</span>
-            <span className="text-[10px] text-gray500">
+            <span className="text-[11px] font-medium text-neutral700">{m.label}</span>
+            <span className="text-[10px] text-neutral500">
               게시 {m.posts}건 · 반응률 {m.rate.toFixed(1)}%
             </span>
           </div>
@@ -373,10 +373,10 @@ function InquiryPanel() {
         {FINDINGS.map((f) => (
           <div
             key={f.title}
-            className="rounded-lg border border-amber400 bg-amber50 px-3.5 py-2.5"
+            className="rounded-lg border border-brand400 bg-brand50 px-3.5 py-2.5"
           >
-            <div className="text-[13px] font-bold text-amber800">! {f.title}</div>
-            <p className="mt-1 text-[12px] leading-relaxed text-gray700">{f.body}</p>
+            <div className="text-[13px] font-bold text-brand800">! {f.title}</div>
+            <p className="mt-1 text-[12px] leading-relaxed text-neutral700">{f.body}</p>
           </div>
         ))}
       </div>
@@ -394,11 +394,11 @@ function InquiryPanel() {
         >
           {copied ? "복사됐어요" : "문안 복사하기"}
         </button>
-        <button className="h-10 flex-1 rounded-lg border border-gray300 bg-white text-[13px] font-bold text-gray700">
+        <button className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral700">
           이상 있음으로 기록
         </button>
       </div>
-      <p className="mt-2 text-[11px] text-gray500">
+      <p className="mt-2 text-[11px] text-neutral500">
         기록해두면 날짜와 함께 남아, 나중에 재계약을 검토할 때 근거로 볼 수 있어요.
       </p>
     </Card>

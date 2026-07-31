@@ -74,7 +74,7 @@ function MockResponsesPage({ id }: { id: string }) {
       }
     >
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
 
       {state.status === "ready" && view === "no_response" && (
@@ -104,7 +104,7 @@ function MockResponsesPage({ id }: { id: string }) {
               </button>
               <button
                 onClick={continueToRevision}
-                className="h-11 flex-1 rounded-lg border border-gray300 bg-white text-[13px] font-bold text-gray500"
+                className="h-11 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral500"
               >
                 원안대로 최종 계약서 확인
               </button>
@@ -189,10 +189,10 @@ function LiveResponsesPage({ id }: { id: string }) {
       }
     >
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">응답을 불러오는 중…</p>
+        <p className="py-10 text-center text-sm text-neutral500">응답을 불러오는 중…</p>
       )}
       {state.status === "error" && (
-        <p className="py-10 text-center text-sm font-bold text-amber800">⚠ {state.error}</p>
+        <p className="py-10 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>
       )}
       {state.status === "ready" && (
         <LiveResponseBody
@@ -237,28 +237,28 @@ function LiveResponseBody({
   return (
     <div className="flex flex-col gap-3">
       {detail.items.map((item, index) => (
-        <article key={item.reviewItemId} className="rounded-xl border border-gray200 bg-white p-4">
+        <article key={item.reviewItemId} className="rounded-xl border border-neutral200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-black text-ink">조정 항목 {index + 1}</h2>
             <ResponseDecision decision={item.decision} />
           </div>
-          <div className="mt-3 rounded-lg bg-paper p-3">
-            <div className="text-[10px] font-bold text-gray500">내 요청</div>
+          <div className="mt-3 rounded-lg bg-subtle p-3">
+            <div className="text-[10px] font-bold text-neutral500">내 요청</div>
             <p className="mt-1 text-[13px] leading-relaxed text-ink">{item.requestText}</p>
           </div>
           {item.counterText && (
-            <div className="mt-2 rounded-lg border border-amber600 bg-amber50 p-3">
-              <div className="text-[10px] font-bold text-amber700">대행사 역제안</div>
+            <div className="mt-2 rounded-lg border border-brand600 bg-brand50 p-3">
+              <div className="text-[10px] font-bold text-brand700">대행사 역제안</div>
               <p className="mt-1 text-[13px] font-bold leading-relaxed text-ink">
                 {item.counterText}
               </p>
             </div>
           )}
           {item.reason && (
-            <p className="mt-2 text-[11px] leading-relaxed text-gray700">사유: {item.reason}</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-neutral700">사유: {item.reason}</p>
           )}
           {item.comparison && (
-            <div className="mt-3 rounded-lg bg-gray100 p-3 text-[11px] leading-relaxed text-gray700">
+            <div className="mt-3 rounded-lg bg-neutral100 p-3 text-[11px] leading-relaxed text-neutral700">
               <b className="text-ink">AI 비교</b>
               <p className="mt-1">{item.comparison.changedSummary}</p>
               <ul className="mt-1 list-disc pl-4">
@@ -284,18 +284,18 @@ function LiveResponseBody({
             />
           )}
           {item.decision === "REJECT" && (
-            <p className="mt-3 rounded-lg bg-gray100 p-3 text-[11px] font-bold text-gray700">
+            <p className="mt-3 rounded-lg bg-neutral100 p-3 text-[11px] font-bold text-neutral700">
               거절된 항목은 원계약 조건을 유지합니다.
             </p>
           )}
           {detail.status === "CONFIRMED" && (
-            <p className="mt-3 rounded-lg bg-amber50 p-3 text-[11px] font-bold text-amber700">
+            <p className="mt-3 rounded-lg bg-brand50 p-3 text-[11px] font-bold text-brand700">
               이 조정 결과는 이미 확정됐습니다. 수정 계약서를 확인해주세요.
             </p>
           )}
         </article>
       ))}
-      <p className="text-[11px] leading-relaxed text-gray500">
+      <p className="text-[11px] leading-relaxed text-neutral500">
         응답 확정 뒤에도 바로 서명하지 않습니다. 대행사가 다시 보낸 수정 계약서를
         업로드하고 반영 내용을 직접 확인합니다.
       </p>
@@ -320,7 +320,7 @@ function ResolutionButtons({
         type="button"
         onClick={() => onSelect(acceptValue)}
         className={`h-10 rounded-lg border text-[12px] font-bold ${
-          selected === acceptValue ? "border-amber700 bg-amber50 text-ink" : "border-gray300 bg-white text-gray700"
+          selected === acceptValue ? "border-brand700 bg-brand50 text-ink" : "border-neutral300 bg-white text-neutral700"
         }`}
       >
         {acceptLabel}
@@ -329,7 +329,7 @@ function ResolutionButtons({
         type="button"
         onClick={() => onSelect("KEEP_ORIGINAL")}
         className={`h-10 rounded-lg border text-[12px] font-bold ${
-          selected === "KEEP_ORIGINAL" ? "border-ink bg-gray100 text-ink" : "border-gray300 bg-white text-gray700"
+          selected === "KEEP_ORIGINAL" ? "border-ink bg-neutral100 text-ink" : "border-neutral300 bg-white text-neutral700"
         }`}
       >
         원안 유지
@@ -354,7 +354,7 @@ function ResponseDecision({ decision }: { decision: LiveAdjustmentDetail["items"
       : decision === "REJECT"
         ? "거절 · 원안 유지"
         : "응답 대기";
-  return <span className="rounded bg-paper px-2 py-1 text-[10px] font-bold text-gray700">{label}</span>;
+  return <span className="rounded bg-subtle px-2 py-1 text-[10px] font-bold text-neutral700">{label}</span>;
 }
 
 function ViewSwitch({
@@ -370,7 +370,7 @@ function ViewSwitch({
       onChange={(e) =>
         onChange(e.target.value as "normal" | "no_response" | "all_rejected")
       }
-      className="rounded-md border border-gray300 bg-white px-1.5 py-1 text-[10px] text-gray700"
+      className="rounded-md border border-neutral300 bg-white px-1.5 py-1 text-[10px] text-neutral700"
       aria-label="상태 미리보기"
     >
       <option value="normal">정상 응답</option>
@@ -400,18 +400,18 @@ function ResponsesBody({
   return (
     <div className="flex flex-col gap-4">
       {/* 대기 상태 */}
-      <div className="rounded-xl border border-gray200 bg-white p-4">
+      <div className="rounded-xl border border-neutral200 bg-white p-4">
         <div className="text-sm font-black text-ink">응답 현황</div>
         <div className="mt-3 flex gap-2.5">
-          <div className="flex-1 rounded-lg bg-paper py-2.5 text-center">
+          <div className="flex-1 rounded-lg bg-subtle py-2.5 text-center">
             <div className="text-xl font-black text-ink">
               {responded.length}/{requested.length}
             </div>
-            <div className="text-[10px] text-gray500">응답 완료</div>
+            <div className="text-[10px] text-neutral500">응답 완료</div>
           </div>
-          <div className="flex-1 rounded-lg bg-paper py-2.5 text-center">
+          <div className="flex-1 rounded-lg bg-subtle py-2.5 text-center">
             <div className="text-xl font-black text-ink">D-4</div>
-            <div className="text-[10px] text-gray500">응답 기한</div>
+            <div className="text-[10px] text-neutral500">응답 기한</div>
           </div>
         </div>
 
@@ -419,9 +419,9 @@ function ResponsesBody({
           {requested.map((c) => (
             <div
               key={c.id}
-              className="flex items-center justify-between rounded-md bg-paper px-3 py-2 text-xs"
+              className="flex items-center justify-between rounded-md bg-subtle px-3 py-2 text-xs"
             >
-              <span className="text-gray700">{c.title}</span>
+              <span className="text-neutral700">{c.title}</span>
               <ResponseTag clause={c} />
             </div>
           ))}
@@ -435,20 +435,20 @@ function ResponsesBody({
             역제안이 도착했어요 — {counter.title}
           </div>
           <div className="mt-3 flex gap-2">
-            <div className="flex-1 rounded-lg bg-paper p-3">
-              <div className="mb-1 text-[10px] text-gray500">내 요청안</div>
+            <div className="flex-1 rounded-lg bg-subtle p-3">
+              <div className="mb-1 text-[10px] text-neutral500">내 요청안</div>
               <div className="text-[13px] font-bold text-ink">
                 {counter.understood ?? "조정 요청"}
               </div>
             </div>
-            <div className="flex-1 rounded-lg border border-amber600 bg-amber50 p-3">
-              <div className="mb-1 text-[10px] text-amber700">대행사 역제안</div>
+            <div className="flex-1 rounded-lg border border-brand600 bg-brand50 p-3">
+              <div className="mb-1 text-[10px] text-brand700">대행사 역제안</div>
               <div className="text-[13px] font-bold text-ink">
                 {counter.agencyResponse?.counterText}
               </div>
             </div>
           </div>
-          <div className="mt-3 rounded-md bg-paper px-3 py-2.5 text-[11px] leading-relaxed text-gray700">
+          <div className="mt-3 rounded-md bg-subtle px-3 py-2.5 text-[11px] leading-relaxed text-neutral700">
             AI 설명: 원 요청보다 기간이 조금 길어졌지만, 위약금·환불 조건은 그대로
             유지돼요. 확인해보세요.
           </div>
@@ -456,11 +456,11 @@ function ResponsesBody({
             <button
               type="button"
               onClick={onConfirm}
-              className="flex h-11 items-center justify-center rounded-lg border-2 border-amber700 bg-amber50 text-[13px] font-bold text-ink"
+              className="flex h-11 items-center justify-center rounded-lg border-2 border-brand700 bg-brand50 text-[13px] font-bold text-ink"
             >
               역제안 수락 후 수정 계약서 확인
             </button>
-            <p className="text-center text-[11px] leading-relaxed text-gray500">
+            <p className="text-center text-[11px] leading-relaxed text-neutral500">
               P0에서는 조정 응답을 한 번만 받습니다. 수정본이 다르면 기존 채널로 다시
               요청해주세요.
             </p>
@@ -478,10 +478,10 @@ function ResponseTag({
 }) {
   const r = clause.agencyResponse;
   if (!r)
-    return <span className="text-gray500">대기</span>;
+    return <span className="text-neutral500">대기</span>;
   if (r.decision === "ACCEPT")
-    return <span className="font-bold text-amber700">수락</span>;
+    return <span className="font-bold text-brand700">수락</span>;
   if (r.decision === "COUNTER")
-    return <span className="font-bold text-amber700">역제안 도착</span>;
-  return <span className="font-bold text-gray700">원안 유지</span>;
+    return <span className="font-bold text-brand700">역제안 도착</span>;
+  return <span className="font-bold text-neutral700">원안 유지</span>;
 }

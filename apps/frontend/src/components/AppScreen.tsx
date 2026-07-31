@@ -12,6 +12,8 @@ const MAXW = {
   sm: "max-w-[520px]",
   md: "max-w-[780px]",
   wide: "max-w-[1120px]",
+  /** 2단 문서 뷰어 등 좌우로 넓게 펼쳐야 하는 화면 */
+  xl: "max-w-[1560px]",
 } as const;
 
 export function AppScreen({
@@ -31,7 +33,7 @@ export function AppScreen({
   onBack?: () => void;
   right?: ReactNode;
   footer?: ReactNode;
-  size?: "sm" | "md" | "wide";
+  size?: "sm" | "md" | "wide" | "xl";
   /** 하위호환: wide=true → size "wide" */
   wide?: boolean;
   children: ReactNode;
@@ -46,14 +48,14 @@ export function AppScreen({
   const max = wide ? MAXW.wide : MAXW[size];
 
   return (
-    <div className="min-h-dvh bg-paper">
+    <div className="min-h-dvh bg-white">
       <SiteHeader />
 
       <div className={`mx-auto w-full ${max} px-6 py-8 lg:px-10 lg:py-10`}>
         {showBack && (
           <button
             onClick={handleBack}
-            className="mb-4 inline-flex items-center gap-1 text-[13px] font-medium text-gray500 hover:text-ink"
+            className="mb-4 inline-flex items-center gap-1 text-[13px] font-medium text-neutral500 hover:text-ink"
           >
             <span className="text-base">‹</span> 뒤로
           </button>
@@ -67,7 +69,7 @@ export function AppScreen({
               </h1>
             )}
             {(step || right) && (
-              <div className="flex-none text-[13px] font-medium text-gray500">
+              <div className="flex-none text-[13px] font-medium text-neutral500">
                 {right ?? step}
               </div>
             )}
@@ -77,7 +79,7 @@ export function AppScreen({
         {children}
 
         {footer && (
-          <div className="mt-8 max-w-[440px] border-t border-gray200 pt-5">
+          <div className="mt-8 max-w-[440px] border-t border-neutral200 pt-5">
             {footer}
           </div>
         )}
@@ -104,8 +106,8 @@ export function CTAButton({
     "flex h-12 w-full items-center justify-center rounded-lg text-[15px] font-bold transition disabled:opacity-40";
   const styles = {
     primary: "bg-ink text-white hover:bg-ink/90",
-    secondary: "border-2 border-ink bg-white text-ink hover:bg-paper",
-    ghost: "border border-gray300 bg-white text-gray500 hover:bg-paper",
+    secondary: "border-2 border-ink bg-white text-ink hover:bg-subtle",
+    ghost: "border border-neutral300 bg-white text-neutral500 hover:bg-subtle",
   }[variant];
 
   if (href && !disabled) {

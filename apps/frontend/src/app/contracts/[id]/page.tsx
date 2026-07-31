@@ -32,17 +32,14 @@ import type {
 /* ④ 계약서 원문(좌) ↔ 분석·조정요청 작성(우) 뷰어 — 참고 이미지 레이아웃 기준(A안).
    위험도(고/중/저)는 소상공인 관점의 '확인이 필요한 정도'를 표시하며 위법성 판정이 아니다. */
 
-/** 위험도 색 — 테마엔 red/green이 없어 명시 hex로 고정(참고 이미지의 빨강/노랑/초록). */
-const RISK: Record<
-  ClauseRisk,
-  { label: string; badgeBg: string; badgeFg: string; tileBg: string; tileFg: string }
-> = {
-  high: { label: "고위험", badgeBg: "#fbe3e3", badgeFg: "#c0392b", tileBg: "#fdeceb", tileFg: "#c0392b" },
-  mid: { label: "중위험", badgeBg: "#faeed0", badgeFg: "#a9752a", tileBg: "#fdf7e8", tileFg: "#b8842a" },
-  low: { label: "저위험", badgeBg: "#e2f1e8", badgeFg: "#2e7d52", tileBg: "#eaf6ee", tileFg: "#2e7d52" },
-};
+/* 하단 확인 바 색 — 미확인이 많을수록 진하고, 확인해 나갈수록 옅어지고, 다 확인하면 하늘색.
+   이 값들은 바 배경(흰 글자)이자 흰 버튼 위 글자색으로 함께 쓰이므로
+   구간 전체가 흰색 대비 4.5:1 이상이어야 한다. 아래 셋은 4.75 / 7.75 / 7.16. */
+const BAR_LIGHT = "#ca453a"; // 거의 다 확인함
+const BAR_STRONG = "#a01f1f"; // 전부 미확인
+const BAR_DONE = "#3e89cf"; // 0건 남음
 
-/** hex 색 두 개를 t(0~1)만큼 선형 보간 — 하단 트레이의 빨강 진하기(미확인 수 비례) 계산용 */
+/** hex 색 두 개를 t(0~1)만큼 선형 보간 — 하단 바의 빨강 농도(미확인 비율) 계산용 */
 function lerpColor(from: string, to: string, t: number): string {
   const clamp = Math.min(1, Math.max(0, t));
   const a = parseInt(from.slice(1), 16);
@@ -56,6 +53,32 @@ function lerpColor(from: string, to: string, t: number): string {
   };
   return `#${mix(16)}${mix(8)}${mix(0)}`;
 }
+
+/** 위험도 색 — 빨강/노랑/초록 대신 테마의 무게 사다리를 쓴다.
+    확인이 급할수록 채움이 진해진다. 위험도 판정에는 빨강을 쓰지 않는다. */
+const RISK: Record<ClauseRisk, { label: string; badge: string; tile: string; num: string }> = {
+  // 가장 확인이 필요 — 유일한 진한 채움
+  high: {
+    label: "고위험",
+    badge: "bg-brand800 text-white",
+    tile: "bg-brand800",
+    num: "text-white",
+  },
+  // 확인 권장 — 옅은 하늘 채움
+  mid: {
+    label: "중위험",
+    badge: "bg-brand100 text-brand800",
+    tile: "bg-brand50 ring-1 ring-brand200",
+    num: "text-brand800",
+  },
+  // 조용함 — 중립
+  low: {
+    label: "저위험",
+    badge: "bg-neutral100 text-neutral700",
+    tile: "bg-white ring-1 ring-neutral200",
+    num: "text-neutral700",
+  },
+};
 
 /** localStorage 설문이 없을 때 목업 understood를 설문 응답 형태로 변환(폴백) */
 function termToAnswers(t: UnderstoodTerm): Partial<Record<UnderstoodKey, string>> {
@@ -79,8 +102,7 @@ function RiskBadge({ risk }: { risk: ClauseRisk }) {
   const r = RISK[risk];
   return (
     <span
-      className="inline-flex flex-none items-center rounded-full px-2 py-0.5 text-[11px] font-bold"
-      style={{ backgroundColor: r.badgeBg, color: r.badgeFg }}
+      className={`inline-flex flex-none items-center rounded-full px-2 py-0.5 text-[11px] font-bold ${r.badge}`}
     >
       {r.label}
     </span>
@@ -90,7 +112,7 @@ function RiskBadge({ risk }: { risk: ClauseRisk }) {
 export default function AnalysisViewerPage() {
   const { id } = useParams<{ id: string }>();
   return (
-    <AppScreen size="wide" backHref="/dashboard">
+    <AppScreen size="xl" backHref="/dashboard">
       {isUsingMock ? <MockViewer contractId={id} /> : <LiveViewer contractId={id} />}
     </AppScreen>
   );
@@ -99,10 +121,10 @@ export default function AnalysisViewerPage() {
 function MockViewer({ contractId }: { contractId: string }) {
   const state = useAsync(() => adapter.getContract(contractId), [contractId]);
   if (state.status === "loading") {
-    return <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>;
+    return <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>;
   }
   if (state.status === "error") {
-    return <p className="py-10 text-center text-sm text-amber800">⚠ {state.error}</p>;
+    return <p className="py-10 text-center text-sm text-brand800">⚠ {state.error}</p>;
   }
   return <ViewerBody data={state.data} contractId={contractId} />;
 }
@@ -112,8 +134,8 @@ function LiveViewer({ contractId }: { contractId: string }) {
   const [choices, setChoices] = useState<Record<string, SuggestionChoice>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  if (state.status === "loading") return <p className="py-10 text-center text-sm text-gray500">분석 결과를 불러오는 중…</p>;
-  if (state.status === "error") return <p className="py-10 text-center text-sm text-amber800">⚠ {state.error}</p>;
+  if (state.status === "loading") return <p className="py-10 text-center text-sm text-neutral500">분석 결과를 불러오는 중…</p>;
+  if (state.status === "error") return <p className="py-10 text-center text-sm text-brand800">⚠ {state.error}</p>;
   const data = { ...state.data, items: state.data.items.map((item) => ({ ...item, userChoice: choices[item.id] ?? item.userChoice })) };
   const requestCount = data.items.filter(
     (item) => item.userChoice === "REQUEST" || item.userChoice === "COMPROMISE",
@@ -132,12 +154,12 @@ function LiveViewer({ contractId }: { contractId: string }) {
   return <div className="mx-auto flex max-w-3xl flex-col gap-5">
     <header className="rounded-2xl bg-ink px-6 py-5 text-white"><h1 className="text-xl font-black">{data.title}</h1><p className="mt-1 text-sm text-white/70">{data.counterpartyName} · 원문 근거와 함께 확인해요</p></header>
     {data.understood && <LayerBlock layer="understood" label="내가 이해한 조건"><div className="grid gap-1 text-sm"><span>기간 · {data.understood.durationText}</span><span>월 금액 · {data.understood.monthlyAmount?.toLocaleString() ?? "기억 안 남"}원</span><span>총액 · {data.understood.totalAmount?.toLocaleString() ?? "기억 안 남"}원</span></div></LayerBlock>}
-    {data.items.length === 0 ? <p className="rounded-xl bg-white p-6 text-center text-sm text-gray500">현재 표시할 확인 항목이 없어요.</p> : data.items.map((item) => <article key={item.id} className="rounded-2xl bg-white p-5 ring-1 ring-gray200"><div className="mb-3 flex items-center justify-between"><b className="text-sm text-ink">{SIGNAL_META[item.type]}</b>{item.sourceConfidence != null && <span className="text-xs text-gray500">근거 확신도 {Math.round(item.sourceConfidence * 100)}%</span>}</div><LayerBlock layer="original" label={item.sourcePage ? `계약서 원문 · ${item.sourcePage}쪽` : "원문 근거를 찾지 못함"}>{item.sourceText ?? "원문 근거가 없어 확인이 필요합니다."}</LayerBlock><div className="mt-3"><LayerBlock layer="ai" label="AI가 본 차이 · 추정">{item.plainExplanation}</LayerBlock></div><div className="mt-3"><LayerBlock layer="official" label="확인 기준">{item.basisText}</LayerBlock></div><div className="mt-3 grid gap-2">{([['ACCEPT','원안 수용',item.suggestionAccept],['COMPROMISE','절충안',item.suggestionCompromise],['REQUEST','요청안',item.suggestionRequest]] as const).map(([choice,label,text]) => <button key={choice} type="button" disabled={savingId === item.id} onClick={() => void select(item.id, choice)} className={`rounded-lg border p-3 text-left text-sm ${item.userChoice === choice ? 'border-amber700 bg-amber100 font-bold' : 'border-gray300 bg-white'}`}><span className="text-xs text-gray500">{label}</span><br />{text}</button>)}</div></article>)}
+    {data.items.length === 0 ? <p className="rounded-xl bg-white p-6 text-center text-sm text-neutral500">현재 표시할 확인 항목이 없어요.</p> : data.items.map((item) => <article key={item.id} className="rounded-2xl bg-white p-5 ring-1 ring-neutral200"><div className="mb-3 flex items-center justify-between"><b className="text-sm text-ink">{SIGNAL_META[item.type]}</b>{item.sourceConfidence != null && <span className="text-xs text-neutral500">근거 확신도 {Math.round(item.sourceConfidence * 100)}%</span>}</div><LayerBlock layer="original" label={item.sourcePage ? `계약서 원문 · ${item.sourcePage}쪽` : "원문 근거를 찾지 못함"}>{item.sourceText ?? "원문 근거가 없어 확인이 필요합니다."}</LayerBlock><div className="mt-3"><LayerBlock layer="ai" label="AI가 본 차이 · 추정">{item.plainExplanation}</LayerBlock></div><div className="mt-3"><LayerBlock layer="official" label="확인 기준">{item.basisText}</LayerBlock></div><div className="mt-3 grid gap-2">{([['ACCEPT','원안 수용',item.suggestionAccept],['COMPROMISE','절충안',item.suggestionCompromise],['REQUEST','요청안',item.suggestionRequest]] as const).map(([choice,label,text]) => <button key={choice} type="button" disabled={savingId === item.id} onClick={() => void select(item.id, choice)} className={`rounded-lg border p-3 text-left text-sm ${item.userChoice === choice ? 'border-brand700 bg-brand100 font-bold' : 'border-neutral300 bg-white'}`}><span className="text-xs text-neutral500">{label}</span><br />{text}</button>)}</div></article>)}
     <a
       href={`/contracts/${contractId}/request`}
       aria-disabled={requestCount === 0}
       className={`flex h-12 items-center justify-center rounded-lg text-sm font-bold ${
-        requestCount > 0 ? "bg-ink text-white" : "pointer-events-none bg-gray200 text-gray500"
+        requestCount > 0 ? "bg-ink text-white" : "pointer-events-none bg-neutral200 text-neutral500"
       }`}
     >
       조정 요청 {requestCount}건 확인하기
@@ -199,11 +221,11 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
     [data.clauses, drafts],
   );
 
-  // 하단 바 색 — 미확인 조항이 남아있으면 그 비율만큼 진한 빨강(다 확인할수록 옅어짐), 다 확인하면 초록
+  // 하단 바 색 — 미확인이 많을수록 진한 빨강, 확인해 나갈수록 옅어지고, 다 확인하면 하늘색.
   const barColor = useMemo(() => {
-    if (pendingConfirm === 0) return RISK.low.tileFg;
+    if (pendingConfirm === 0) return BAR_DONE;
     const ratio = pendingConfirm / Math.max(data.clauses.length, 1);
-    return lerpColor("#f87171", RISK.high.badgeFg, ratio);
+    return lerpColor(BAR_LIGHT, BAR_STRONG, ratio);
   }, [pendingConfirm, data.clauses.length]);
 
   const [confirmSendWithPending, setConfirmSendWithPending] = useState(false);
@@ -271,18 +293,15 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
   };
 
   return (
-    <div className="flex flex-col gap-5 bg-paper">
-      {/* 다크 배너 헤더 */}
-      <div className="flex items-center gap-3 rounded-2xl bg-ink px-6 py-5 text-white">
-        <span className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-white/15 text-xl">
-          📄
-        </span>
-        <div>
-          <h1 className="text-xl font-black">계약서 내용 뷰어</h1>
-          <p className="text-[13px] text-white/70">
-            원문을 읽으며 조항별 분석 확인 · 조정 요청 작성
-          </p>
-        </div>
+    <div className="flex flex-col gap-5">
+      {/* 페이지 헤더 — 다른 화면과 같은 흰 바탕 제목 형식 */}
+      <div>
+        <h1 className="text-2xl font-black tracking-tight text-ink">
+          계약서 내용 뷰어
+        </h1>
+        <p className="mt-1 text-[13px] text-neutral500">
+          원문을 읽으며 조항별 분석 확인 · 조정 요청 작성
+        </p>
       </div>
 
       {/* 내가 이해한 조건 요약 + 통계 — 원문/조정요청 비교 위, 전체 폭 가로 배치 */}
@@ -297,7 +316,7 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
               <div className="flex flex-col gap-1">
                 {summary.items.map((it) => (
                   <div key={it.key}>
-                    <span className="text-gray500">{it.label}</span>{" "}
+                    <span className="text-neutral500">{it.label}</span>{" "}
                     <span className="font-bold">{it.value}</span>
                   </div>
                 ))}
@@ -306,17 +325,22 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
           </LayerBlock>
         </div>
         <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="총 조항 수" value={doc.clauses.length} bg="#eef1fb" fg="#3b4aa0" />
-          <StatCard label="고위험 조항" value={counts.high} bg={RISK.high.tileBg} fg={RISK.high.tileFg} />
-          <StatCard label="중위험 조항" value={counts.mid} bg={RISK.mid.tileBg} fg={RISK.mid.tileFg} />
-          <StatCard label="저위험 조항" value={counts.low} bg={RISK.low.tileBg} fg={RISK.low.tileFg} />
+          <StatCard
+            label="총 조항 수"
+            value={doc.clauses.length}
+            tile="bg-white ring-1 ring-neutral200"
+            num="text-ink"
+          />
+          <StatCard label="고위험 조항" value={counts.high} tile={RISK.high.tile} num={RISK.high.num} />
+          <StatCard label="중위험 조항" value={counts.mid} tile={RISK.mid.tile} num={RISK.mid.num} />
+          <StatCard label="저위험 조항" value={counts.low} tile={RISK.low.tile} num={RISK.low.num} />
         </div>
       </div>
 
       {/* 문서 정보 */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-lg font-black text-ink">{doc.title}</span>
-        <span className="rounded-md bg-gray200 px-2 py-1 text-xs font-medium text-gray700">
+        <span className="rounded-md bg-neutral200 px-2 py-1 text-xs font-medium text-neutral700">
           {doc.parties}
         </span>
       </div>
@@ -324,20 +348,20 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
       {/* 좌: 원문 / 우: 분석·작성 */}
       <div className="grid gap-5 lg:grid-cols-2">
         {/* ── 좌: 계약서 원문 ── */}
-        <section className="flex flex-col rounded-2xl bg-white ring-1 ring-gray200">
-          <header className="flex items-center justify-between border-b border-gray200 px-5 py-3">
+        <section className="flex flex-col rounded-2xl bg-white ring-1 ring-neutral200">
+          <header className="flex items-center justify-between border-b border-neutral200 px-5 py-3">
             <h2 className="text-sm font-black text-ink">계약서 원문</h2>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setFontScale((s) => Math.max(0.85, +(s - 0.1).toFixed(2)))}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-gray300 text-gray500 hover:bg-paper"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral300 text-neutral500 hover:bg-subtle"
                 aria-label="글자 작게"
               >
                 −
               </button>
               <button
                 onClick={() => setFontScale((s) => Math.min(1.4, +(s + 0.1).toFixed(2)))}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-gray300 text-gray500 hover:bg-paper"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral300 text-neutral500 hover:bg-subtle"
                 aria-label="글자 크게"
               >
                 +
@@ -348,7 +372,7 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
           <div className="px-5 py-5" style={{ fontSize: `${fontScale}rem` }}>
             <div className="mb-5 text-center">
               <div className="text-lg font-black text-ink">{doc.title}</div>
-              <div className="mt-1 text-[0.72em] text-gray500">{doc.parties}</div>
+              <div className="mt-1 text-[0.72em] text-neutral500">{doc.parties}</div>
             </div>
 
             <div className="flex flex-col gap-4">
@@ -378,30 +402,20 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
         {/* ── 우: 분석 결과 + 조정요청 작성 ── */}
         <section className="flex flex-col gap-4">
           {/* 조정 요청 작성 — 확인이 필요한 조항별 문구 선택·수정 */}
-          <div className="rounded-2xl bg-white ring-1 ring-gray200">
-            <div className="border-b border-gray200 px-5 py-3">
+          <div className="rounded-2xl bg-white ring-1 ring-neutral200">
+            <div className="border-b border-neutral200 px-5 py-3">
               <h2 className="text-sm font-black text-ink">조정 요청 작성</h2>
             </div>
             <div className="flex flex-col gap-3 p-3">
               {Object.keys(drafts).length === 0 && (
-                <div
-                  className="mx-1 my-3 rounded-xl border-2 border-dashed px-5 py-8 text-center"
-                  style={{ borderColor: RISK.high.badgeFg, backgroundColor: RISK.high.tileBg }}
-                >
+                <div className="mx-1 my-3 rounded-xl border border-dashed border-brand300 bg-brand50 px-5 py-8 text-center">
                   <div className="text-3xl">👈</div>
-                  <p className="mt-2 text-[15px] font-black" style={{ color: RISK.high.badgeFg }}>
+                  <p className="mt-2 text-[15px] font-black text-brand800">
                     왼쪽 원문에서 조항을 확인해주세요
                   </p>
-                  <p className="mt-2 text-[12px] leading-relaxed text-gray700">
+                  <p className="mt-2 text-[12px] leading-relaxed text-neutral700">
                     조항 제목 옆의{" "}
-                    <span
-                      className="mx-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border align-middle text-[10px] font-black"
-                      style={{
-                        backgroundColor: RISK.high.tileBg,
-                        color: RISK.high.badgeFg,
-                        borderColor: RISK.high.badgeFg,
-                      }}
-                    >
+                    <span className="mx-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-brand600 bg-white align-middle text-[10px] font-black text-brand700">
                       !
                     </span>{" "}
                     버튼을 <b>눌러야</b> 확인돼요. 확인한 조항이 이곳에 요청서 카드로 나타나요.
@@ -441,7 +455,7 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
             </div>
           </div>
 
-          <p className="text-[11px] leading-relaxed text-gray500">
+          <p className="text-[11px] leading-relaxed text-neutral500">
             위험도는 소상공인 입장에서 &lsquo;확인이 필요한 정도&rsquo;를 표시한 것으로, 위법성이나
             계약의 효력을 판정하지 않아요. 원안 수용을 고른 조항은 요청서에서 제외돼요.
           </p>
@@ -501,28 +515,32 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
   );
 }
 
-/** 상태별 트리거 버튼 색 — 축소된 버튼에서도 미확인(빨강)/확인됨(초록)이 한눈에 보이게 유지 */
+/** 상태별 트리거 버튼 색.
+    bg = 옅은 채움(작은 버튼·메뉴 헤더 배경), fg = 진한 색(아이콘·테두리·액션 버튼 배경).
+    확인됨·일반은 하늘/중립을 쓰고, 미확인 "!" 버튼만 예외로 빨강을 쓴다.
+    화면에서 유일한 빨강이라 "지금 눌러야 하는 것"이 한눈에 잡힌다.
+    위험도 배지·집계 타일에는 빨강을 쓰지 않는다(기존 설계 원칙 유지). */
 const CLAUSE_MENU_STYLE: Record<
   "unconfirmed" | "confirmed" | "none",
   { bg: string; fg: string; icon: string; label: string; actionLabel: string }
 > = {
   unconfirmed: {
-    bg: RISK.high.tileBg,
-    fg: RISK.high.badgeFg,
+    bg: "#fdeceb", // 옅은 빨강 배경
+    fg: "#c0392b", // 빨강. 흰 글자 대비 5.44:1 (AA)
     icon: "!",
     label: "확인 필요",
     actionLabel: "! 확인하고 요청서에 담기",
   },
   confirmed: {
-    bg: RISK.low.tileBg,
-    fg: RISK.low.tileFg,
+    bg: "#e3f0fb",
+    fg: "#10365a",
     icon: "✓",
     label: "확인 완료",
     actionLabel: "✓ 요청서에서 보기",
   },
   none: {
-    bg: "#fdf3e0",
-    fg: "#a9752a",
+    bg: "#f1f3f5",
+    fg: "#434b56",
     icon: "⋯",
     label: "일반 조항",
     actionLabel: "✎ 조정 요청 작성",
@@ -563,7 +581,7 @@ function ClauseOriginal({
     <div
       id={`clause-${clause.id}`}
       className={`scroll-mt-4 rounded-xl border px-4 py-3.5 transition ${
-        active ? "border-amber400 bg-amber50" : "border-gray200 bg-white"
+        active ? "border-brand400 bg-brand50" : "border-neutral200 bg-white"
       }`}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -586,8 +604,10 @@ function ClauseOriginal({
             <>
               {/* z-40: 사이트 헤더(z-30)보다 위에 있어야 헤더 위 클릭도 바깥클릭으로 닫힘 */}
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              {/* right-0 기준점이 카드 안쪽이라 좁은 화면에서는 왼쪽으로 넘친다.
+                  페이지·카드 좌우 여백(약 5rem)을 뺀 폭을 쓰고, sm 이상에서만 380px. */}
               <div
-                className="absolute right-0 bottom-full z-50 mb-1.5 w-72 overflow-hidden rounded-xl border border-gray200 bg-white text-left shadow-lg"
+                className="absolute right-0 bottom-full z-50 mb-1.5 w-[calc(100vw-5rem)] overflow-hidden rounded-xl border border-neutral200 bg-white text-left shadow-lg sm:w-[380px]"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* 헤더 — 상태 라벨 + 닫기 */}
@@ -615,7 +635,7 @@ function ClauseOriginal({
                       type="button"
                       onClick={handleExplain}
                       disabled={loading}
-                      className="flex w-full items-center gap-1.5 rounded-lg border border-amber300 bg-amber50 px-2.5 py-2 text-[12px] font-bold text-amber800 transition hover:bg-amber100 disabled:opacity-70"
+                      className="flex w-full items-center gap-1.5 rounded-lg border border-brand300 bg-brand50 px-2.5 py-2 text-[12px] font-bold text-brand800 transition hover:bg-brand100 disabled:opacity-70"
                     >
                       {loading ? (
                         <span className="animate-pulse">🤖 단디가 조항을 분석하고 있어요…</span>
@@ -624,13 +644,13 @@ function ClauseOriginal({
                       )}
                     </button>
                   ) : (
-                    <div className="rounded-lg bg-amber50 px-2.5 py-2 text-[12px] leading-relaxed text-amber800">
+                    <div className="rounded-lg bg-brand50 px-2.5 py-2 text-[12px] leading-relaxed text-brand800">
                       <p>{detail.summary}</p>
                       {detail.officialBasis && (
-                        <p className="mt-1.5 text-[0.9em] text-amber700">근거 · {detail.officialBasis}</p>
+                        <p className="mt-1.5 text-[0.9em] text-brand700">근거 · {detail.officialBasis}</p>
                       )}
                       {detail.confidence != null && (
-                        <p className="mt-1 text-[0.85em] text-amber700/80">
+                        <p className="mt-1 text-[0.85em] text-brand700/80">
                           확신도 {Math.round(detail.confidence * 100)}%
                         </p>
                       )}
@@ -654,7 +674,7 @@ function ClauseOriginal({
           )}
         </div>
       </div>
-      <p className="whitespace-pre-line text-[0.85em] leading-relaxed text-gray700">
+      <p className="whitespace-pre-line text-[0.85em] leading-relaxed text-neutral700">
         {clause.body}
       </p>
     </div>
@@ -699,31 +719,31 @@ function RequestCard({
     <div
       id={`req-${clause.id}`}
       className={`scroll-mt-4 rounded-xl border px-4 py-3.5 transition ${
-        active ? "border-amber700 bg-amber50" : "border-gray200 bg-white"
+        active ? "border-brand700 bg-brand50" : "border-neutral200 bg-white"
       }`}
     >
       <div className="mb-1 flex items-center justify-between gap-2">
         <h3 className="text-sm font-black text-ink">{clause.title}</h3>
         <div className="flex flex-none items-center gap-2">
-          <span className="rounded-full bg-amber100 px-2 py-0.5 text-[11px] font-bold text-amber700">
+          <span className="rounded-full bg-brand100 px-2 py-0.5 text-[11px] font-bold text-brand700">
             {SIGNAL_META[clause.signal]}
           </span>
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="text-[11px] font-bold text-gray500 hover:text-amber700"
+            className="text-[11px] font-bold text-neutral500 hover:text-brand700"
           >
             ✕ 삭제
           </button>
         </div>
       </div>
 
-      <p className="mb-2.5 text-[12px] leading-relaxed text-gray700">{clause.aiExplanation}</p>
+      <p className="mb-2.5 text-[12px] leading-relaxed text-neutral700">{clause.aiExplanation}</p>
 
       {onViewOriginal && (
         <button
           onClick={onViewOriginal}
-          className="mb-2.5 text-[11px] font-bold text-amber700 underline underline-offset-2"
+          className="mb-2.5 text-[11px] font-bold text-brand700 underline underline-offset-2"
         >
           ↖ 원문에서 보기
         </button>
@@ -740,12 +760,12 @@ function RequestCard({
               onClick={() => onChoice(s.choice)}
               className={`rounded-lg border px-3 py-2 text-left text-[12px] transition ${
                 sel
-                  ? "border-2 border-amber700 bg-amber50 font-bold"
-                  : "border-gray300 bg-white hover:border-amber400"
+                  ? "border-2 border-brand700 bg-brand50 font-bold"
+                  : "border-neutral300 bg-white hover:border-brand400"
               }`}
             >
-              <span className="text-gray500">{s.label}</span> — {s.text}
-              {sel && <span className="ml-1 text-amber700">✓</span>}
+              <span className="text-neutral500">{s.label}</span> — {s.text}
+              {sel && <span className="ml-1 text-brand700">✓</span>}
             </button>
           );
         })}
@@ -753,19 +773,19 @@ function RequestCard({
 
       {/* 직접 수정 (원안 수용이 아닐 때만) */}
       {choice === "ACCEPT" ? (
-        <p className="mt-2.5 text-[11px] text-gray500">원안을 그대로 수용해요 · 요청서에서 제외</p>
+        <p className="mt-2.5 text-[11px] text-neutral500">원안을 그대로 수용해요 · 요청서에서 제외</p>
       ) : (
         <div className="mt-2.5">
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] font-bold text-gray700">보낼 문구 (직접 수정 가능)</span>
-            <span className="text-[10px] font-bold text-amber700">{CHOICE_HINT[choice]}</span>
+            <span className="text-[10px] font-bold text-neutral700">보낼 문구 (직접 수정 가능)</span>
+            <span className="text-[10px] font-bold text-brand700">{CHOICE_HINT[choice]}</span>
           </div>
           <textarea
             value={text}
             onChange={(e) => changeText(e.target.value)}
             rows={2}
             placeholder="내 말로 막 써도 돼요. 예) 5년은 너무 길어요 ㅠㅠ"
-            className="w-full resize-y rounded-lg border border-gray300 px-3 py-2 text-[12px] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-gray400"
+            className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[12px] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
           />
 
           {/* 톤 완충 — 지금 문구를 정중하게 다듬기 */}
@@ -773,14 +793,14 @@ function RequestCard({
             type="button"
             onClick={() => setPolished(politen(text))}
             disabled={!text.trim()}
-            className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-amber400 bg-amber50 px-2.5 py-1 text-[11px] font-bold text-amber700 transition hover:bg-amber100 disabled:opacity-40"
+            className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[11px] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
           >
             ✨ 정중하게 다듬기
           </button>
 
           {polished !== null && (
-            <div className="mt-2 rounded-lg border border-amber600 bg-amber50 px-3 py-2.5">
-              <div className="mb-1 text-[10px] font-bold text-amber800">
+            <div className="mt-2 rounded-lg border border-brand600 bg-brand50 px-3 py-2.5">
+              <div className="mb-1 text-[10px] font-bold text-brand800">
                 이렇게 바꿔봤어요
               </div>
               <p className="text-[12px] leading-relaxed text-ink">“{polished}”</p>
@@ -798,7 +818,7 @@ function RequestCard({
                 <button
                   type="button"
                   onClick={() => setPolished(null)}
-                  className="flex-1 rounded-md border border-gray300 bg-white px-3 py-1.5 text-[11px] font-bold text-gray700"
+                  className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[11px] font-bold text-neutral700"
                 >
                   취소
                 </button>
@@ -850,18 +870,18 @@ function ManualRequestCard({
   return (
     <div
       id={`req-${draftId}`}
-      className="scroll-mt-4 rounded-xl border border-gray200 bg-white px-4 py-3.5"
+      className="scroll-mt-4 rounded-xl border border-neutral200 bg-white px-4 py-3.5"
     >
       <div className="mb-1 flex items-center justify-between gap-2">
         <h3 className="text-sm font-black text-ink">{draft.title}</h3>
         <div className="flex flex-none items-center gap-2">
-          <span className="rounded-full bg-amber100 px-2 py-0.5 text-[11px] font-bold text-amber700">
+          <span className="rounded-full bg-brand100 px-2 py-0.5 text-[11px] font-bold text-brand700">
             직접 추가
           </span>
           <button
             type="button"
             onClick={onRemove}
-            className="text-[11px] font-bold text-gray500 hover:text-amber700"
+            className="text-[11px] font-bold text-neutral500 hover:text-brand700"
           >
             ✕ 삭제
           </button>
@@ -869,7 +889,7 @@ function ManualRequestCard({
       </div>
 
       {sourceBody && (
-        <p className="mb-2.5 whitespace-pre-line text-[12px] leading-relaxed text-gray700">
+        <p className="mb-2.5 whitespace-pre-line text-[12px] leading-relaxed text-neutral700">
           {sourceBody}
         </p>
       )}
@@ -877,7 +897,7 @@ function ManualRequestCard({
       {onViewOriginal && (
         <button
           onClick={onViewOriginal}
-          className="mb-2.5 text-[11px] font-bold text-amber700 underline underline-offset-2"
+          className="mb-2.5 text-[11px] font-bold text-brand700 underline underline-offset-2"
         >
           ↖ 원문에서 보기
         </button>
@@ -885,29 +905,29 @@ function ManualRequestCard({
 
       <div className="mt-1">
         <div className="mb-1 flex items-center justify-between">
-          <span className="text-[10px] font-bold text-gray700">보낼 문구 (직접 작성)</span>
-          <span className="text-[10px] font-bold text-amber700">요청서에 담겨요</span>
+          <span className="text-[10px] font-bold text-neutral700">보낼 문구 (직접 작성)</span>
+          <span className="text-[10px] font-bold text-brand700">요청서에 담겨요</span>
         </div>
         <textarea
           value={draft.text}
           onChange={(e) => changeText(e.target.value)}
           rows={2}
           placeholder="추가하고 싶은 요청을 자유롭게 써주세요."
-          className="w-full resize-y rounded-lg border border-gray300 px-3 py-2 text-[12px] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-gray400"
+          className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[12px] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
         />
 
         <button
           type="button"
           onClick={() => setPolished(politen(draft.text))}
           disabled={!draft.text.trim()}
-          className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-amber400 bg-amber50 px-2.5 py-1 text-[11px] font-bold text-amber700 transition hover:bg-amber100 disabled:opacity-40"
+          className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[11px] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
         >
           ✨ 정중하게 다듬기
         </button>
 
         {polished !== null && (
-          <div className="mt-2 rounded-lg border border-amber600 bg-amber50 px-3 py-2.5">
-            <div className="mb-1 text-[10px] font-bold text-amber800">이렇게 바꿔봤어요</div>
+          <div className="mt-2 rounded-lg border border-brand600 bg-brand50 px-3 py-2.5">
+            <div className="mb-1 text-[10px] font-bold text-brand800">이렇게 바꿔봤어요</div>
             <p className="text-[12px] leading-relaxed text-ink">“{polished}”</p>
             <div className="mt-2 flex gap-2">
               <button
@@ -923,7 +943,7 @@ function ManualRequestCard({
               <button
                 type="button"
                 onClick={() => setPolished(null)}
-                className="flex-1 rounded-md border border-gray300 bg-white px-3 py-1.5 text-[11px] font-bold text-gray700"
+                className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[11px] font-bold text-neutral700"
               >
                 취소
               </button>
@@ -938,22 +958,20 @@ function ManualRequestCard({
 function StatCard({
   label,
   value,
-  bg,
-  fg,
+  tile,
+  num,
 }: {
   label: string;
   value: number;
-  bg: string;
-  fg: string;
+  /** 타일 배경·테두리 유틸 클래스 */
+  tile: string;
+  /** 라벨·숫자 글자색 유틸 클래스 */
+  num: string;
 }) {
   return (
-    <div className="rounded-2xl px-4 py-3.5" style={{ backgroundColor: bg }}>
-      <div className="text-[12px] font-bold" style={{ color: fg }}>
-        {label}
-      </div>
-      <div className="mt-1 text-3xl font-black" style={{ color: fg }}>
-        {value}
-      </div>
+    <div className={`rounded-2xl px-4 py-3.5 ${tile}`}>
+      <div className={`text-[12px] font-bold ${num}`}>{label}</div>
+      <div className={`mt-1 text-3xl font-black tabular-nums ${num}`}>{value}</div>
     </div>
   );
 }

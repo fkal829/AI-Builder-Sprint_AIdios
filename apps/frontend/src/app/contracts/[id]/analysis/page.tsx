@@ -69,7 +69,7 @@ export default function AnalysisPage() {
   return (
     <AppScreen size="sm">
       <div className="flex flex-col items-center gap-6 py-10">
-        <div className="h-16 w-16 animate-acc-spin rounded-full border-4 border-amber200 border-t-amber700" />
+        <div className="h-16 w-16 animate-acc-spin rounded-full border-4 border-brand200 border-t-brand700" />
         <h2 className="text-center text-base font-black text-ink">
           계약서를 살펴보고 있어요
         </h2>
@@ -83,19 +83,19 @@ export default function AnalysisPage() {
                 key={label}
                 className={`flex items-center gap-2.5 text-[13px] ${
                   done
-                    ? "text-gray500"
+                    ? "text-neutral500"
                     : active
                       ? "font-bold text-ink"
-                      : "text-gray400"
+                      : "text-neutral400"
                 }`}
               >
                 <span
                   className={`flex h-4 w-4 flex-none items-center justify-center rounded-full text-[10px] ${
                     done
-                      ? "bg-amber700 text-white"
+                      ? "bg-brand700 text-white"
                       : active
-                        ? "border-2 border-amber700"
-                        : "border-2 border-gray300"
+                        ? "border-2 border-brand700"
+                        : "border-2 border-neutral300"
                   }`}
                 >
                   {done ? "✓" : ""}
@@ -108,7 +108,7 @@ export default function AnalysisPage() {
 
         {error ? (
           <div className="flex flex-col items-center gap-3 text-center">
-            <p className="text-xs font-bold leading-relaxed text-amber800">⚠ {error}</p>
+            <p className="text-xs font-bold leading-relaxed text-brand800">⚠ {error}</p>
             <button
               type="button"
               onClick={() => router.replace("/contracts/new")}
@@ -118,7 +118,7 @@ export default function AnalysisPage() {
             </button>
           </div>
         ) : (
-          <p className="text-center text-[11px] text-gray500">보통 30초 정도 걸려요</p>
+          <p className="text-center text-[11px] text-neutral500">보통 30초 정도 걸려요</p>
         )}
       </div>
     </AppScreen>

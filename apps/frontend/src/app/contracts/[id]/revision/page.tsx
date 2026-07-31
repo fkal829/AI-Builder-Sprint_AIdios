@@ -89,16 +89,16 @@ export default function RevisedContractPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="rounded-xl border border-gray200 bg-white p-4">
+        <div className="rounded-xl border border-neutral200 bg-white p-4">
           <h2 className="text-sm font-black text-ink">대행사가 다시 보낸 PDF를 올려주세요</h2>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-gray500">
+          <p className="mt-1.5 text-[12px] leading-relaxed text-neutral500">
             대행사는 이메일이나 메신저로 수정 계약서를 전달합니다. 단디계약은 계약서를
             대신 만들지 않고, 확정한 조정 내용이 수정본에 들어갔는지 대조합니다.
           </p>
           <input
             type="file"
             accept="application/pdf,.pdf"
-            className="mt-3 block w-full text-xs text-gray700"
+            className="mt-3 block w-full text-xs text-neutral700"
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
           <button
@@ -115,7 +115,7 @@ export default function RevisedContractPage() {
           <section className="flex flex-col gap-2.5">
             <div>
               <h2 className="text-sm font-black text-ink">조항별 반영 결과</h2>
-              <p className="mt-1 text-[11px] leading-relaxed text-gray500">
+              <p className="mt-1 text-[11px] leading-relaxed text-neutral500">
                 정확히 찾은 문구도 직접 확인해주세요. 표현이 다른 항목은 자동으로
                 합의됐다고 판단하지 않습니다.
               </p>
@@ -123,7 +123,7 @@ export default function RevisedContractPage() {
             {review.items.map((item) => (
               <label
                 key={item.reviewItemId}
-                className="flex cursor-pointer gap-3 rounded-xl border border-gray200 bg-white p-4"
+                className="flex cursor-pointer gap-3 rounded-xl border border-neutral200 bg-white p-4"
               >
                 <input
                   type="checkbox"
@@ -137,8 +137,8 @@ export default function RevisedContractPage() {
                     <span
                       className={`rounded px-2 py-1 text-[10px] font-bold ${
                         item.matchStatus === "MATCHED"
-                          ? "bg-amber50 text-amber700"
-                          : "bg-gray100 text-gray700"
+                          ? "bg-brand50 text-brand700"
+                          : "bg-neutral100 text-neutral700"
                       }`}
                     >
                       {item.matchStatus === "MATCHED" ? "문구 확인" : "직접 확인 필요"}
@@ -148,11 +148,11 @@ export default function RevisedContractPage() {
                     “{item.expectedText}”
                   </span>
                   {item.sourceText ? (
-                    <span className="mt-2 block rounded-md bg-paper px-3 py-2 text-[11px] leading-relaxed text-gray700">
+                    <span className="mt-2 block rounded-md bg-subtle px-3 py-2 text-[11px] leading-relaxed text-neutral700">
                       수정본 {item.sourcePage}쪽: “{item.sourceText}”
                     </span>
                   ) : (
-                    <span className="mt-2 block text-[11px] text-gray500">
+                    <span className="mt-2 block text-[11px] text-neutral500">
                       같은 문구를 찾지 못했습니다. PDF 원문을 직접 확인한 뒤 체크해주세요.
                     </span>
                   )}

@@ -108,10 +108,10 @@ export default function NewContractPage() {
             onDrop={onDrop}
             className={`flex h-32 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm transition ${
               dragActive
-                ? "border-amber700 bg-amber100 text-amber800"
+                ? "border-brand700 bg-brand100 text-brand800"
                 : uploaded
-                  ? "border-amber400 bg-amber50 text-amber700"
-                  : "border-gray300 text-gray500 hover:bg-paper"
+                  ? "border-brand400 bg-brand50 text-brand700"
+                  : "border-neutral300 text-neutral500 hover:bg-subtle"
             }`}
           >
             {dragActive ? (
@@ -136,27 +136,27 @@ export default function NewContractPage() {
           </button>
 
           {error && (
-            <p className="text-[12px] font-bold text-amber800">⚠ {error}</p>
+            <p className="text-[12px] font-bold text-brand800">⚠ {error}</p>
           )}
 
-          <label className="flex flex-col gap-1.5 text-xs font-bold text-gray700">
+          <label className="flex flex-col gap-1.5 text-xs font-bold text-neutral700">
             계약 이름
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={120}
               placeholder="예: SNS 광고대행 계약"
-              className="h-11 rounded-lg border border-gray300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
+              className="h-11 rounded-lg border border-neutral300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
             />
           </label>
-          <label className="flex flex-col gap-1.5 text-xs font-bold text-gray700">
+          <label className="flex flex-col gap-1.5 text-xs font-bold text-neutral700">
             대행사 이름
             <input
               value={counterpartyName}
               onChange={(e) => setCounterpartyName(e.target.value)}
               maxLength={120}
               placeholder="계약 상대방 또는 대행사명"
-              className="h-11 rounded-lg border border-gray300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
+              className="h-11 rounded-lg border border-neutral300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
             />
           </label>
 
@@ -164,23 +164,23 @@ export default function NewContractPage() {
             href="/sample-contract.pdf"
             target="_blank"
             rel="noreferrer"
-            className="text-center text-[11px] text-amber700 underline underline-offset-2"
+            className="text-center text-[11px] text-brand700 underline underline-offset-2"
           >
             예시 계약서(광안리 카페 SNS광고) 미리보기 →
           </a>
 
           {/* 선택 첨부 — P1 부가 경로 (접힘) */}
-          <details className="rounded-lg bg-paper px-3.5 py-3">
-            <summary className="flex cursor-pointer items-center justify-between text-xs text-gray500">
+          <details className="rounded-lg bg-subtle px-3.5 py-3">
+            <summary className="flex cursor-pointer items-center justify-between text-xs text-neutral500">
               <span>
                 제안서·견적서 / 메시지 첨부
-                <span className="ml-1.5 rounded bg-amber200 px-1.5 py-0.5 text-[10px] font-bold text-amber800">
+                <span className="ml-1.5 rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
                   P1
                 </span>
               </span>
               <span>펼치기</span>
             </summary>
-            <div className="mt-3 flex h-20 items-center justify-center rounded-lg border border-dashed border-gray300 text-[11px] text-gray500">
+            <div className="mt-3 flex h-20 items-center justify-center rounded-lg border border-dashed border-neutral300 text-[11px] text-neutral500">
               문서로 확인된 설명이 있으면 근거로 함께 대조해요 (선택)
             </div>
           </details>
@@ -265,10 +265,10 @@ export default function NewContractPage() {
                 disabled={submitting}
                 className={`min-h-[52px] rounded-lg px-4 text-left text-sm font-bold transition ${
                   selected
-                    ? "border-2 border-amber700 bg-amber200"
+                    ? "border-2 border-brand700 bg-brand200"
                     : isDontRemember
-                      ? "border border-dashed border-gray500 bg-white font-medium text-gray500"
-                      : "border-2 border-ink bg-white hover:bg-paper"
+                      ? "border border-dashed border-neutral500 bg-white font-medium text-neutral500"
+                      : "border-2 border-ink bg-white hover:bg-subtle"
                 }`}
               >
                 {opt}
@@ -284,8 +284,8 @@ export default function NewContractPage() {
               <div
                 className={`flex min-h-[52px] items-center rounded-lg pl-4 pr-2 transition ${
                   customSelected
-                    ? "border-2 border-amber700 bg-amber200"
-                    : "border-2 border-dashed border-gray300 bg-white focus-within:border-ink"
+                    ? "border-2 border-brand700 bg-brand200"
+                    : "border-2 border-dashed border-neutral300 bg-white focus-within:border-ink"
                 }`}
               >
                 <input
@@ -295,7 +295,7 @@ export default function NewContractPage() {
                     if (e.key === "Enter") submitCustom();
                   }}
                   placeholder="직접 입력…"
-                  className="min-w-0 flex-1 bg-transparent text-sm font-bold text-ink outline-none placeholder:font-medium placeholder:text-gray400"
+                  className="min-w-0 flex-1 bg-transparent text-sm font-bold text-ink outline-none placeholder:font-medium placeholder:text-neutral400"
                 />
                 <button
                   type="button"
@@ -312,12 +312,12 @@ export default function NewContractPage() {
 
         <ProgressDots total={UNDERSTOOD_QUESTIONS.length} current={qIndex + 1} />
 
-        <p className="text-[11px] leading-relaxed text-gray500">
+        <p className="text-[11px] leading-relaxed text-neutral500">
           여기 답하신 내용은 &lsquo;사용자가 기억하고 이해한 설명&rsquo;으로만 쓰여요.
           대행사가 다르게 말했다고 단정하지 않아요.
         </p>
-        {error && <p className="text-center text-xs font-bold text-amber800">⚠ {error}</p>}
-        {submitting && <p className="text-center text-xs text-gray500">계약서를 등록하고 있어요…</p>}
+        {error && <p className="text-center text-xs font-bold text-brand800">⚠ {error}</p>}
+        {submitting && <p className="text-center text-xs text-neutral500">계약서를 등록하고 있어요…</p>}
       </div>
     </AppScreen>
   );

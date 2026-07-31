@@ -10,13 +10,13 @@ export default function StatesPage() {
       <header className="mb-8 flex items-baseline justify-between border-b-2 border-ink pb-4">
         <div>
           <h1 className="text-2xl font-black text-ink">실패 · 빈 상태</h1>
-          <p className="mt-1 text-[13px] text-gray500">
+          <p className="mt-1 text-[13px] text-neutral500">
             판정색(빨강) 없이 중립적으로 안내. 응답이 없는 것도 정보로 다룸.
           </p>
         </div>
         <Link
           href="/"
-          className="text-[13px] font-bold text-amber700 underline underline-offset-2"
+          className="text-[13px] font-bold text-brand700 underline underline-offset-2"
         >
           ← 런처
         </Link>
@@ -41,7 +41,7 @@ export default function StatesPage() {
                 <button className="h-11 flex-1 rounded-lg border-2 border-ink bg-white text-[12px] font-bold text-ink">
                   여기서 멈출게요
                 </button>
-                <button className="h-11 flex-1 rounded-lg border border-gray300 bg-white text-[12px] font-bold text-gray500">
+                <button className="h-11 flex-1 rounded-lg border border-neutral300 bg-white text-[12px] font-bold text-neutral500">
                   원안대로 진행
                 </button>
               </div>
@@ -107,7 +107,7 @@ function Frame({
 }) {
   return (
     <div>
-      <div className="mb-2 text-[12px] font-bold text-gray700">{caption}</div>
+      <div className="mb-2 text-[12px] font-bold text-neutral700">{caption}</div>
       <div className="rounded-[24px] border-2 border-ink bg-white p-5">
         {children}
       </div>

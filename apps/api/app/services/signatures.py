@@ -16,6 +16,7 @@ from app.schemas.signatures import (
     Signature,
 )
 from app.services.state_machine import InvalidStatusTransition
+from app.services.webhooks import ModusignWebhookService
 
 
 class SignatureService:
@@ -27,6 +28,7 @@ class SignatureService:
         storage: PrivateStorage,
         modusign: ModusignAdapter,
         embedded_redirect_url: str,
+        webhook_secret: str = "",
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
@@ -34,6 +36,7 @@ class SignatureService:
         self._storage = storage
         self._modusign = modusign
         self._embedded_redirect_url = embedded_redirect_url
+        self._webhook_secret = webhook_secret
         self._now = now or (lambda: datetime.now(UTC))
 
     async def create_embedded_draft(
@@ -87,6 +90,10 @@ class SignatureService:
                 agreement_pdf=agreement_pdf,
                 signers=payload.signers,
                 redirect_url=self._embedded_redirect_url,
+                metadata=ModusignWebhookService.build_signature_metadata(
+                    signature_id=record.signature.id,
+                    webhook_secret=self._webhook_secret,
+                ),
             )
         except (ExternalStorageFailure, ModusignAdapterError, OSError) as error:
             await self._repository.fail_embedded_signature_draft(

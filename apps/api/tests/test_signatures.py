@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient, MockTransport, Request, Response
 from app.adapters.modusign import ModusignAdapter, ModusignAdapterError
 from app.adapters.supabase import SupabaseAdapter
 from app.api.dependencies import get_modusign_adapter, get_supabase_adapter
-from app.core.enums import ContractStatus, InternalSignatureStatus
+from app.core.enums import ContractStatus, InternalSignatureStatus, ModusignStatus
 from app.main import app
 from app.repositories.agreements import AgreementRecord
 from app.schemas.agreements import (
@@ -315,3 +315,38 @@ async def test_live_adapter_creates_embedded_draft_with_pdf_and_basic_auth() -> 
     assert participant["type"] == "SIGNER"
     assert participant["role"] == "OWNER"
     assert participant["signingOrder"] == 1
+
+
+async def test_live_adapter_reads_document_status_and_metadata() -> None:
+    def handler(request: Request) -> Response:
+        assert request.url.path == "/documents/vendor-document-id"
+        return Response(
+            200,
+            json={
+                "id": "vendor-document-id",
+                "status": "ON_GOING",
+                "metadatas": [
+                    {"key": "aidos_signature_id", "value": "signature-id"},
+                    {"key": "aidos_signature_proof", "value": "proof"},
+                ],
+            },
+        )
+
+    async with AsyncClient(
+        base_url="https://api.modusign.co.kr",
+        transport=MockTransport(handler),
+    ) as http_client:
+        modusign = ModusignAdapter(
+            account_email="account@example.com",
+            api_key="test-key",
+            mode="live",
+            client=http_client,
+        )
+        document = await modusign.get_document_status(document_id="vendor-document-id")
+
+    assert document.id == "vendor-document-id"
+    assert document.status == ModusignStatus.ON_GOING
+    assert document.metadata == {
+        "aidos_signature_id": "signature-id",
+        "aidos_signature_proof": "proof",
+    }

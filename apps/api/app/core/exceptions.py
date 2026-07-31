@@ -81,6 +81,15 @@ class ModusignRequestFailed(ApiException):
         )
 
 
+class WebhookAuthenticationFailed(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=401,
+            code=ErrorCode.WEBHOOK_AUTH_FAILED,
+            message="웹훅 인증에 실패했습니다.",
+        )
+
+
 class PublicTokenExpired(ApiException):
     def __init__(self, *, code: ErrorCode) -> None:
         super().__init__(

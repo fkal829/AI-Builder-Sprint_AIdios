@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import httpx
 
+from app.core.enums import ModusignStatus
 from app.schemas.agreements import Agreement
 from app.schemas.signatures import SignatureSigner
 
@@ -19,6 +20,13 @@ class ModusignEmbeddedDraft:
     id: str
     editor_url: str
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class ModusignDocumentStatus:
+    id: str
+    status: ModusignStatus
+    metadata: dict[str, str]
 
 
 class ModusignAdapter:
@@ -46,6 +54,7 @@ class ModusignAdapter:
         agreement_pdf: bytes,
         signers: list[SignatureSigner],
         redirect_url: str,
+        metadata: dict[str, str] | None = None,
     ) -> ModusignEmbeddedDraft:
         if self._mode == "mock":
             draft_id = f"mock-modusign-draft-{uuid4()}"
@@ -73,6 +82,10 @@ class ModusignAdapter:
         }
         if redirect_url:
             payload["redirectUrl"] = redirect_url
+        if metadata:
+            payload["metadatas"] = [
+                {"key": key, "value": value} for key, value in sorted(metadata.items())
+            ]
         response_data = await self._request(
             "POST",
             "/embedded-drafts",
@@ -90,7 +103,32 @@ class ModusignAdapter:
         except (KeyError, ValueError, TypeError) as error:
             raise ModusignAdapterError("The vendor response had an unsupported shape.") from error
 
-    async def _request(self, method: str, path: str, *, json: dict[str, Any]) -> dict[str, Any]:
+    async def get_document_status(self, *, document_id: str) -> ModusignDocumentStatus:
+        if self._mode == "mock":
+            raise ModusignAdapterError("Mock document status must be supplied by a test double.")
+        response_data = await self._request("GET", f"/documents/{document_id}", json=None)
+        try:
+            metadata = {
+                str(item["key"]): str(item["value"])
+                for item in response_data.get("metadatas", [])
+                if isinstance(item, dict) and isinstance(item.get("key"), str)
+                and isinstance(item.get("value"), str)
+            }
+            return ModusignDocumentStatus(
+                id=str(response_data["id"]),
+                status=ModusignStatus(str(response_data["status"])),
+                metadata=metadata,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ModusignAdapterError("The vendor response had an unsupported shape.") from error
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         encoded = base64.b64encode(
             f"{self._account_email}:{self._api_key}".encode()
         ).decode("ascii")

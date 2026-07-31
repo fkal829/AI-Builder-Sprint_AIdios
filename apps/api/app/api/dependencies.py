@@ -24,6 +24,7 @@ from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
 from app.services.signatures import SignatureService
 from app.services.understood_terms import UnderstoodTermService
+from app.services.webhooks import ModusignWebhookService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -227,6 +228,18 @@ async def get_signature_service(
         storage=supabase,
         modusign=modusign,
         embedded_redirect_url=get_settings().modusign_embedded_redirect_url,
+        webhook_secret=get_settings().modusign_webhook_secret,
+    )
+
+
+async def get_modusign_webhook_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    modusign: Annotated[ModusignAdapter, Depends(get_modusign_adapter)],
+) -> ModusignWebhookService:
+    return ModusignWebhookService(
+        repository=supabase,
+        modusign=modusign,
+        webhook_secret=get_settings().modusign_webhook_secret,
     )
 
 

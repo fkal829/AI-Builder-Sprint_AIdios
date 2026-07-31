@@ -444,7 +444,11 @@ private Storage에 저장하며, 저장 경로·SHA-256·페이지 수·합의�
    hash fingerprint로 이벤트를 멱등 저장한다.
 3. 즉시 `204 No Content`를 반환한다.
 4. 문서 상태 조회와 계약 상태 전이는 응답 이후 비동기로 수행한다.
-5. 종료 상태를 오래되거나 순서가 뒤바뀐 이벤트로 되돌리지 않는다.
+5. 임베디드 초안에는 내부 Signature ID와 서버 secret으로 만든 HMAC 증명 metadata를 넣고,
+   상태 조회 응답의 metadata를 검증해 해당 Signature에만 외부 문서 ID를 연결한다.
+6. 종료 상태를 오래되거나 순서가 뒤바뀐 이벤트로 되돌리지 않는다. `COMPLETED`가
+   `ON_GOING`보다 먼저 관측되면 최신 조회 상태를 우선하여
+   `EDITING/READY_TO_SIGN → COMPLETED/SIGNED`를 한 트랜잭션으로 보정한다.
 
 기획안의 `WEBHOOK_DUPLICATED`는 중복 수신을 위한 내부 관측·테스트 분류다. 공개
 `ApiError.code`에는 포함하지 않으며 vendor 수신 endpoint는 공통 오류 envelope 대신
@@ -572,6 +576,7 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 | Signature `REQUESTING → FAILED` | SYSTEM의 PDF·초안 생성 실패 | 외부 문서 발송 전 실패 | 완료 시각과 `SIGNATURE_FAILED`, Contract는 `READY_TO_SIGN` 유지 |
 | Signature `EDITING → SIGNING` | SYSTEM의 외부 상태 반영 | 사용자가 편집기에서 발송, 인증 이벤트와 최신 원본 `ON_GOING` | 외부 문서 ID·fingerprint·`SIGNATURE_STARTED` |
 | Signature `EDITING / SIGNING → ABORTED / FAILED`, `SIGNING → COMPLETED` | SYSTEM의 외부 상태 반영 | 인증 이벤트와 최신 종료 상태 | 종료 상태를 과거 이벤트로 되돌리지 않음 |
+| Signature `EDITING → COMPLETED`, Contract `READY_TO_SIGN → SIGNED` | SYSTEM의 순서 역전 보정 | `COMPLETED` 최신 조회가 `ON_GOING`보다 먼저 처리됨 | `SIGNATURE_COMPLETED`를 한 트랜잭션으로 기록 |
 | Obligation `PENDING → SUBMITTED` | AGENCY의 증빙 제출 | 유효한 scope·resource·만료, 최초 제출 | URL·`submitted_at`, `AuditEvent` |
 | Obligation `SUBMITTED → APPROVED / DISPUTED` | OWNER의 명시적 검토 API 호출 | 소유권과 유효한 decision | `reviewed_at`, 지급 조건 표시, `AuditEvent` |
 

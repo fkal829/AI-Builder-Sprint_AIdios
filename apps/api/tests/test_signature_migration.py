@@ -26,3 +26,14 @@ def test_signature_migration_has_private_attempts_and_atomic_rpcs() -> None:
     assert "SIGNATURE_FAILED" in sql
     assert "modusign_document_id text unique" in sql
     assert "modusign_draft_id text unique" in sql
+
+
+def test_webhook_migration_has_deduplication_and_atomic_reconciliation() -> None:
+    migration = MIGRATION.with_name("20260730300000_add_modusign_webhook_reconciliation.sql")
+    sql = migration.read_text(encoding="utf-8")
+
+    assert "create table public.modusign_webhook_events" in sql
+    assert "deduplication_key text not null unique" in sql
+    assert "record_modusign_webhook_event" in sql
+    assert "apply_modusign_document_status" in sql
+    assert "SIGNATURE_COMPLETED" in sql

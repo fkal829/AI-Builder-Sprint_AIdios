@@ -208,13 +208,16 @@ POST /webhooks/modusign
 - 웹훅은 빠르게 `204 No Content`를 반환한다.
 - 이후 비동기로 최신 모두싸인 문서 상태를 조회하고 내부 상태에 반영한다.
 - 사용자가 임베디드 편집기에서 발송한 문서를 `modusign_draft_id`의 내부 Signature와
-  연결하고 외부 문서 ID를 저장한다.
+  연결하고 외부 문서 ID를 저장한다. 초안 생성 시 서명 시도 ID와 HMAC 증명 메타데이터를
+  넣어, 상태 조회 결과가 해당 시도에 속하는지 확인한다.
 - 과거 이벤트가 완료 상태를 되돌리지 않게 한다.
 
 완료 조건:
 
 - `ON_GOING`이면 Signature `EDITING → SIGNING`, Contract
   `READY_TO_SIGN → SIGNING`을 반영하고, `COMPLETED → SIGNED`를 처리한다.
+- `COMPLETED`가 시작 이벤트보다 먼저 처리되면 최신 문서 상태를 기준으로
+  `EDITING/READY_TO_SIGN → COMPLETED/SIGNED`를 원자적으로 보정한다.
 - `ABORTED`/`PROCESSING_FAILED`면 `SIGNING → READY_TO_SIGN`으로 되돌린다.
 - 중복 웹훅은 새 이벤트나 중복 상태 변경을 만들지 않는다.
 - 웹훅 중복·순서 역전·실패 시나리오 테스트를 통과한다.

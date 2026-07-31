@@ -4,13 +4,17 @@ from typing import Any
 from uuid import UUID
 
 from app.core.enums import IdempotencyOperation, PublicTokenScope
-from app.core.exceptions import ResourceNotFound
+from app.core.errors import ErrorCode
+from app.core.exceptions import PublicTokenExpired, ResourceNotFound
 from app.repositories.obligations import (
     EvidenceLinkCreateOutcome,
+    EvidenceSubmissionOutcome,
     ObligationRecord,
     ObligationRepository,
 )
+from app.schemas.adjustments import PublicSubmission
 from app.schemas.obligations import (
+    EvidenceSubmission,
     Obligation,
     PublicLink,
     PublicLinkCreate,
@@ -105,6 +109,30 @@ class ObligationService:
         )
         return result.response
 
+    async def submit_evidence(
+        self,
+        *,
+        token: str,
+        payload: EvidenceSubmission,
+    ) -> PublicSubmission:
+        public_tokens = self._public_token_service()
+        token_record = await public_tokens.resolve(
+            token=token,
+            expected_scope=PublicTokenScope.OBLIGATION_EVIDENCE,
+        )
+        outcome = await self._repository.submit_obligation_evidence_with_audit(
+            public_token=token_record,
+            evidence_url=str(payload.evidence_url),
+            submitted_at=self._utc_now(),
+        )
+        if outcome == EvidenceSubmissionOutcome.NOT_FOUND:
+            raise ResourceNotFound()
+        if outcome == EvidenceSubmissionOutcome.EXPIRED:
+            raise PublicTokenExpired(code=ErrorCode.OBLIGATION_LINK_EXPIRED)
+        if outcome == EvidenceSubmissionOutcome.INVALID_STATUS_TRANSITION:
+            raise InvalidStatusTransition("증빙은 PENDING 상태에서 한 번만 제출할 수 있습니다.")
+        return PublicSubmission(submitted=True)
+
     def _replay_evidence_link(self, stored: dict[str, Any]) -> PublicLink:
         _, public_tokens = self._link_dependencies()
         token = public_tokens.token_for_id(UUID(stored["token_id"]))
@@ -127,6 +155,11 @@ class ObligationService:
         ):
             raise RuntimeError("증빙 제출 링크 생성 의존성이 구성되지 않았습니다.")
         return self._idempotency, self._public_tokens
+
+    def _public_token_service(self) -> PublicTokenService:
+        if self._public_tokens is None:
+            raise RuntimeError("증빙 제출 공개 토큰 의존성이 구성되지 않았습니다.")
+        return self._public_tokens
 
     def _utc_now(self) -> datetime:
         value = self._now()

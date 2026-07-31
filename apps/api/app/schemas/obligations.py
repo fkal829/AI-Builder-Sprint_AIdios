@@ -2,7 +2,15 @@ from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    UrlConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.core.enums import ObligationStatus, PublicTokenScope
 
@@ -91,3 +99,15 @@ class PublicLink(BaseModel):
         if value.tzinfo is None:
             raise ValueError("증빙 제출 링크 만료 시각은 시간대 정보를 포함해야 합니다.")
         return value
+
+
+EvidenceUrl = Annotated[
+    AnyHttpUrl,
+    UrlConstraints(max_length=2048, allowed_schemes=["http", "https"]),
+]
+
+
+class EvidenceSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_url: EvidenceUrl

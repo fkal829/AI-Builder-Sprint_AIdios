@@ -53,7 +53,11 @@ from app.repositories.contracts import (
 )
 from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
-from app.repositories.obligations import EvidenceLinkCreateOutcome, ObligationRecord
+from app.repositories.obligations import (
+    EvidenceLinkCreateOutcome,
+    EvidenceSubmissionOutcome,
+    ObligationRecord,
+)
 from app.repositories.public_tokens import PublicTokenRecord
 from app.repositories.review_items import (
     ReviewItemSelectionOutcome,
@@ -872,6 +876,87 @@ class SupabaseAdapter:
         except (TypeError, ValueError) as error:
             raise ExternalStorageFailure(
                 "증빙 제출 링크 저장 결과를 확인할 수 없습니다."
+            ) from error
+
+    async def submit_obligation_evidence_with_audit(
+        self,
+        *,
+        public_token: PublicTokenRecord,
+        evidence_url: str,
+        submitted_at: datetime,
+    ) -> EvidenceSubmissionOutcome:
+        if public_token.scope != PublicTokenScope.OBLIGATION_EVIDENCE:
+            return EvidenceSubmissionOutcome.NOT_FOUND
+
+        if self.mode == "mock":
+            async with self._mock_lock:
+                stored_token = self._mock_public_tokens.get(public_token.token_hash)
+                if (
+                    stored_token is None
+                    or stored_token.id != public_token.id
+                    or stored_token.scope != PublicTokenScope.OBLIGATION_EVIDENCE
+                    or stored_token.resource_id != public_token.resource_id
+                    or stored_token.revoked_at is not None
+                ):
+                    return EvidenceSubmissionOutcome.NOT_FOUND
+                if stored_token.expires_at <= submitted_at:
+                    return EvidenceSubmissionOutcome.EXPIRED
+                obligation = next(
+                    (
+                        item
+                        for item in self._mock_obligations.values()
+                        if item.id == stored_token.resource_id
+                    ),
+                    None,
+                )
+                if obligation is None:
+                    return EvidenceSubmissionOutcome.NOT_FOUND
+                if obligation.status != ObligationStatus.PENDING:
+                    return EvidenceSubmissionOutcome.INVALID_STATUS_TRANSITION
+                self._mock_obligations[obligation.contract_id] = replace(
+                    obligation,
+                    evidence_url=evidence_url,
+                    status=ObligationStatus.SUBMITTED,
+                    submitted_at=submitted_at,
+                    reviewed_at=None,
+                    payment_condition_met=False,
+                    updated_at=submitted_at,
+                )
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=obligation.contract_id,
+                        event_type="EVIDENCE_SUBMITTED",
+                        actor_type="AGENCY",
+                        summary="대행사가 산출물 증빙 URL을 제출했습니다.",
+                        created_at=submitted_at,
+                    )
+                )
+                return EvidenceSubmissionOutcome.SUBMITTED
+
+        client = self._require_live_client()
+        params = {
+            "p_public_token_id": str(public_token.id),
+            "p_token_hash": public_token.token_hash,
+            "p_obligation_id": str(public_token.resource_id),
+            "p_evidence_url": evidence_url,
+            "p_submitted_at": submitted_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "submit_obligation_evidence_with_audit",
+                    params,
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("증빙 URL 제출 저장에 실패했습니다.") from error
+        payload = response.data[0] if isinstance(response.data, list) else response.data
+        try:
+            return EvidenceSubmissionOutcome(payload)
+        except (TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "증빙 URL 제출 저장 결과를 확인할 수 없습니다."
             ) from error
 
     async def list_audit_events(

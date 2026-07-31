@@ -40,3 +40,19 @@ def test_analysis_migration_preserves_json_null_and_canonical_guards() -> None:
     assert "signed_date = coalesce(" in sql
     assert "total_amount = coalesce(" in sql
     assert "on conflict (contract_id) do nothing" in sql
+
+
+def test_analysis_migration_creates_one_evidence_backed_obligation_atomically() -> None:
+    sql = MIGRATION.read_text(encoding="utf-8")
+
+    assert "contract_id uuid not null unique" in sql
+    assert "field = 'deliverable_due_date'" in sql
+    assert "value_type = 'DATE'" in sql
+    assert "source_type = 'CONTRACT_DOCUMENT'" in sql
+    assert "document_id = due.document_id" in sql
+    assert "source_page = due.source_page" in sql
+    assert "source_text = due.source_text" in sql
+    assert "field in ('advertising_channel', 'content_type', 'content_quantity')" in sql
+    assert "least(" in sql
+    assert "get diagnostics v_obligation_created = row_count" in sql
+    assert "if v_obligation_created = 1 then" in sql

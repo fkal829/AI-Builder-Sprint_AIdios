@@ -12,7 +12,7 @@ from app.adapters.solar import SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
 from app.adapters.upstage import UpstageAdapter, UpstageExtractionError
 from app.api.dependencies import get_analysis_service, get_supabase_adapter
-from app.core.enums import AnalysisStatus, ContractStatus, ExtractedField
+from app.core.enums import AnalysisStatus, ContractStatus, ExtractedField, ObligationStatus
 from app.main import app
 from app.repositories.analysis import AnalysisTaskRecord
 from app.services.analysis import AnalysisService
@@ -234,6 +234,11 @@ async def test_starts_idempotent_analysis_and_processes_mock_result(analysis_con
     assert obligation.source_page == 1
     assert obligation.source_text
     assert obligation.confidence > 0
+    assert obligation.status == ObligationStatus.PENDING
+    assert obligation.evidence_url is None
+    assert obligation.submitted_at is None
+    assert obligation.reviewed_at is None
+    assert obligation.payment_condition_met is False
     assert [event.event_type for event in repository.mock_audit_events].count(
         "ANALYSIS_STARTED"
     ) == 1

@@ -10,7 +10,7 @@ export default function Home() {
         <div className="text-[13px] font-medium text-gray500">
           부산 관광상권 소상공인용 AI 광고대행 계약 CLM
         </div>
-        <h1 className="mt-1 text-3xl font-black text-ink">안심홍보계약</h1>
+        <h1 className="mt-1 text-3xl font-black text-ink">단디계약</h1>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-gray700">
           읽지 못한 계약을 읽어주고, 하지 못한 말을 대신해준다. 내가 이해한 조건과
           실제 계약서를 AI가 비교하고, 조정 요청을 대신 작성해 전자서명으로

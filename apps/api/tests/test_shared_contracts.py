@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import yaml
+
 from app.core.enums import (
     AdjustmentRequestStatus,
     AnalysisStatus,
@@ -10,7 +12,9 @@ from app.core.enums import (
     InternalSignatureStatus,
     ModusignStatus,
     ObligationStatus,
+    PerformanceMetricVerificationStatus,
 )
+from app.schemas.performance import PerformanceExtractedPayload
 from app.services.state_machine import (
     ALLOWED_ADJUSTMENT_REQUEST_TRANSITIONS,
     ALLOWED_ANALYSIS_TASK_TRANSITIONS,
@@ -132,6 +136,102 @@ def test_review_schema_distinguishes_source_and_model_confidence() -> None:
         "source_document_id",
         "user_choice",
     } <= set(schema["required"])
+
+
+def test_performance_extracted_payload_schema_matches_runtime_and_openapi() -> None:
+    schema = json.loads(
+        (
+            SHARED_CONTRACTS
+            / "schemas"
+            / "performance-extracted-payload.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    runtime_schema = PerformanceExtractedPayload.model_json_schema()
+    openapi = yaml.safe_load(
+        (SHARED_CONTRACTS / "openapi" / "openapi.yaml").read_text(encoding="utf-8")
+    )["components"]["schemas"]["PerformanceExtractedPayload"]
+
+    expected_fields = {
+        "impressions",
+        "likes",
+        "comments",
+        "reach",
+        "saves",
+        "shares",
+        "follower_net_change",
+        "published_content_count",
+    }
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == expected_fields
+    assert set(schema["required"]) == expected_fields
+    assert set(runtime_schema["properties"]) == expected_fields
+    assert set(runtime_schema["required"]) == expected_fields
+    assert set(openapi["properties"]) == expected_fields
+    assert set(openapi["required"]) == expected_fields
+
+
+def test_performance_extracted_payload_schema_keeps_metric_boundaries() -> None:
+    schema = json.loads(
+        (
+            SHARED_CONTRACTS
+            / "schemas"
+            / "performance-extracted-payload.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    definitions = schema["$defs"]
+    openapi_definitions = yaml.safe_load(
+        (SHARED_CONTRACTS / "openapi" / "openapi.yaml").read_text(encoding="utf-8")
+    )["components"]["schemas"]
+    non_negative = definitions["PerformanceNonNegativeMetricCandidate"]
+    signed = definitions["PerformanceSignedMetricCandidate"]
+    required_candidate_fields = {
+        "value",
+        "source_page",
+        "source_text",
+        "confidence",
+        "verification_status",
+    }
+
+    assert non_negative["additionalProperties"] is False
+    assert signed["additionalProperties"] is False
+    assert set(non_negative["required"]) == required_candidate_fields
+    assert set(signed["required"]) == required_candidate_fields
+    assert non_negative["properties"]["value"]["minimum"] == 0
+    assert "minimum" not in signed["properties"]["value"]
+    assert schema["properties"]["published_content_count"] == {
+        "$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"
+    }
+    assert schema["properties"]["follower_net_change"] == {
+        "$ref": "#/$defs/PerformanceSignedMetricCandidate"
+    }
+    assert set(definitions["PerformanceMetricVerificationStatus"]["enum"]) == {
+        status.value for status in PerformanceMetricVerificationStatus
+    }
+
+    for name, definition in (
+        ("PerformanceNonNegativeMetricCandidate", non_negative),
+        ("PerformanceSignedMetricCandidate", signed),
+    ):
+        openapi_definition = openapi_definitions[name]
+        assert definition["additionalProperties"] == openapi_definition["additionalProperties"]
+        assert set(definition["properties"]) == set(openapi_definition["properties"])
+        assert set(definition["required"]) == set(openapi_definition["required"])
+        assert definition["properties"]["value"] == openapi_definition["properties"]["value"]
+        assert definition["allOf"] == openapi_definition["allOf"]
+
+    non_negative_rules = {
+        rule["if"]["properties"]["verification_status"]["const"]: rule["then"]
+        for rule in non_negative["allOf"]
+    }
+    assert non_negative_rules["NOT_FOUND"]["properties"] == {
+        "value": {"type": "null"},
+        "source_page": {"type": "null"},
+        "source_text": {"type": "null"},
+    }
+    assert non_negative_rules["NEEDS_CHECK"]["properties"]["source_page"] == {
+        "type": "integer",
+        "minimum": 1,
+    }
 
 
 def test_openapi_declares_security_and_separate_public_contracts() -> None:

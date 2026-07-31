@@ -174,6 +174,12 @@ Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서�
 각 작업의 Evaluator Loop는 다시 최대 2회로 제한한다. 기존 멱등 키 재호출은 최초 HTTP
 결과(보통 `202` 접수, 접수 자체 실패 시 `503`)를 재생할 뿐 새 작업을 만들지 않는다.
 비동기 `FAILED` 상태는 조회 API에서 확인하며 자동 무한 재시도는 하지 않는다.
+내구성 worker는 짧은 cutoff보다 오래된 `QUEUED`만 다시 처리하며, `PROCESSING`은
+별도 처리 timeout(기본 14,400초)을 넘긴 경우에만 실패로 마감한다. 해당 행을
+잠그고 `status=PROCESSING` 및 `updated_at <= cutoff`를 재검증한 뒤
+`FAILED/DOCUMENT_PARSE_FAILED`, 주 계약 문서와 선택 자료 `parse_status=FAILED`,
+`ANALYSIS_FAILED` 감사 이벤트를 한 트랜잭션에 기록한다. 계약은 `ANALYZING`을
+유지하므로 위 수동 재시작 규칙을 그대로 사용한다.
 
 ### 6.2 원문 근거
 
@@ -302,6 +308,15 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 `supporting_document_ids` 배열을 받는다. 선택 자료에서 얻은
 `DOCUMENTED_EXPLANATION` 값은 비교·표시에만 사용하고 canonical 값이나 대표 의무로
 승격하지 않는다. `AnalysisTask`는 실패한 경우에도 사용한 두 문서 ID 집합을 보존한다.
+
+같은 `field`의 계약 원문과 선택 자료 값은 서버가 `value_type`에 따라 결정적으로
+비교한다. 날짜는 ISO date, 금액·정수·비율은 정수, Boolean·갱신 유형은 enum,
+일반 TEXT는 공백·대소문자를 정규화한다. 계약과 모든 선택 자료의 근거가
+`VERIFIED`이고 선택 자료끼리 같은 값일 때만 `MISMATCH`를 확정한다. 선택 자료끼리
+충돌하거나 어느 한쪽 근거가 미검증이면 `NEEDS_CHECK`, 계약 원문이 `NOT_FOUND`이고
+선택 자료에 검증된 설명이 있으면 `NO_BASIS`로 둔다. 선택 자료의 `NOT_FOUND`만으로는
+비교 신호를 추가하지 않는다. 비교 항목의 `related_extracted_term_ids`는 계약 원문을
+먼저 두고 요청된 선택 자료 순서를 유지한다.
 
 분석 완료 시 같은 계약의 최신 `CONTRACT` 문서에서 나온 후보 중 다음 조건을 모두 만족한
 값만 비어 있는 `Contract.signed_date`, `start_date`, `end_date`,
@@ -468,6 +483,11 @@ private Storage에 저장하며, 저장 경로·SHA-256·페이지 수·합의�
   만들지 않고 확인 신호를 유지한다.
 - 자동 생성 후 별도 endpoint에서 사용자의 명시적 요청으로
   `OBLIGATION_EVIDENCE` scope 제출 링크를 만든다.
+- 증빙 제출 링크는 계약 상태가 `SIGNED` 또는 `IN_PROGRESS`이고 대표 의무가
+  `PENDING`일 때만 만든다. 링크 생성은 계약 상태를 자동으로 전환하지 않는다.
+- 증빙 제출 링크는 멱등 예약·요청 검증, 공개 토큰, 감사 이벤트, 안전한 재생값을 한
+  DB 트랜잭션에 저장한다. DB 커밋 뒤 응답이 유실되어도 같은 키 재시도는 최초 링크를
+  재생하며 토큰이나 감사 이벤트를 중복 생성하지 않는다.
 - 이행 목록 응답은 P0에서 빈 배열 또는 대표 항목 한 건만 반환한다.
 - 제목 또는 due date 근거가 없으면 대표 의무를 만들지 않고 확인 신호를 유지한다.
 - 증빙 URL은 길이 2,048 이하의 `http://` 또는 `https://` URL만 허용한다.

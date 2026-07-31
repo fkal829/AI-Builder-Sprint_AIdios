@@ -1,11 +1,7 @@
-"use client";
-
-import { useParams } from "next/navigation";
 import { AgencyShell } from "@/components/AgencyShell";
 
 /* 대행사 ③ 응답 완료 — 계정 유도 없음(무가입 토큰 접근이 핵심 포지션). */
 export default function AgencyDonePage() {
-  const { token } = useParams<{ token: string }>();
   return (
     <AgencyShell>
       <div className="rounded-xl border-2 border-ink bg-white p-6">
@@ -23,14 +19,9 @@ export default function AgencyDonePage() {
             산출물 등록도 필요하신가요?
           </div>
           <p className="mt-1 text-[11px] text-gray500">
-            합의·서명 이후 산출물 증빙 URL은 아래 링크로 제출하실 수 있어요.
+            합의·서명 이후 계약 요청자가 증빙 제출 전용 링크를 새로 보내드려요.
+            조정 요청 링크로는 증빙을 제출할 수 없습니다.
           </p>
-          <a
-            href={`/r/${token}/evidence`}
-            className="mt-2 inline-block text-[12px] font-bold text-amber700 underline underline-offset-2"
-          >
-            산출물 URL 제출하기 →
-          </a>
         </div>
       </div>
     </AgencyShell>

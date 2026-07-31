@@ -87,8 +87,11 @@ src/
 // export const adapter = USE_MOCK ? new MockAdapter() : new RealAdapter();
 ```
 
-현재는 대행사 공개 조정 응답 화면(`/r/[token]`)만 실 API 연동을 지원합니다. `.env.local`에
-다음을 설정하면 나머지 화면은 목업으로 유지하면서 해당 화면만 API를 호출합니다.
+현재는 대행사 공개 조정 응답 화면(`/r/[token]`)과 공개 증빙 제출 화면
+(`/r/[token]/evidence`)이 실 API 연동을 지원합니다. `.env.local`에 다음을 설정하면
+나머지 화면은 목업으로 유지하면서 두 공개 화면이 API를 호출합니다. 조정 응답 토큰의
+scope는 `ADJUSTMENT_RESPONSE`, 증빙 제출 토큰의 scope는 `OBLIGATION_EVIDENCE`이므로
+서로 재사용할 수 없으며, 증빙은 소유자가 별도로 발급한 증빙 제출 링크로 접근해야 합니다.
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000

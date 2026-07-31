@@ -39,9 +39,25 @@ class IdempotencyService:
         repository: IdempotencyRepository,
         *,
         now: Callable[[], datetime] | None = None,
+        completion_attempts: int = 3,
+        completion_retry_delay_seconds: float = 0.05,
+        pending_replay_attempts: int = 100,
+        pending_replay_delay_seconds: float = 0.02,
     ) -> None:
+        if completion_attempts < 1:
+            raise ValueError("Idempotency completion attempts must be positive.")
+        if completion_retry_delay_seconds < 0:
+            raise ValueError("Idempotency retry delay cannot be negative.")
+        if pending_replay_attempts < 1:
+            raise ValueError("Idempotency pending replay attempts must be positive.")
+        if pending_replay_delay_seconds < 0:
+            raise ValueError("Idempotency pending replay delay cannot be negative.")
         self._repository = repository
         self._now = now or (lambda: datetime.now(UTC))
+        self._completion_attempts = completion_attempts
+        self._completion_retry_delay_seconds = completion_retry_delay_seconds
+        self._pending_replay_attempts = pending_replay_attempts
+        self._pending_replay_delay_seconds = pending_replay_delay_seconds
 
     async def execute(
         self,
@@ -53,6 +69,9 @@ class IdempotencyService:
         request_payload: Any,
         perform: Callable[[], Awaitable[IdempotentOutcome[ResponseT]]],
         replay: Callable[[dict[str, Any]], ResponseT],
+        exception_outcome: (
+            Callable[[Exception], IdempotentOutcome[ResponseT] | None] | None
+        ) = None,
     ) -> IdempotentResult[ResponseT]:
         request_hash = request_fingerprint(request_payload)
         claim = await self._repository.claim_idempotency(
@@ -79,17 +98,23 @@ class IdempotencyService:
 
         try:
             outcome = await perform()
-            _ensure_safe_replay_payload(outcome.replay_payload)
-            await self._repository.complete_idempotency(
-                owner_id=owner_id,
-                operation=operation,
-                resource_id=resource_id,
-                key=key,
-                request_hash=request_hash,
-                response_status=outcome.status_code,
-                response_payload=outcome.replay_payload,
-            )
-        except Exception:
+        except Exception as error:
+            outcome = exception_outcome(error) if exception_outcome is not None else None
+            if outcome is not None:
+                _ensure_safe_replay_payload(outcome.replay_payload)
+                await self._complete_with_retry(
+                    owner_id=owner_id,
+                    operation=operation,
+                    resource_id=resource_id,
+                    key=key,
+                    request_hash=request_hash,
+                    outcome=outcome,
+                )
+                return IdempotentResult(
+                    status_code=outcome.status_code,
+                    response=outcome.response,
+                    replayed=False,
+                )
             await self._repository.abandon_idempotency(
                 owner_id=owner_id,
                 operation=operation,
@@ -98,11 +123,54 @@ class IdempotencyService:
                 request_hash=request_hash,
             )
             raise
+
+        # Once perform() has returned, it may already have committed a business
+        # transaction. Never abandon its reservation if replay persistence fails:
+        # deleting it would allow the same key to execute the side effect again.
+        _ensure_safe_replay_payload(outcome.replay_payload)
+        await self._complete_with_retry(
+            owner_id=owner_id,
+            operation=operation,
+            resource_id=resource_id,
+            key=key,
+            request_hash=request_hash,
+            outcome=outcome,
+        )
         return IdempotentResult(
             status_code=outcome.status_code,
             response=outcome.response,
             replayed=False,
         )
+
+    async def _complete_with_retry(
+        self,
+        *,
+        owner_id: UUID,
+        operation: IdempotencyOperation,
+        resource_id: UUID,
+        key: UUID,
+        request_hash: str,
+        outcome: IdempotentOutcome[Any],
+    ) -> None:
+        last_error: Exception | None = None
+        for attempt in range(self._completion_attempts):
+            try:
+                await self._repository.complete_idempotency(
+                    owner_id=owner_id,
+                    operation=operation,
+                    resource_id=resource_id,
+                    key=key,
+                    request_hash=request_hash,
+                    response_status=outcome.status_code,
+                    response_payload=outcome.replay_payload,
+                )
+                return
+            except Exception as error:
+                last_error = error
+                if attempt + 1 < self._completion_attempts:
+                    await asyncio.sleep(self._completion_retry_delay_seconds)
+        assert last_error is not None
+        raise last_error
 
     async def _wait_for_replay(
         self,
@@ -114,8 +182,8 @@ class IdempotencyService:
         request_hash: str,
         replay: Callable[[dict[str, Any]], ResponseT],
     ) -> IdempotentResult[ResponseT]:
-        for _ in range(100):
-            await asyncio.sleep(0.02)
+        for _ in range(self._pending_replay_attempts):
+            await asyncio.sleep(self._pending_replay_delay_seconds)
             record = await self._repository.get_idempotency(
                 owner_id=owner_id,
                 operation=operation,
@@ -128,7 +196,7 @@ class IdempotencyService:
                 raise IdempotencyConflict()
             if record.response_status is not None:
                 return _replay(record, request_hash=request_hash, replay=replay)
-        raise RuntimeError("The original idempotent request did not complete in time.")
+        raise IdempotencyConflict("같은 멱등 요청이 아직 처리 중입니다.")
 
 
 def request_fingerprint(payload: Any) -> str:

@@ -3,11 +3,78 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from fastapi.utils import generate_unique_id
 from starlette.responses import Response
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import ApiException
 from app.schemas.common import ApiError, ApiResponse
+
+CANONICAL_OPERATION_IDS = {
+    ("GET", "/health"): "healthCheck",
+    ("GET", "/contracts"): "listContracts",
+    ("POST", "/contracts"): "createContract",
+    ("GET", "/contracts/{contract_id}"): "getContract",
+    ("GET", "/contracts/{contract_id}/timeline"): "getContractTimeline",
+    ("PUT", "/contracts/{contract_id}/renewal-decision"): "saveRenewalDecision",
+    ("POST", "/contracts/{contract_id}/documents"): "uploadContractDocument",
+    (
+        "GET",
+        "/contracts/{contract_id}/documents/{document_id}/access",
+    ): "getDocumentAccess",
+    ("PUT", "/contracts/{contract_id}/understood-terms"): "saveUnderstoodTerms",
+    ("POST", "/contracts/{contract_id}/analysis"): "startAnalysis",
+    ("GET", "/contracts/{contract_id}/analysis"): "getAnalysis",
+    ("PATCH", "/contracts/{contract_id}/review-items/{item_id}"): "updateReviewItem",
+    ("POST", "/contracts/{contract_id}/adjustment-requests"): "createAdjustmentRequest",
+    (
+        "GET",
+        "/contracts/{contract_id}/adjustment-requests/{adjustment_request_id}",
+    ): "getOwnerAdjustmentRequest",
+    (
+        "POST",
+        "/contracts/{contract_id}/adjustment-requests/{adjustment_request_id}/send",
+    ): "sendAdjustmentRequest",
+    ("GET", "/public/adjustment-requests/{token}"): "getPublicAdjustmentRequest",
+    ("POST", "/public/adjustment-requests/{token}/open"): "openPublicAdjustmentRequest",
+    (
+        "POST",
+        "/public/adjustment-requests/{token}/responses",
+    ): "submitAdjustmentResponses",
+    ("POST", "/contracts/{contract_id}/adjustment-confirmation"): "confirmAdjustment",
+    ("POST", "/contracts/{contract_id}/agreement"): "createAgreement",
+    ("GET", "/contracts/{contract_id}/agreement"): "getAgreement",
+    (
+        "POST",
+        "/contracts/{contract_id}/signature-embedded-drafts",
+    ): "createSignatureEmbeddedDraft",
+    ("GET", "/contracts/{contract_id}/signature"): "getSignature",
+    ("GET", "/contracts/{contract_id}/obligations"): "listObligations",
+    (
+        "POST",
+        "/contracts/{contract_id}/obligations/{obligation_id}/evidence-link",
+    ): "createObligationEvidenceLink",
+    ("POST", "/public/obligations/{token}/evidence"): "submitObligationEvidence",
+    (
+        "PATCH",
+        "/contracts/{contract_id}/obligations/{obligation_id}",
+    ): "reviewObligation",
+    ("GET", "/dashboard"): "getDashboard",
+    ("POST", "/webhooks/modusign"): "receiveModusignWebhook",
+}
+
+NO_AUTOMATIC_VALIDATION_RESPONSE_OPERATION_IDS = {
+    "getPublicAdjustmentRequest",
+    "openPublicAdjustmentRequest",
+}
+PUBLIC_OPERATION_IDS = {
+    "healthCheck",
+    "getPublicAdjustmentRequest",
+    "openPublicAdjustmentRequest",
+    "submitAdjustmentResponses",
+    "submitObligationEvidence",
+}
 
 
 def new_request_id() -> str:
@@ -23,6 +90,53 @@ def set_no_store(response: Response) -> Response:
 
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def canonical_operation_id(route: APIRoute) -> str:
+    """Use the shared OpenAPI operationId for every registered public route."""
+
+    methods = route.methods - {"HEAD", "OPTIONS"}
+    if len(methods) != 1:
+        return generate_unique_id(route)
+
+    method = next(iter(methods))
+    path = route.path_format
+    operation_id = CANONICAL_OPERATION_IDS.get((method, path))
+    if operation_id is None:
+        matches = [
+            candidate
+            for (candidate_method, candidate_path), candidate in (CANONICAL_OPERATION_IDS.items())
+            if candidate_method == method and path.endswith(candidate_path)
+        ]
+        operation_id = matches[0] if len(matches) == 1 else None
+    return operation_id if operation_id is not None else generate_unique_id(route)
+
+
+def install_openapi_contract(app: FastAPI, *, server_url: str) -> None:
+    """Remove impossible generated responses from the canonical public contract."""
+
+    default_openapi = app.openapi
+
+    def canonical_openapi() -> dict:
+        schema = default_openapi()
+        schema["servers"] = [{"url": server_url}]
+        schema["security"] = [{"BearerAuth": []}]
+        for path_item in schema.get("paths", {}).values():
+            for method, operation in path_item.items():
+                if method not in {"get", "post", "put", "patch", "delete"}:
+                    continue
+                operation_id = operation.get("operationId")
+                if operation_id in NO_AUTOMATIC_VALIDATION_RESPONSE_OPERATION_IDS:
+                    operation.get("responses", {}).pop("422", None)
+                if operation_id in PUBLIC_OPERATION_IDS:
+                    operation["security"] = []
+                elif operation_id == "receiveModusignWebhook":
+                    operation["security"] = [{"ModusignWebhookSecret": []}]
+                else:
+                    operation.pop("security", None)
+        return schema
+
+    app.openapi = canonical_openapi
 
 
 def install_http_contract(app: FastAPI) -> None:

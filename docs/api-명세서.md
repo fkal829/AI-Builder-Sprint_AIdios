@@ -464,11 +464,22 @@ text 파일을 선택 자료로 받는다. 확장자만 신뢰하지 않고 MIME
 `DOCUMENTED_EXPLANATION`으로 비교·표시할 뿐 canonical 값이나 대표 의무로 승격하지
 않는다.
 
+같은 필드의 검증된 계약 원문과 선택 자료 값은 날짜·금액·정수·enum·정규화된 TEXT로
+결정 비교한다. 선택 자료끼리 값이 다르거나 어느 한쪽 근거가 미검증이면
+`NEEDS_CHECK`, 계약 원문에서 근거를 찾지 못하고 선택 자료에 검증된 설명이 있으면
+`NO_BASIS`로 표시하며 확정 불일치로 단정하지 않는다. 비교한 추출값 ID는 계약 원문을
+먼저 두고 선택 자료 요청 순서대로 `related_extracted_term_ids`에 연결한다.
+
 최신 작업이 `FAILED`이고 실행 중 작업이 없으면 사용자가 새 `Idempotency-Key`와 최신
 계약 문서 ID로 수동 재시작할 수 있다. 계약은 `ANALYZING`을 유지하고 새 `QUEUED`
 작업과 `ANALYSIS_RESTARTED` 감사 이벤트를 만든다. 기존 멱등 키 재호출은 최초 HTTP
 결과(보통 `202` 접수, 접수 자체 실패 시 `503`)를 재생하고 새 작업을 만들지 않는다.
 비동기 `FAILED` 상태는 조회 API에서 확인하며 자동 무한 재시도는 하지 않는다.
+별도 worker는 짧은 대기 cutoff보다 오래된 `QUEUED`만 다시 처리한다. 이미 시작한
+`PROCESSING`은 별도 처리 timeout(기본 14,400초)을 넘긴 경우에만 DB에서 잠그고
+상태·cutoff을 재검증한 뒤 `FAILED/DOCUMENT_PARSE_FAILED`, 주 계약 문서와 선택 자료
+`parse_status=FAILED`, `ANALYSIS_FAILED` 감사 이벤트를 원자적으로 기록한다.
+계약은 `ANALYZING`을 유지하므로 사용자가 위 명시적 재시작 경로를 사용한다.
 
 구현은 최초 접수에서 계약을 `ANALYZING`, 작업을 `QUEUED`로 저장하고 감사 이벤트를
 같은 트랜잭션에 기록한 뒤 `202`를 반환한다. 이후 백그라운드 작업이 private Storage
@@ -697,7 +708,7 @@ Solar 요청 실패, 출력 ID 불일치, 금지된 단정 표현 또는 입력�
   "data": {
     "id": "adjustment_request_uuid",
     "status": "SENT",
-    "public_url": "https://example.com/adjustments/raw-token",
+    "public_url": "https://example.com/r/raw-token",
     "expires_at": "2026-08-01T09:00:00Z"
   },
   "error": null,
@@ -1093,9 +1104,13 @@ P0에서는 계약당 대표 이행 항목을 최대 한 건만 반환하므로 
 ```
 
 응답의 `scope`는 `OBLIGATION_EVIDENCE`로 고정한다.
+계약 상태가 `SIGNED` 또는 `IN_PROGRESS`이고 대표 이행 항목이 `PENDING`일 때만 링크를
+생성한다. 링크 생성 자체는 계약을 `SIGNED → IN_PROGRESS`로 자동 전환하지 않는다.
 `expires_at`은 최초 성공 시각에 `expires_in_hours`를 더해 계산한다. 같은 멱등
 요청은 최초 `public_url`과 `expires_at`을 그대로 재생한다. 최초 생성 시
-`EVIDENCE_LINK_CREATED` 감사 이벤트를 같은 트랜잭션에 기록한다.
+멱등 예약·공개 토큰·안전한 재생값과 `EVIDENCE_LINK_CREATED` 감사 이벤트를 같은
+트랜잭션에 기록한다. DB 커밋 뒤 응답이 유실되어도 같은 키 재시도에서 최초 링크를
+재생하며 토큰과 감사 이벤트를 중복 생성하지 않는다.
 
 ### 7.4 대행사 증빙 URL 제출
 

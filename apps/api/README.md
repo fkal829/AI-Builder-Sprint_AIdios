@@ -22,6 +22,19 @@ uvicorn app.main:app --reload
 
 라우터에서 외부 API를 직접 호출하거나 계약 상태를 직접 변경하지 않습니다.
 
+## 공개 토큰 로그 보호
+
+애플리케이션은 Uvicorn access log에 포함되는
+`/api/v1/public/adjustment-requests/{token}`과
+`/api/v1/public/obligations/{token}`의 토큰 경로 구간을 `[REDACTED]`로 바꿉니다.
+원본 공개 토큰을 애플리케이션 로그에 직접 기록하지 않습니다.
+
+이 필터는 API 프로세스 안의 `uvicorn.access` logger에만 적용됩니다. Reverse proxy,
+load balancer, CDN의 access log는 애플리케이션보다 먼저 요청 URI를 기록하므로 해당
+계층에서도 위 두 공개 경로를 route template으로 기록하거나 토큰 구간을 마스킹해야
+합니다. 운영 배포 전에 프록시·플랫폼 로그에서 원본 공개 토큰이 남지 않는지 별도로
+검증해야 합니다.
+
 ## 문서 업로드·원문 접근·이해조건·분석 mock 모드
 
 기본 `SUPABASE_MODE=mock`은 외부 Supabase 없이 4.1 문서 업로드와 4.2 원문 임시
@@ -104,6 +117,30 @@ curl -X POST \
 수행합니다. 같은 멱등 키와 같은 요청은 최초 `202` 응답을 재생하고, 다른 요청은
 `409 IDEMPOTENCY_CONFLICT`로 거부합니다. mock 분석 결과도 `source_page`,
 `source_text`, `confidence` 필드를 유지하며 찾지 못한 값의 원문 필드는 `null`입니다.
+
+### 분석 작업 복구 worker
+
+`GET /contracts/{contract_id}/analysis`는 최근 상태만 조회하며 분석을 시작하거나 재개하지
+않습니다. 서버 종료 직후 남은 `QUEUED` 작업은 API 서버와 별도로 worker를 실행해
+복구합니다. 이미 시작한 `PROCESSING` 작업은 짧은 대기 cutoff으로 재실행하지 않고,
+별도 4시간 처리 timeout을 넘긴 경우에만 원자적으로 실패 처리해 명시적 재시작 경로를
+다시 엽니다.
+
+```bash
+cd apps/api
+python -m app.workers.analysis_recovery --once
+python -m app.workers.analysis_recovery --loop
+```
+
+worker는 `ANALYSIS_RECOVERY_STALE_AFTER_SECONDS`보다 오래된 작업을
+`ANALYSIS_RECOVERY_BATCH_SIZE`만큼 정렬해 읽습니다. 실제 처리 claim은 저장소의 조건부
+`QUEUED → PROCESSING` 전이로 이루어져 두 worker가 같은 작업을 처리하지 않습니다.
+또한 `ANALYSIS_RECOVERY_PROCESSING_TIMEOUT_SECONDS`(기본 14,400초)를 넘긴
+`PROCESSING`을 `FAILED/DOCUMENT_PARSE_FAILED`로 전이하고, 주 계약 문서와 선택 자료의 실패 상태와
+`ANALYSIS_FAILED` 감사 이벤트를 같은 DB 트랜잭션에 기록합니다. 활성 작업과의
+경쟁을 줄이기 위해 cutoff 행을 잠그고 상태와 시간을 다시 확인합니다.
+반복 실행 주기는 `ANALYSIS_RECOVERY_INTERVAL_SECONDS`(기본 30초)로 설정합니다.
+운영에서는 Supabase migration 적용 후 API와 별도 프로세스로 실행하세요.
 
 ## Upstage live 모드
 

@@ -63,7 +63,14 @@ class _FakeModusignStatusAdapter:
 
 
 @pytest.fixture
-async def lifecycle_context():
+async def lifecycle_context(monkeypatch):
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    # The upload path's deterministic PDF page counter is exercised directly;
+    # run only its thread handoff inline so the sandboxed test process does not
+    # leave Python's default executor waiting during event-loop shutdown.
+    monkeypatch.setattr("app.services.documents.asyncio.to_thread", run_inline)
     repository = SupabaseAdapter(
         mode="mock",
         url="",
@@ -414,8 +421,7 @@ async def test_representative_contract_flows_end_to_end_through_the_real_api(
     )
     assert started_webhook.status_code == 204
     assert (
-        repository.mock_signatures[signature_id].signature.status
-        == InternalSignatureStatus.SIGNING
+        repository.mock_signatures[signature_id].signature.status == InternalSignatureStatus.SIGNING
     )
     assert repository.mock_contracts[contract_id].status == ContractStatus.SIGNING
 
@@ -430,8 +436,7 @@ async def test_representative_contract_flows_end_to_end_through_the_real_api(
     )
     assert wrong_secret.status_code == 401
     assert (
-        repository.mock_signatures[signature_id].signature.status
-        == InternalSignatureStatus.SIGNING
+        repository.mock_signatures[signature_id].signature.status == InternalSignatureStatus.SIGNING
     )
 
     # Duplicate delivery of the same start event must not create a second
@@ -509,7 +514,5 @@ async def test_representative_contract_flows_end_to_end_through_the_real_api(
     assert renewal.status_code == 200
     assert renewal.json()["data"]["decision"] == "RENEW_SAME_TERMS"
 
-    dashboard_after_renewal_signal = await client.get(
-        "/api/v1/dashboard", headers=auth_headers()
-    )
+    dashboard_after_renewal_signal = await client.get("/api/v1/dashboard", headers=auth_headers())
     assert dashboard_after_renewal_signal.json()["data"]["expiring_soon"] == 1

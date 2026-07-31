@@ -36,7 +36,7 @@ type ApiPublicAdjustment = {
   items: { item_id: string; request_text: string }[];
 };
 
-class PublicApiError extends Error {
+export class PublicApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -57,6 +57,8 @@ export interface DataAdapter {
   openAdjustmentRequest(token: string): Promise<void>;
   /** POST /api/v1/public/adjustment-requests/{token}/responses */
   submitAdjustmentResponses(token: string, responses: PublicResponseInput[]): Promise<void>;
+  /** POST /api/v1/public/obligations/{token}/evidence */
+  submitObligationEvidence(token: string, evidenceUrl: string): Promise<void>;
 }
 
 /** 네트워크 지연 흉내 (분석 진행 화면 등에서 사용) */
@@ -89,6 +91,12 @@ class MockAdapter implements DataAdapter {
   async submitAdjustmentResponses(token: string, responses: PublicResponseInput[]) {
     void token;
     void responses;
+    await delay(240);
+  }
+
+  async submitObligationEvidence(token: string, evidenceUrl: string) {
+    void token;
+    void evidenceUrl;
     await delay(240);
   }
 }
@@ -135,6 +143,16 @@ class PublicApiAdapter extends MockAdapter {
         })),
       }),
     });
+  }
+
+  async submitObligationEvidence(token: string, evidenceUrl: string): Promise<void> {
+    await this.request<{ submitted: true }>(
+      `/api/v1/public/obligations/${encodeURIComponent(token)}/evidence`,
+      {
+        method: "POST",
+        body: JSON.stringify({ evidence_url: evidenceUrl }),
+      },
+    );
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

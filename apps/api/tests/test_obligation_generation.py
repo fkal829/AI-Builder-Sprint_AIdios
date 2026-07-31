@@ -96,9 +96,67 @@ def test_builds_deterministic_representative_obligation_from_one_excerpt() -> No
 def test_does_not_create_obligation_from_different_source_excerpts() -> None:
     terms = representative_terms()
     for index, term in enumerate(terms):
-        terms[index] = term.model_copy(
-            update={"source_text": f"서로 다른 산출물 근거 {index}"}
+        terms[index] = term.model_copy(update={"source_text": f"서로 다른 산출물 근거 {index}"})
+
+    draft = build_representative_obligation(
+        contract_id=CONTRACT_ID,
+        terms=terms,
+    )
+
+    assert draft is None
+
+
+def test_requires_all_four_representative_fields() -> None:
+    terms = representative_terms()
+
+    for missing_field in (
+        ExtractedField.ADVERTISING_CHANNEL,
+        ExtractedField.CONTENT_TYPE,
+        ExtractedField.CONTENT_QUANTITY,
+        ExtractedField.DELIVERABLE_DUE_DATE,
+    ):
+        draft = build_representative_obligation(
+            contract_id=CONTRACT_ID,
+            terms=[term for term in terms if term.field != missing_field],
         )
+
+        assert draft is None
+
+
+def test_requires_every_representative_field_to_be_verified() -> None:
+    terms = representative_terms()
+
+    for unverified_field in (
+        ExtractedField.ADVERTISING_CHANNEL,
+        ExtractedField.CONTENT_TYPE,
+        ExtractedField.CONTENT_QUANTITY,
+        ExtractedField.DELIVERABLE_DUE_DATE,
+    ):
+        changed = [
+            (
+                term.model_copy(update={"verification_status": VerificationStatus.NEEDS_CHECK})
+                if term.field == unverified_field
+                else term
+            )
+            for term in terms
+        ]
+
+        draft = build_representative_obligation(
+            contract_id=CONTRACT_ID,
+            terms=changed,
+        )
+
+        assert draft is None
+
+
+def test_rejects_ambiguous_duplicate_representative_field() -> None:
+    terms = representative_terms()
+    terms.append(
+        make_term(
+            field=ExtractedField.CONTENT_TYPE,
+            value="릴스",
+        )
+    )
 
     draft = build_representative_obligation(
         contract_id=CONTRACT_ID,
@@ -111,9 +169,7 @@ def test_does_not_create_obligation_from_different_source_excerpts() -> None:
 def test_keeps_confirmation_signal_when_verified_terms_are_not_coherent() -> None:
     terms = representative_terms()
     for index, term in enumerate(terms):
-        terms[index] = term.model_copy(
-            update={"source_text": f"서로 다른 산출물 근거 {index}"}
-        )
+        terms[index] = term.model_copy(update={"source_text": f"서로 다른 산출물 근거 {index}"})
 
     reviews = _build_review_items(
         contract_id=CONTRACT_ID,

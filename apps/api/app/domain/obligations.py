@@ -67,12 +67,9 @@ def build_representative_obligation(
             and term.source_page == due.source_page
             and term.source_text == due.source_text
         ]
-        if len(matches) > 1:
+        if len(matches) != 1:
             return None
-        if matches:
-            title_terms.append(matches[0])
-    if not title_terms:
-        return None
+        title_terms.append(matches[0])
 
     values = {
         term.field: (
@@ -82,9 +79,7 @@ def build_representative_obligation(
         )
         for term in title_terms
     }
-    title = " ".join(
-        values[field] for field in REPRESENTATIVE_TITLE_FIELDS if field in values
-    )
+    title = " ".join(values[field] for field in REPRESENTATIVE_TITLE_FIELDS if field in values)
     if not title:
         return None
 

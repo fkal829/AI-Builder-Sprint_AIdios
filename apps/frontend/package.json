@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "next": "16.2.12",
@@ -18,12 +19,15 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "brace-expansion": "file:vendor/brace-expansion-compat",
+    "brace-expansion-upstream": "npm:brace-expansion@5.0.9",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
+    "brace-expansion": "$brace-expansion",
     "postcss": "^8.5.18",
     "sharp": "^0.35.0"
   }

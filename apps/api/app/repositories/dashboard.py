@@ -1,35 +1,42 @@
-from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 from uuid import UUID
 
-from app.core.enums import ReviewItemStatus, ReviewSignalType
-from app.repositories.contracts import ContractRecord
-from app.repositories.obligations import ObligationRecord
+from app.core.enums import ReviewSignalType
+
+DASHBOARD_SIGNAL_TIE_BREAK = (
+    ReviewSignalType.MISMATCH,
+    ReviewSignalType.NO_BASIS,
+    ReviewSignalType.UNCLEAR,
+    ReviewSignalType.MISSING,
+    ReviewSignalType.NEEDS_CHECK,
+)
 
 
 @dataclass(frozen=True)
-class DashboardReviewItem:
-    """Narrow ReviewItem projection: only the fields the dashboard aggregates."""
-
-    contract_id: UUID
-    type: ReviewSignalType
-    status: ReviewItemStatus
+class DashboardRecord:
+    total: int
+    signing: int
+    in_progress: int
+    completed: int
+    expiring_soon: int
+    unresolved_signals: int
+    adjustment_requested_clauses: int
+    adjustment_agreed_clauses: int
+    adjustment_rejected_clauses: int
+    obligation_pending: int
+    obligation_submitted: int
+    obligation_approved: int
+    total_committed: int
+    payment_condition_met_amount: int
+    most_common_signal: ReviewSignalType | None
 
 
 class DashboardRepository(Protocol):
-    async def list(self, *, owner_id: UUID) -> Sequence[ContractRecord]: ...
-
-    async def list_dashboard_obligations(
-        self, *, owner_id: UUID
-    ) -> Sequence[ObligationRecord]: ...
-
-    async def list_dashboard_review_items(
-        self, *, owner_id: UUID
-    ) -> Sequence[DashboardReviewItem]: ...
-
-    async def list_dashboard_adjustment_request_item_counts(
-        self, *, owner_id: UUID
-    ) -> Sequence[int]:
-        """Item counts of non-DRAFT adjustment requests owned by owner_id."""
-        ...
+    async def get_dashboard(
+        self,
+        *,
+        owner_id: UUID,
+        today: date,
+    ) -> DashboardRecord: ...

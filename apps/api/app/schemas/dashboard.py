@@ -20,4 +20,4 @@ class Dashboard(BaseModel):
     obligation_approved: int = Field(ge=0)
     total_committed: int = Field(ge=0)
     payment_condition_met_amount: int = Field(ge=0)
-    most_common_signal: ReviewSignalType | None = None
+    most_common_signal: ReviewSignalType | None

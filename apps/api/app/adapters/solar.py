@@ -25,6 +25,8 @@ from app.schemas.analysis import (
 SOLAR_CHAT_PATH = "/v1/chat/completions"
 SOLAR_PROMPT_VERSION = "contract-review-copy-v1"
 COUNTERPROPOSAL_PROMPT_VERSION = "counterproposal-comparison-v1"
+DEFAULT_SOLAR_REVIEW_CHUNK_SIZE = 1
+MAX_SOLAR_REVIEW_CHUNK_SIZE = 4
 SOLAR_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 SOLAR_CONFIDENCE_LIMITATION = (
     "model_confidence는 Solar의 비보정 자기평가이며 법적 판단 정확도나 "
@@ -165,15 +167,25 @@ class SolarReviewAdapter:
         timeout_seconds: float = 120,
         model: str = "solar-pro3",
         retry_delay_seconds: float = 0.25,
+        review_chunk_size: int = DEFAULT_SOLAR_REVIEW_CHUNK_SIZE,
     ) -> None:
         if mode == "live" and not api_key:
             raise ValueError("UPSTAGE_MODE=live에는 UPSTAGE_API_KEY가 필요합니다.")
+        if (
+            isinstance(review_chunk_size, bool)
+            or not isinstance(review_chunk_size, int)
+            or not 1 <= review_chunk_size <= MAX_SOLAR_REVIEW_CHUNK_SIZE
+        ):
+            raise ValueError(
+                f"Solar 검토 chunk 크기는 1~{MAX_SOLAR_REVIEW_CHUNK_SIZE} 사이의 정수여야 합니다."
+            )
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.mode = mode
         self.timeout_seconds = timeout_seconds
         self.model = model
         self.retry_delay_seconds = retry_delay_seconds
+        self.review_chunk_size = review_chunk_size
 
     async def generate_review_content(
         self,
@@ -182,6 +194,19 @@ class SolarReviewAdapter:
     ) -> list[SolarReviewOutput]:
         if not items:
             return []
+        batch = SolarReviewBatchInput(items=items)
+        outputs: list[SolarReviewOutput] = []
+        for offset in range(0, len(batch.items), self.review_chunk_size):
+            chunk = batch.items[offset : offset + self.review_chunk_size]
+            outputs.extend(await self._generate_review_chunk(items=chunk))
+        _validate_review_output_sequence(inputs=batch.items, outputs=outputs)
+        return outputs
+
+    async def _generate_review_chunk(
+        self,
+        *,
+        items: list[SolarReviewInput],
+    ) -> list[SolarReviewOutput]:
         batch = SolarReviewBatchInput(items=items)
         if self.mode == "mock":
             outputs = [_mock_review_output(item) for item in batch.items]
@@ -253,11 +278,11 @@ class SolarReviewAdapter:
             if not isinstance(content, str):
                 raise TypeError("Solar message content must be a JSON string.")
             output = SolarReviewBatchOutput.model_validate_json(content)
-            outputs_by_id = {item.review_item_id: item for item in output.items}
-            requested_ids = [item.review_item_id for item in batch.items]
-            if set(outputs_by_id) != set(requested_ids):
-                raise ValueError("Solar 검토 출력 ID가 입력과 일치하지 않습니다.")
-            ordered = [outputs_by_id[item_id] for item_id in requested_ids]
+            ordered = list(output.items)
+            _validate_review_output_sequence(
+                inputs=batch.items,
+                outputs=ordered,
+            )
             _validate_no_invented_numbers(inputs=batch.items, outputs=ordered)
         except (IndexError, KeyError, TypeError, ValueError) as error:
             _log_run(
@@ -362,6 +387,9 @@ class SolarReviewAdapter:
             if not isinstance(content, str):
                 raise TypeError("Solar message content must be a JSON string.")
             output = CounterproposalComparisonBatchOutput.model_validate_json(content)
+            output_ids = [item.review_item_id for item in output.items]
+            if len(output_ids) != len(set(output_ids)):
+                raise ValueError("Solar 역제안 비교 출력 ID는 중복될 수 없습니다.")
             outputs_by_id = {item.review_item_id: item for item in output.items}
             requested_ids = [item.review_item_id for item in batch.items]
             if set(outputs_by_id) != set(requested_ids):
@@ -435,12 +463,9 @@ def _mock_review_output(item: SolarReviewInput) -> SolarReviewOutput:
             "조건이 빠진 것인지 상대방과 확인해 보세요."
         )
         accept = f"현재 계약서에 {label} 조건이 없는 상태를 그대로 수용합니다."
-        compromise = (
-            f"{label} 조건의 최소 범위와 확정 시점을 정해 상대방과 조정합니다."
-        )
+        compromise = f"{label} 조건의 최소 범위와 확정 시점을 정해 상대방과 조정합니다."
         request = (
-            f"{label} 조건의 주체·수량·기한·책임 범위를 계약서에 "
-            "구체적으로 적어 달라고 요청합니다."
+            f"{label} 조건의 주체·수량·기한·책임 범위를 계약서에 구체적으로 적어 달라고 요청합니다."
         )
         confidence = 0.82
     elif item.signal == ReviewSignalType.UNCLEAR:
@@ -449,25 +474,17 @@ def _mock_review_output(item: SolarReviewInput) -> SolarReviewOutput:
             f"현재 확인된 내용은 '{current}'입니다."
         )
         accept = f"현재 계약서의 불명확한 {label} 조건을 그대로 수용합니다."
-        compromise = (
-            f"{label} 조건이 바뀌는 기준과 확인 절차를 함께 정해 조정합니다."
-        )
-        request = (
-            f"{label} 조건의 적용 기준·주체·시점을 계약서에 명확히 적어 달라고 요청합니다."
-        )
+        compromise = f"{label} 조건이 바뀌는 기준과 확인 절차를 함께 정해 조정합니다."
+        request = f"{label} 조건의 적용 기준·주체·시점을 계약서에 명확히 적어 달라고 요청합니다."
         confidence = 0.76
     elif item.signal == ReviewSignalType.MISMATCH:
-        comparison = (
-            f" 사용자가 이해한 내용은 '{understood}'입니다." if understood else ""
-        )
+        comparison = f" 사용자가 이해한 내용은 '{understood}'입니다." if understood else ""
         explanation = (
             f"{item.deterministic_explanation}{comparison} "
             f"계약 원문에서 확인된 내용은 '{current}'이므로 두 조건을 나란히 확인해 보세요."
         )
         accept = f"사용자 이해와 달라도 계약 원문에 적힌 {label} 조건을 수용합니다."
-        compromise = (
-            f"{label} 조건의 차이를 확인하고 양쪽이 수용할 범위를 정해 조정합니다."
-        )
+        compromise = f"{label} 조건의 차이를 확인하고 양쪽이 수용할 범위를 정해 조정합니다."
         request = (
             f"{label} 조건을 합의한 내용과 같도록 계약 문구에 명확히 반영해 달라고 요청합니다."
         )
@@ -502,13 +519,9 @@ def _mock_counterproposal_output(
     counter_text = _short_text(item.counter_text, limit=260)
     reason = _short_text(item.reason, limit=220)
     if " ".join(item.request_text.split()) == " ".join(item.counter_text.split()):
-        changed_summary = (
-            f"역제안 문구 '{counter_text}'는 원 요청과 같은 내용을 유지합니다."
-        )
+        changed_summary = f"역제안 문구 '{counter_text}'는 원 요청과 같은 내용을 유지합니다."
     else:
-        changed_summary = (
-            f"원 요청 '{request_text}'에서 역제안 '{counter_text}'로 변경되었습니다."
-        )
+        changed_summary = f"원 요청 '{request_text}'에서 역제안 '{counter_text}'로 변경되었습니다."
     return GeneratedCounterproposalComparison(
         review_item_id=item.review_item_id,
         changed_summary=changed_summary,
@@ -528,6 +541,19 @@ def _short_text(value: str, *, limit: int) -> str:
     if len(normalized) <= limit:
         return normalized
     return f"{normalized[: limit - 1]}…"
+
+
+def _validate_review_output_sequence(
+    *,
+    inputs: list[SolarReviewInput],
+    outputs: list[SolarReviewOutput],
+) -> None:
+    requested_ids = [item.review_item_id for item in inputs]
+    output_ids = [item.review_item_id for item in outputs]
+    if len(output_ids) != len(set(output_ids)):
+        raise SolarReviewError("Solar 검토 출력 ID는 중복될 수 없습니다.")
+    if output_ids != requested_ids:
+        raise SolarReviewError("Solar 검토 출력 ID와 순서가 전체 입력과 일치하지 않습니다.")
 
 
 def _validate_no_invented_numbers(
@@ -568,9 +594,7 @@ def _validate_counterproposal_numbers(
     inputs_by_id = {item.review_item_id: item for item in inputs}
     for output in outputs:
         item = inputs_by_id[output.review_item_id]
-        input_text = " ".join(
-            [item.request_text, item.counter_text, item.reason]
-        )
+        input_text = " ".join([item.request_text, item.counter_text, item.reason])
         output_text = " ".join(
             [
                 output.changed_summary,

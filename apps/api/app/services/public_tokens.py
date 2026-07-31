@@ -2,10 +2,11 @@ import base64
 import hashlib
 import hmac
 import re
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from app.core.enums import PublicTokenScope
 from app.core.errors import ErrorCode
@@ -91,7 +92,9 @@ class PublicTokenService:
         normalized_expiry = _as_utc(expires_at)
         if normalized_expiry <= now:
             raise ValueError("Public token expiry must be in the future.")
-        token_id = uuid4()
+        # Keep the DB-compatible UUID envelope while retaining all 128 random
+        # bits; uuid4 reserves six version/variant bits and falls below policy.
+        token_id = UUID(bytes=secrets.token_bytes(16))
         token = self.token_for_id(token_id)
         record = PublicTokenRecord(
             id=token_id,

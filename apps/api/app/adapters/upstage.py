@@ -1,7 +1,10 @@
 import base64
 import json
+import logging
 import re
 from collections import defaultdict
+from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any, Literal
 
 import httpx
@@ -21,6 +24,7 @@ MOCK_EXTRACT_MODEL = "mock-information-extract-v1"
 HIGH_CONFIDENCE = 0.9
 LOW_CONFIDENCE = 0.4
 LOW_CONFIDENCE_THRESHOLD = 0.5
+logger = logging.getLogger(__name__)
 
 FIELD_DESCRIPTIONS: dict[ExtractedField, str] = {
     ExtractedField.CONTRACT_PARTY_OWNER: "소상공인 또는 광고주 계약 당사자명",
@@ -130,6 +134,35 @@ class UpstageExtractionError(RuntimeError):
     pass
 
 
+def _http_status_from_error(error: Exception) -> int | None:
+    response = getattr(error, "response", None)
+    status_code = getattr(response, "status_code", None)
+    return status_code if isinstance(status_code, int) else None
+
+
+def _log_upstage_run(
+    *,
+    run_type: str,
+    model: str,
+    started_at: str,
+    started: float,
+    status: str,
+    http_status: int | None,
+    schema_valid: bool,
+) -> None:
+    logger.info(
+        "upstage_%s_run model=%s started_at=%s status=%s http_status=%s "
+        "latency_ms=%d schema_valid=%s",
+        run_type,
+        model,
+        started_at,
+        status,
+        http_status,
+        round((perf_counter() - started) * 1000),
+        schema_valid,
+    )
+
+
 class UpstageAdapter:
     """Upstage Document Parse and Information Extract boundary."""
 
@@ -174,6 +207,8 @@ class UpstageAdapter:
                 model="local-utf8-text",
             )
 
+        started_at = datetime.now(UTC).isoformat()
+        started = perf_counter()
         try:
             async with httpx.AsyncClient(
                 base_url=self.base_url,
@@ -187,6 +222,15 @@ class UpstageAdapter:
                 )
                 response.raise_for_status()
         except (httpx.HTTPError, ValueError) as error:
+            _log_upstage_run(
+                run_type="parse",
+                model="document-parse",
+                started_at=started_at,
+                started=started,
+                status="failed",
+                http_status=_http_status_from_error(error),
+                schema_valid=False,
+            )
             raise UpstageDocumentParseError("문서 구조 분석에 실패했습니다.") from error
 
         try:
@@ -194,9 +238,27 @@ class UpstageAdapter:
             parsed_document = _parsed_document_from_document_parse(payload)
             if not parsed_document.pages:
                 raise ValueError("Document Parse returned no page text.")
-            return parsed_document
         except (TypeError, ValueError, json.JSONDecodeError) as error:
+            _log_upstage_run(
+                run_type="parse",
+                model="document-parse",
+                started_at=started_at,
+                started=started,
+                status="failed",
+                http_status=getattr(response, "status_code", 200),
+                schema_valid=False,
+            )
             raise UpstageDocumentParseError("문서 구조 분석 결과가 올바르지 않습니다.") from error
+        _log_upstage_run(
+            run_type="parse",
+            model=parsed_document.model,
+            started_at=started_at,
+            started=started,
+            status="completed",
+            http_status=getattr(response, "status_code", 200),
+            schema_valid=True,
+        )
+        return parsed_document
 
     async def extract_terms(
         self,
@@ -209,11 +271,20 @@ class UpstageAdapter:
         if self.mode == "mock":
             return _mock_terms(target_fields)
 
+        started_at = datetime.now(UTC).isoformat()
+        started = perf_counter()
         document_url = _document_data_url(content=content, content_type=content_type)
         if document_url is None:
-            raise UpstageExtractionError(
-                "Universal Extraction에서 처리할 수 없는 문서 형식입니다."
+            _log_upstage_run(
+                run_type="extract",
+                model=self.extract_model,
+                started_at=started_at,
+                started=started,
+                status="failed",
+                http_status=None,
+                schema_valid=False,
             )
+            raise UpstageExtractionError("Universal Extraction에서 처리할 수 없는 문서 형식입니다.")
         schema = _information_extract_schema(target_fields)
         body = {
             "model": self.extract_model,
@@ -253,6 +324,15 @@ class UpstageAdapter:
                 response = await client.post(UNIVERSAL_EXTRACTION_PATH, json=body)
                 response.raise_for_status()
         except (httpx.HTTPError, ValueError) as error:
+            _log_upstage_run(
+                run_type="extract",
+                model=self.extract_model,
+                started_at=started_at,
+                started=started,
+                status="failed",
+                http_status=_http_status_from_error(error),
+                schema_valid=False,
+            )
             raise UpstageExtractionError("계약 필드 추출에 실패했습니다.") from error
 
         try:
@@ -261,7 +341,7 @@ class UpstageAdapter:
             content_json = message["content"]
             extracted = json.loads(content_json)
             additional_values = _additional_values(message)
-            return _candidates_from_information_extract(
+            candidates = _candidates_from_information_extract(
                 extracted=extracted,
                 additional_values=additional_values,
                 target_fields=target_fields,
@@ -275,7 +355,26 @@ class UpstageAdapter:
             json.JSONDecodeError,
             ValidationError,
         ) as error:
+            _log_upstage_run(
+                run_type="extract",
+                model=self.extract_model,
+                started_at=started_at,
+                started=started,
+                status="failed",
+                http_status=getattr(response, "status_code", 200),
+                schema_valid=False,
+            )
             raise UpstageExtractionError("계약 필드 추출 결과가 스키마와 맞지 않습니다.") from error
+        _log_upstage_run(
+            run_type="extract",
+            model=self.extract_model,
+            started_at=started_at,
+            started=started,
+            status="completed",
+            http_status=getattr(response, "status_code", 200),
+            schema_valid=True,
+        )
+        return candidates
 
 
 def _parsed_document_from_document_parse(payload: dict[str, Any]) -> ParsedDocument:
@@ -374,13 +473,13 @@ def _information_extract_schema(
         properties[field.value] = {
             "type": property_type,
             "description": (
-                f"{FIELD_DESCRIPTIONS[field]}. "
-                "문서에서 확인되지 않으면 이 속성을 결과에서 생략"
+                f"{FIELD_DESCRIPTIONS[field]}. 문서에서 확인되지 않으면 이 속성을 결과에서 생략"
             ),
         }
     return {
         "type": "object",
         "properties": properties,
+        "additionalProperties": False,
     }
 
 
@@ -412,6 +511,10 @@ def _candidates_from_information_extract(
 ) -> list[ExtractedTermCandidate]:
     if not isinstance(extracted, dict):
         raise ValueError("Information Extract result must be an object.")
+    expected_fields = {field.value for field in target_fields}
+    unexpected_fields = set(extracted) - expected_fields
+    if unexpected_fields:
+        raise ValueError("Information Extract result contains unexpected fields.")
     pages = {page.number: page.text for page in parsed_document.pages}
     candidates: list[ExtractedTermCandidate] = []
     for field in target_fields:
@@ -450,17 +553,18 @@ def _candidates_from_information_extract(
             source_page = None
             source_text = None
 
-        if (
-            status == VerificationStatus.VERIFIED
-            and confidence <= LOW_CONFIDENCE_THRESHOLD
-        ):
+        if status == VerificationStatus.VERIFIED and confidence <= LOW_CONFIDENCE_THRESHOLD:
             status = VerificationStatus.NEEDS_CHECK
 
-        if field in {
-            ExtractedField.AUTO_RENEWAL,
-            ExtractedField.EARLY_TERMINATION_ALLOWED,
-            ExtractedField.CONTRACT_RENEWAL_TYPE,
-        } and value == "UNKNOWN":
+        if (
+            field
+            in {
+                ExtractedField.AUTO_RENEWAL,
+                ExtractedField.EARLY_TERMINATION_ALLOWED,
+                ExtractedField.CONTRACT_RENEWAL_TYPE,
+            }
+            and value == "UNKNOWN"
+        ):
             status = VerificationStatus.NEEDS_CHECK
             if source_page is None or source_text is None:
                 status = VerificationStatus.MISSING_EVIDENCE
@@ -525,10 +629,9 @@ def _source_text_from_location(
             and element_box[1] <= location_center[1] <= element_box[3]
         )
         overlaps = int(_boxes_overlap(location_box, element_box))
-        distance = (
-            ((element_box[0] + element_box[2]) / 2 - location_center[0]) ** 2
-            + ((element_box[1] + element_box[3]) / 2 - location_center[1]) ** 2
-        )
+        distance = ((element_box[0] + element_box[2]) / 2 - location_center[0]) ** 2 + (
+            (element_box[1] + element_box[3]) / 2 - location_center[1]
+        ) ** 2
         ranked.append((contains_center, overlaps, -distance, element))
     if not ranked:
         return None
@@ -554,10 +657,7 @@ def _boxes_overlap(
     second: tuple[float, float, float, float],
 ) -> bool:
     return not (
-        first[2] < second[0]
-        or second[2] < first[0]
-        or first[3] < second[1]
-        or second[3] < first[1]
+        first[2] < second[0] or second[2] < first[0] or first[3] < second[1] or second[3] < first[1]
     )
 
 

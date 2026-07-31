@@ -30,8 +30,18 @@ class ObligationRecord:
 
 class EvidenceLinkCreateOutcome(StrEnum):
     CREATED = "CREATED"
+    REPLAY = "REPLAY"
     NOT_FOUND = "NOT_FOUND"
     INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
+    IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
+    IDEMPOTENCY_PENDING = "IDEMPOTENCY_PENDING"
+
+
+@dataclass(frozen=True)
+class EvidenceLinkCreateResult:
+    outcome: EvidenceLinkCreateOutcome
+    token_id: UUID | None = None
+    expires_at: datetime | None = None
 
 
 class EvidenceSubmissionOutcome(StrEnum):
@@ -61,14 +71,16 @@ class ObligationRepository(Protocol):
         contract_id: UUID,
     ) -> Sequence[ObligationRecord] | None: ...
 
-    async def create_obligation_evidence_link_with_audit(
+    async def create_obligation_evidence_link_idempotent(
         self,
         *,
         owner_id: UUID,
         contract_id: UUID,
         obligation_id: UUID,
+        idempotency_key: UUID,
+        request_hash: str,
         public_token: PublicTokenRecord,
-    ) -> EvidenceLinkCreateOutcome: ...
+    ) -> EvidenceLinkCreateResult: ...
 
     async def submit_obligation_evidence_with_audit(
         self,

@@ -1,4 +1,3 @@
-import re
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID
@@ -19,6 +18,7 @@ from app.core.enums import (
     VerificationStatus,
 )
 from app.core.errors import ErrorCode
+from app.core.text_safety import contains_unsafe_legal_conclusion
 
 EXPECTED_VALUE_TYPES: dict[ExtractedField, ExtractedValueType] = {
     ExtractedField.CONTRACT_SIGNED_DATE: ExtractedValueType.DATE,
@@ -89,10 +89,14 @@ class ExtractedTermCandidate(StrictModel):
             ExtractedValueType.PERCENT,
         } and (not isinstance(self.value, int) or isinstance(self.value, bool)):
             raise ValueError(f"{self.value_type} 값은 정수여야 합니다.")
-        if self.value_type in {
-            ExtractedValueType.MONEY_KRW,
-            ExtractedValueType.INTEGER,
-        } and self.value < 0:
+        if (
+            self.value_type
+            in {
+                ExtractedValueType.MONEY_KRW,
+                ExtractedValueType.INTEGER,
+            }
+            and self.value < 0
+        ):
             raise ValueError("금액과 정수 값은 0 이상이어야 합니다.")
         if self.value_type == ExtractedValueType.PERCENT and not 0 <= self.value <= 100:
             raise ValueError("비율은 0부터 100 사이여야 합니다.")
@@ -223,16 +227,6 @@ class ReviewItem(StrictModel):
         return self
 
 
-UNSAFE_SOLAR_REVIEW_PATTERNS = (
-    r"사기(?:의심)?업체",
-    r"불법계약",
-    r"안전한업체",
-    r"승소(?:할)?가능",
-    r"승소확률",
-    r"법률자문.{0,12}(?:대체|대신)(?:합니다|한다|할수있|가능)",
-)
-
-
 class SolarReviewInput(StrictModel):
     review_item_id: UUID
     signal: ReviewSignalType
@@ -298,11 +292,7 @@ class SolarReviewOutput(StrictModel):
         }
         if len(suggestions) != 3:
             raise ValueError("Solar의 원안·절충·요청 문구는 서로 달라야 합니다.")
-        normalized = re.sub(r"[\W_]+", "", " ".join(text_values)).lower()
-        if any(
-            re.search(pattern, normalized)
-            for pattern in UNSAFE_SOLAR_REVIEW_PATTERNS
-        ):
+        if contains_unsafe_legal_conclusion(text_values):
             raise ValueError("Solar 검토 출력에 허용되지 않은 단정 표현이 있습니다.")
         return self
 
@@ -322,6 +312,45 @@ class Analysis(StrictModel):
     contract_id: UUID
     extracted_terms: list[ExtractedTerm]
     review_items: list[ReviewItem]
+
+    @model_validator(mode="after")
+    def validate_evidence_links(self) -> "Analysis":
+        term_ids = [term.id for term in self.extracted_terms]
+        if len(term_ids) != len(set(term_ids)):
+            raise ValueError("분석 결과의 추출값 ID는 중복될 수 없습니다.")
+
+        review_ids = [item.id for item in self.review_items]
+        if len(review_ids) != len(set(review_ids)):
+            raise ValueError("분석 결과의 검토 항목 ID는 중복될 수 없습니다.")
+
+        terms_by_id = {term.id: term for term in self.extracted_terms}
+        if any(term.contract_id != self.contract_id for term in self.extracted_terms):
+            raise ValueError("모든 추출값은 분석 결과와 같은 계약에 속해야 합니다.")
+
+        for item in self.review_items:
+            if item.contract_id != self.contract_id:
+                raise ValueError("모든 검토 항목은 분석 결과와 같은 계약에 속해야 합니다.")
+            try:
+                related_terms = [
+                    terms_by_id[term_id] for term_id in item.related_extracted_term_ids
+                ]
+            except KeyError as error:
+                raise ValueError(
+                    "검토 항목의 관련 근거는 같은 분석 결과의 추출값이어야 합니다."
+                ) from error
+
+            if item.source_document_id is None:
+                continue
+            if not any(
+                term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
+                and term.document_id == item.source_document_id
+                and term.source_page == item.source_page
+                and term.source_text == item.source_text
+                and term.confidence == item.source_confidence
+                for term in related_terms
+            ):
+                raise ValueError("검토 항목의 원문 근거는 연결된 계약 추출값과 일치해야 합니다.")
+        return self
 
 
 class ReviewItemUpdate(StrictModel):
@@ -357,6 +386,8 @@ class AnalysisTask(StrictModel):
     def validate_status_payload(self) -> "AnalysisTask":
         if len(set(self.supporting_document_ids)) != len(self.supporting_document_ids):
             raise ValueError("supporting_document_ids는 중복될 수 없습니다.")
+        if self.document_id in self.supporting_document_ids:
+            raise ValueError("주 계약 문서는 선택 자료에 포함할 수 없습니다.")
         if self.status == AnalysisStatus.QUEUED:
             if self.attempt_count != 0 or self.error_code is not None or self.result is not None:
                 raise ValueError("QUEUED 작업은 시도 전 상태여야 합니다.")
@@ -370,6 +401,19 @@ class AnalysisTask(StrictModel):
                 raise ValueError("COMPLETED 작업의 시도 횟수는 1~2여야 합니다.")
             if self.error_code is not None or self.result is None:
                 raise ValueError("완료된 분석 작업에는 결과만 필요합니다.")
+            if self.result.contract_id != self.contract_id:
+                raise ValueError("분석 결과는 작업과 같은 계약에 속해야 합니다.")
+            for term in self.result.extracted_terms:
+                if (
+                    term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT
+                    and term.document_id != self.document_id
+                ):
+                    raise ValueError("계약 원문 추출값은 분석 작업의 주 문서에 속해야 합니다.")
+                if (
+                    term.source_type == ExtractedSourceType.DOCUMENTED_EXPLANATION
+                    and term.document_id not in self.supporting_document_ids
+                ):
+                    raise ValueError("선택 자료 추출값은 분석 작업의 선택 문서에 속해야 합니다.")
         elif self.status == AnalysisStatus.FAILED:
             allowed_errors = {
                 ErrorCode.DOCUMENT_PARSE_FAILED,

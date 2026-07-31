@@ -19,20 +19,22 @@ set search_path = ''
 as $$
 declare
     v_status text;
+    v_contract_status text;
 begin
-    select obligation.status
-    into v_status
+    select obligation.status, contract.status
+    into v_status, v_contract_status
     from public.obligations obligation
     join public.contracts contract on contract.id = obligation.contract_id
     where obligation.id = p_obligation_id
       and obligation.contract_id = p_contract_id
       and contract.owner_id = p_owner_id
-    for update of obligation;
+    for update of obligation, contract;
 
     if not found then
         return 'NOT_FOUND';
     end if;
-    if v_status <> 'PENDING' then
+    if v_status <> 'PENDING'
+       or v_contract_status not in ('SIGNED', 'IN_PROGRESS') then
         return 'INVALID_STATUS_TRANSITION';
     end if;
     if p_token_scope <> 'OBLIGATION_EVIDENCE'

@@ -27,7 +27,12 @@ from app.services.signatures import SignatureService
 from app.services.understood_terms import UnderstoodTermService
 from app.services.webhooks import ModusignWebhookService
 
-bearer_scheme = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="BearerAuth",
+    bearerFormat="JWT",
+    description="소유자 API용 인증 토큰. 인증 공급자와 발급 방식은 구현 환경에서 결정한다.",
+)
 
 
 @lru_cache
@@ -152,13 +157,18 @@ async def get_contract_service(
     return ContractService(supabase)
 
 
+async def get_dashboard_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> DashboardService:
+    return DashboardService(repository=supabase)
+
+
 async def get_obligation_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> ObligationService:
     settings = get_settings()
     return ObligationService(
         supabase,
-        idempotency=IdempotencyService(supabase),
         public_tokens=PublicTokenService(
             supabase,
             signing_secret=settings.public_token_secret,
@@ -242,12 +252,6 @@ async def get_modusign_webhook_service(
         modusign=modusign,
         webhook_secret=get_settings().modusign_webhook_secret,
     )
-
-
-async def get_dashboard_service(
-    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
-) -> DashboardService:
-    return DashboardService(repository=supabase)
 
 
 async def get_current_owner_id(

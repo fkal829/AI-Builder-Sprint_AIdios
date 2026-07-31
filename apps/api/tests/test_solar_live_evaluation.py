@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -10,16 +11,14 @@ from evaluation.solar_live import (
     LiveSolarItemResult,
     LiveSolarReport,
     build_live_solar_inputs,
+    run_live_solar_review,
 )
 
 
 def test_builds_three_live_inputs_from_fixed_fictitious_cases() -> None:
     selected = build_live_solar_inputs(load_cases())
 
-    assert [
-        (target.field, target.signal)
-        for target, _, _ in selected
-    ] == [
+    assert [(target.field, target.signal) for target, _, _ in selected] == [
         (ExtractedField.CONTRACT_TOTAL_AMOUNT, ReviewSignalType.MISMATCH),
         (ExtractedField.CONTENT_QUANTITY, ReviewSignalType.UNCLEAR),
         (ExtractedField.SHOOTING_SAFETY, ReviewSignalType.NEEDS_CHECK),
@@ -63,9 +62,7 @@ def test_live_report_requires_easy_explanation_and_three_distinct_suggestions() 
     )
 
     assert report.mode == "LIVE_SOLAR_REVIEW"
-    assert report.items[0].output.review_item_id == UUID(
-        str(solar_input.review_item_id)
-    )
+    assert report.items[0].output.review_item_id == UUID(str(solar_input.review_item_id))
 
 
 @pytest.mark.parametrize(
@@ -98,3 +95,52 @@ def test_live_report_rejects_failed_validation_summary(
             three_distinct_suggestions_generated=three_distinct_suggestions_generated,
             items=[],
         )
+
+
+async def test_live_runner_uses_same_chunked_adapter_boundary_as_production(
+    monkeypatch,
+) -> None:
+    adapter_calls = []
+    fake_settings = SimpleNamespace(
+        upstage_api_key="test-key",
+        upstage_base_url="https://api.upstage.ai",
+        upstage_solar_timeout_seconds=120,
+        upstage_solar_model="solar-pro3",
+    )
+
+    class FakeSolarReviewAdapter:
+        review_chunk_size = 1
+
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def generate_review_content(self, *, items):
+            adapter_calls.append([item.review_item_id for item in items])
+            return [
+                SolarReviewOutput(
+                    review_item_id=item.review_item_id,
+                    plain_explanation="입력된 계약 조건을 직접 확인해야 합니다.",
+                    suggestion_accept="현재 계약 문구를 그대로 수용합니다.",
+                    suggestion_compromise="확인할 조건의 범위를 협의해 조정합니다.",
+                    suggestion_request="확인할 조건을 계약서에 명확히 적어 달라고 요청합니다.",
+                    self_reported_confidence=0.8,
+                    model_limitations="제공된 가상 계약 일부만 반영했습니다.",
+                )
+                for item in items
+            ]
+
+    monkeypatch.setattr(
+        "evaluation.solar_live.get_settings",
+        lambda: fake_settings,
+    )
+    monkeypatch.setattr(
+        "evaluation.solar_live.SolarReviewAdapter",
+        FakeSolarReviewAdapter,
+    )
+
+    report = await run_live_solar_review(cases=load_cases())
+
+    assert len(adapter_calls) == 1
+    assert len(adapter_calls[0]) == 3
+    assert report.request_count == 3
+    assert report.item_count == 3

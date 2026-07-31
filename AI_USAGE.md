@@ -110,6 +110,24 @@ mock Solar 문구는 항목별 필드와 신호를 반영하지만 실제 모델
 live 결과는 같은 계약 원문을 실제 Adapter로 실행한 뒤 모델·프롬프트 버전·실행일과
 함께 별도로 공개한다.
 
+## 2026-07-31 Solar 검토 문구 live 확인
+
+고정 평가의 가상 계약 중 총액 불일치, 모호한 산출물 수량, 촬영 안전 책임 3건으로
+Solar `POST /v1/chat/completions`를 실제 호출했다. 요청 모델은 `solar-pro3`,
+프롬프트 버전은 `contract-review-copy-v1`이다.
+
+- 입력을 한 건씩 분리한 실제 요청 3회 성공
+- 응답 3건 모두 strict JSON Schema와 Pydantic 스키마 검증 통과
+- 쉬운 설명 3/3 생성
+- 원안 수용·절충·요청 문구 3종 3/3 생성 및 항목별 상호 구분 확인
+- 입력 ID 일치, 입력에 없는 숫자, 금지 단정 표현 검사 통과
+
+최초 3건 배치 요청은 120초 timeout 뒤 한 번 재시도했지만 `ReadTimeout`으로
+실패했다. 한 건씩 나눈 호출은 모두 성공했으므로 실제 endpoint와 응답 계약 연동은
+확인했지만, 3건 비스트리밍 배치가 현재 timeout 안에서 안정적이라는 증거는 아니다.
+검증된 생성 문구와 실패·재시도 내역은
+`fixtures/evaluation/SOLAR_LIVE_RESULTS.md`에 기록한다.
+
 ## 2026-07-30 live 확인
 
 가상 샘플 `apps/frontend/public/sample-contract.pdf`로 명시적 live 확인을 수행했다.
@@ -133,8 +151,8 @@ live 결과는 같은 계약 원문을 실제 Adapter로 실행한 뒤 모델·�
 아니다. 기획안의 목표 지표는 `fixtures/evaluation/`의 고정 10건 평가를 실행한 뒤
 별도로 기록한다.
 
-이 2026-07-30 확인은 Solar 검토 문구 단계가 추가되기 전 수행한 기록이므로
-`/v1/chat/completions` live 성공을 의미하지 않는다.
+이 2026-07-30 확인 자체는 Solar 검토 문구 단계가 추가되기 전 수행한 기록이다.
+Solar `/v1/chat/completions`의 새 live 성공 근거는 위 2026-07-31 기록을 따른다.
 
 ## 보안
 

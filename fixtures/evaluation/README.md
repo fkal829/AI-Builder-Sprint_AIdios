@@ -38,6 +38,17 @@ cd apps/api
 `RESULTS.md`는 실행기가 생성하는 Markdown과 정확히 일치해야 하며 테스트가 이를
 검증한다.
 
+Solar 검토 문구 live 검증은 외부 호출과 비용이 발생하므로 일반 평가와 분리한다.
+`apps/api/.env`에 `UPSTAGE_API_KEY`를 설정하고 명시적으로 실행한다.
+
+```bash
+cd apps/api
+.venv/bin/python -m evaluation.solar_live --confirm-live
+```
+
+2026-07-31 실제 호출의 검증 문구와 실패·재시도 결과는
+`SOLAR_LIVE_RESULTS.md`에 기록되어 있다.
+
 ## 지표 정의
 
 - 핵심 필드 추출 정확도: 정답 필드 값과 오프라인 추출 값의 exact match 비율

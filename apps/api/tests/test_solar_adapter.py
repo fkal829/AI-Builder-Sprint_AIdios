@@ -335,6 +335,40 @@ async def test_live_timeout_after_retry_maps_to_solar_review_error(monkeypatch) 
     assert len(FakeAsyncClient.calls) == 2
 
 
+async def test_live_rejects_malformed_json_content(monkeypatch) -> None:
+    FakeAsyncClient.calls = []
+    request = httpx.Request("POST", f"https://api.upstage.ai{SOLAR_CHAT_PATH}")
+    FakeAsyncClient.responses = [
+        httpx.Response(
+            200,
+            request=request,
+            json={
+                "model": "solar-pro3",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": '{"items": [',
+                        }
+                    }
+                ],
+            },
+        )
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    adapter = SolarReviewAdapter(
+        mode="live",
+        api_key="test-key",
+        base_url="https://api.upstage.ai",
+        retry_delay_seconds=0,
+    )
+
+    with pytest.raises(SolarReviewError):
+        await adapter.generate_review_content(items=[make_input()])
+
+    assert len(FakeAsyncClient.calls) == 1
+
+
 @pytest.mark.parametrize(
     "invalid_output",
     [

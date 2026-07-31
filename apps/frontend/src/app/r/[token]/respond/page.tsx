@@ -91,10 +91,39 @@ export default function AgencyRespondPage() {
                 key={it.clauseId}
                 className="rounded-xl border border-neutral200 bg-white p-4"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <p className="text-[13px] font-bold text-ink">
-                    “{it.requestText}”
+                {/* 원본 계약서 — 무엇이 바뀌는 요청인지 판단할 근거 */}
+                <div className="rounded-lg bg-subtle px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-neutral500">
+                      원본 계약서
+                    </span>
+                    {it.sourcePage && (
+                      <span className="flex-none text-[10px] text-neutral500">
+                        원계약 {it.sourcePage}쪽
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed text-neutral700">
+                    {it.beforeText
+                      ? `“${it.beforeText}”`
+                      : "원계약에서 확인되지 않아 추가 확인이 필요합니다."}
                   </p>
+                </div>
+
+                <div className="py-1 text-center text-[11px] text-neutral400">
+                  ↓
+                </div>
+
+                {/* 변경사항 확인 — 사장님이 보낸 요청 문구 */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-brand700">
+                      변경사항 확인
+                    </span>
+                    <p className="mt-1 text-[13px] font-bold text-ink">
+                      “{it.requestText}”
+                    </p>
+                  </div>
                   {it.officialBasis && (
                     <span className="flex-none rounded-full bg-neutral100 px-2 py-1 text-[10px] text-neutral700">
                       근거 있음

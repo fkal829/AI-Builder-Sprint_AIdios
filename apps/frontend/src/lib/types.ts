@@ -247,6 +247,9 @@ export interface AdjustmentRequestPublic {
     clauseId: string;
     requestText: string;
     officialBasis: string | null;
+    /** 원계약 문구와 그 페이지 — 목업에서만 채운다. 공개 API에는 아직 없다. */
+    beforeText?: string;
+    sourcePage?: number;
   }[];
 }
 

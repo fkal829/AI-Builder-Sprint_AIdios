@@ -246,3 +246,17 @@ class ReviewItemStatus(StrEnum):
     SENT = "SENT"
     RESOLVED = "RESOLVED"
     KEPT_ORIGINAL = "KEPT_ORIGINAL"
+
+
+class PerformanceFlagType(StrEnum):
+    DELIVERABLE_COUNT_SHORTFALL = "DELIVERABLE_COUNT_SHORTFALL"
+    ENGAGEMENT_RATE_DROP = "ENGAGEMENT_RATE_DROP"
+    OWNER_REPORTED_ISSUE = "OWNER_REPORTED_ISSUE"
+
+
+class PerformanceRevisionStatus(StrEnum):
+    """A confirmed report revision's outcome. Distinct from the report-level
+    UPLOADED/EXTRACTED states (P2-B), which precede any revision existing."""
+
+    CONFIRMED = "CONFIRMED"
+    FLAGGED = "FLAGGED"

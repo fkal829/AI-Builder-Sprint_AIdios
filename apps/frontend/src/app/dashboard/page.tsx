@@ -90,6 +90,20 @@ export default function DashboardPage() {
                 ))}
             </div>
           </section>
+
+          {/* 광고효과 모아보기 진입 */}
+          <Link
+            href="/performance"
+            className="flex items-center justify-between gap-4 rounded-2xl border border-neutral200 bg-white px-5 py-4 transition hover:border-brand400"
+          >
+            <div className="min-w-0">
+              <div className="text-[15px] font-bold text-ink">광고효과 모아보기</div>
+              <p className="mt-0.5 text-[12px] text-neutral500">
+                계약마다 받은 리포트를 한데 모아, 약속한 조건대로 진행되는지 확인해요.
+              </p>
+            </div>
+            <span className="flex-none text-neutral400">→</span>
+          </Link>
         </div>
       )}
     </AppScreen>

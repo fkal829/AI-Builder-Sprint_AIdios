@@ -55,6 +55,27 @@ Solar timeout, HTTP 오류, 잘못된 JSON, 스키마 오류, 출력 ID 불일�
 `429`와 일시적인 전송·서버 오류만 한 번 재시도한다. 이 호출은 추출 Evaluator Loop의
 `attempt_count`에 포함하지 않는다.
 
+## Solar 역제안 비교
+
+5.2 소유자용 조정 상세 조회는 `apps/api/app/services/counterproposal.py`의
+`CounterproposalComparator`를 사용한다. 수락·거절 설명은 서버 코드가 결정적으로
+만들고, 역제안만 저장된 실제 요청 문구, 대행사의 역제안 문구와 사유를 Solar Chat에
+전달한다.
+
+live 요청은 `counterproposal-comparison-v1` 프롬프트와 strict JSON Schema를 사용해
+다음 필드만 생성한다.
+
+- `changed_summary`
+- `remaining_checks`
+- `final_confirmation`
+
+출력 UUID는 입력 UUID와 정확히 일치해야 하며 빈 확인사항, 추가 필드, 금지된 법적·
+신뢰성 단정과 입력에 없는 숫자는 거부한다. 비교 결과는 조정 상태를 변경하거나
+역제안을 자동 수락·재요청하지 않는다. Solar 요청 또는 검증 실패는
+`502 ANALYSIS_SCHEMA_INVALID`로 반환하며 먼저 저장된 대행사 응답은 유지한다.
+mock 결과는 실제 요청·역제안·사유를 반영한 규칙 기반 예시이고 실제 Solar 응답이
+아니다.
+
 ## Evaluator Loop
 
 1. Document Parse 결과와 1차 추출 결과를 Pydantic 스키마로 검증한다.

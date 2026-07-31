@@ -4,8 +4,12 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.adapters.solar import SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
-from app.api.dependencies import get_supabase_adapter
+from app.api.dependencies import (
+    get_counterproposal_comparator,
+    get_supabase_adapter,
+)
 from app.core.enums import (
     AdjustmentRequestStatus,
     ContractStatus,
@@ -14,6 +18,7 @@ from app.core.enums import (
 )
 from app.main import app
 from app.repositories.adjustments import ReviewItemForAdjustment
+from app.services.counterproposal import CounterproposalComparator
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000023")
 DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000042")
@@ -35,7 +40,17 @@ async def adjustment_context():
     async def override_adapter():
         return adapter
 
+    async def override_comparator():
+        return CounterproposalComparator(
+            SolarReviewAdapter(
+                mode="mock",
+                api_key="",
+                base_url="https://api.upstage.ai",
+            )
+        )
+
     app.dependency_overrides[get_supabase_adapter] = override_adapter
+    app.dependency_overrides[get_counterproposal_comparator] = override_comparator
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"

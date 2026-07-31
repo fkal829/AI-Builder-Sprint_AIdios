@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.core.enums import ExtractedField
+from app.schemas.adjustments import (
+    CounterproposalComparisonInput,
+    GeneratedCounterproposalComparison,
+)
 from app.schemas.analysis import (
     ExtractedTermCandidate,
     SolarReviewInput,
@@ -53,6 +57,14 @@ class ContractReviewAdapter(Protocol):
         *,
         items: list[SolarReviewInput],
     ) -> list[SolarReviewOutput]: ...
+
+
+class CounterproposalComparisonAdapter(Protocol):
+    async def compare_counterproposals(
+        self,
+        *,
+        items: list[CounterproposalComparisonInput],
+    ) -> list[GeneratedCounterproposalComparison]: ...
 
 
 class SignatureAdapter(Protocol):

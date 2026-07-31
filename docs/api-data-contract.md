@@ -76,7 +76,7 @@ minimum: 0
 | `ADJUSTMENT_LINK_EXPIRED` | 조정 링크 만료 |
 | `OBLIGATION_LINK_EXPIRED` | 산출물 증빙 링크 만료 |
 | `INVALID_STATUS_TRANSITION` | 허용되지 않은 상태 전환 또는 중복 제출 |
-| `MODUSIGN_REQUEST_FAILED` | 모두싸인 서명 요청 실패 |
+| `MODUSIGN_REQUEST_FAILED` | 모두싸인 임베디드 초안 또는 후속 문서 처리 실패 |
 | `WEBHOOK_AUTH_FAILED` | 웹훅 비밀 헤더 검증 실패 |
 | `UNAUTHORIZED_ACCESS` | 인증 또는 객체 권한 검증 실패 |
 | `IDEMPOTENCY_CONFLICT` | 같은 멱등 키에 다른 요청 사용 |
@@ -124,14 +124,17 @@ Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서�
 - 조정 요청 초안 생성
 - 조정 링크 활성화
 - 합의서 생성
-- 모두싸인 서명 요청
+- 모두싸인 임베디드 서명 초안 생성
 - 산출물 증빙 링크 생성
 
 멱등 키는 소유자·operation·resource 범위로 관리한다.
 
 - 같은 키와 같은 요청: 최초 상태 코드와 응답을 재생한다.
 - 같은 키와 다른 요청: `409 IDEMPOTENCY_CONFLICT`를 반환한다.
-- 서명 요청처럼 외부 부작용이 있는 호출은 외부 문서 ID와 DB 유일성 제약도 함께 사용한다.
+- 임베디드 초안 생성 응답의 `editor_url`은 민감한 단기 URL이라 멱등 응답에 저장하지
+  않는다. 같은 키의 재호출은 URL을 재생·재발급하지 않고 `409`를 반환한다.
+- 외부 부작용이 있는 호출은 `modusign_draft_id`·외부 문서 ID와 DB 유일성 제약도
+  함께 사용한다.
 
 ## 5. 정렬 규칙
 
@@ -372,17 +375,34 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 
 ## 8. 모두싸인 계약
 
-- 서명 요청에는 확정된 `agreement_id`, `agreement_version`, `confirmed=true`가 필요하다.
+> **C-7 변경(2026-07-31):** 템플릿 기반 즉시 발송을 제거하고
+> `POST /contracts/{contract_id}/signature-embedded-drafts` 임베디드 초안 생성으로
+> 대체했다. 초안 API는 외부 서명 요청을 발송하지 않으며 사용자가 모두싸인 편집기에서
+> 서명란을 배치하고 직접 발송한다.
+
+- 임베디드 초안 생성에는 확정된 `agreement_id`, `agreement_version`,
+  `confirmed=true`가 필요하다.
 - 서명자는 `OWNER` 한 명과 `AGENCY` 한 명으로 정확히 두 명이다.
 - 이름은 2~30자다.
 - `EMAIL`은 email 형식, `KAKAO`는 하이픈 없는 국내 휴대전화 번호 형식을 사용한다.
 - 두 서명자의 역할과 연락처는 중복될 수 없다.
-- 연락처 원문은 모두싸인 Adapter 전달에만 사용하고 응답과 로그에 다시 노출하지 않는다.
+- 연락처 원문은 모두싸인 Adapter 전달에만 사용하고 API 응답·DB·로그에 저장하지 않는다.
+- 서버는 확정 합의서를 메모리에서 PDF로 생성하고 모두싸인 `POST /embedded-drafts`의
+  `file.base64`, `file.extension=pdf`로 전달한다. 합의서 원문을 로컬 임시 파일이나
+  로그에 남기지 않는다.
+- 응답은 `signature`, `editor_url`, `expires_at`을 가진다. `editor_url`은 약 2시간
+  유효한 민감 URL이며 `Cache-Control: no-store`로 한 번만 반환하고 DB·로그·멱등
+  재생값에 저장하지 않는다.
+- 임베디드 초안 생성 직후 내부 상태는 `EDITING`, 원본 상태는 `DRAFT`이고
+  `modusign_draft_id`를 저장한다. `modusign_document_id`와 `last_event_id`는 아직
+  `null`이며 Contract는 `READY_TO_SIGN`을 유지한다.
+- 사용자가 임베디드 편집기에서 직접 발송한 뒤 인증된 모두싸인 이벤트·최신 조회 결과로
+  외부 문서 ID를 연결하고 Contract `READY_TO_SIGN → SIGNING`을 처리한다.
 - 모두싸인 원본 상태 `modusign_status`와 내부 `Signature.status`를 분리한다.
 - 원본 상태 enum은 `DRAFT`, `SCHEDULED`, `ON_PROCESSING`, `ON_GOING`,
-  `COMPLETED`, `ABORTED`, `PROCESSING_FAILED`를 보존한다. 정상 P0 요청 흐름은
-  `ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED`이며
-  `DRAFT`, `SCHEDULED`를 정상 흐름에 임의로 끼워 넣지 않는다.
+  `COMPLETED`, `ABORTED`, `PROCESSING_FAILED`를 보존한다. 임베디드 P0 흐름은
+  `DRAFT → ON_PROCESSING → ON_GOING → COMPLETED / ABORTED /
+  PROCESSING_FAILED`다.
 - `Signature`는 내부 `id`와 마지막으로 반영한 웹훅 `last_event_id`를 보존한다.
   실제 payload에서 안정적인 vendor 이벤트 ID를 Adapter가 검증할 수 있으면 사용하고,
   없으면 `event.type + document.id + canonical payload hash` fingerprint를 사용한다.
@@ -390,23 +410,23 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
   필요하다. 내부 `COMPLETED`는 원본 `COMPLETED`, 외부 문서 ID, 마지막 이벤트,
   요청·완료 시각을 모두 보존한다. `ABORTED`도 원본 `ABORTED`와 같은 추적 필드를
   보존한다.
-- `REQUESTING`은 외부 문서 생성 전이면 원본 상태·문서 ID·이벤트 ID가 모두 `null`이고,
-  생성 후이면 원본 `DRAFT`, `SCHEDULED`, `ON_PROCESSING` 중 하나와 외부 문서 ID를
-  가진다. 아직 인증 웹훅이 없을 수 있으므로 이 단계의 `last_event_id`는 `null`일 수
-  있고, `SIGNING`·terminal 상태부터 필수다. terminal 원본 상태를 허용하지 않는다.
-- `FAILED`는 외부 문서 생성 전 로컬 실패이면 세 외부 필드가 모두 `null`, 외부 처리
+- `REQUESTING`은 외부 초안 생성 호출 중인 내부 상태이며 원본 상태·초안 ID·문서 ID·
+  이벤트 ID가 모두 `null`이다. `EDITING`은 원본 `DRAFT`, 초안 ID, 요청 시각을
+  보존하고 문서 ID·이벤트 ID·완료 시각은 `null`이다.
+- `FAILED`는 외부 문서 생성 전 로컬 실패이면 외부 상태·초안 ID·문서 ID·이벤트 ID가
+  모두 `null`, 외부 처리
   실패이면 `modusign_status=PROCESSING_FAILED`와 문서·이벤트 ID를 모두 가진다.
   두 경우 모두 요청·완료 시각을 보존하며 `COMPLETED`, `ABORTED`, `ON_GOING`을
   `FAILED`와 조합하지 않는다.
-- 외부 문서 생성 전 로컬 실패는 `Signature=FAILED`로 보존하고 계약은
-  `READY_TO_SIGN`을 유지하거나 되돌린다. 인증 후 최신 원본 상태가 `ABORTED` 또는
+- PDF 또는 외부 초안 생성 실패는 `Signature=FAILED`로 보존하고 계약은
+  `READY_TO_SIGN`을 유지한다. 인증 후 최신 원본 상태가 `ABORTED` 또는
   `PROCESSING_FAILED`이면 계약을 `SIGNING → READY_TO_SIGN`으로 되돌리고 각각
   `SIGNATURE_ABORTED`, `SIGNATURE_FAILED`를 기록한다. 실패·중단 시도를 자동 재요청하지
   않으며 사용자가 현재 합의서를 다시 확인하고 새 `Idempotency-Key`와
   `confirmed=true`로 요청해야 한다.
-- 재요청은 새 `Signature` 시도를 만들고 이전 terminal 레코드와 외부 문서 ID를
+- 재요청은 새 `Signature` 시도를 만들고 이전 terminal 레코드와 외부 초안·문서 ID를
   보존한다. 단일 서명 조회는 가장 최근 시도를 반환한다. 같은 멱등 키 재생이나 활성
-  시도가 있는 동안에는 새 외부 문서를 만들지 않는다.
+  시도가 있는 동안에는 새 외부 초안을 만들지 않는다.
 
 웹훅 처리:
 
@@ -484,7 +504,8 @@ DOCUMENT_UPLOADED, UNDERSTOOD_TERMS_SAVED,
 ANALYSIS_STARTED, ANALYSIS_RESTARTED, ANALYSIS_COMPLETED, ANALYSIS_FAILED,
 REVIEW_ITEM_SELECTION_UPDATED, ADJUSTMENT_DRAFT_CREATED, ADJUSTMENT_SENT,
 ADJUSTMENT_OPENED, ADJUSTMENT_RESPONDED, ADJUSTMENT_CONFIRMED,
-ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, SIGNATURE_REQUESTED, SIGNATURE_STARTED,
+ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, SIGNATURE_DRAFT_CREATED,
+SIGNATURE_REQUESTED, SIGNATURE_STARTED,
 SIGNATURE_COMPLETED, SIGNATURE_ABORTED, SIGNATURE_FAILED, OBLIGATION_CREATED,
 EVIDENCE_LINK_CREATED, EVIDENCE_SUBMITTED, EVIDENCE_APPROVED,
 EVIDENCE_DISPUTED, RENEWAL_DECISION_SAVED
@@ -492,7 +513,7 @@ EVIDENCE_DISPUTED, RENEWAL_DECISION_SAVED
 
 계약 생성, 문서 업로드와 사용자 조건 저장부터 각각 `CONTRACT_CREATED`,
 `DOCUMENT_UPLOADED`, `UNDERSTOOD_TERMS_SAVED`를 기록한다. 분석의 최초 접수·수동
-재시작·완료·실패, 조정 초안·발송·열람·응답·확정·만료, 합의서 생성, 서명
+재시작·완료·실패, 조정 초안·발송·열람·응답·확정·만료, 합의서 생성, 서명 초안·
 요청·진행·종료, 대표 의무 생성·증빙 링크·제출·검토, 재계약 의사 저장도 위 대응
 이벤트를 상태 변경과 같은 트랜잭션에 기록한다. 같은 선택의 반복 저장이나 공개 `/open`
 재호출처럼 상태가 바뀌지 않는 멱등 재생은 새 이벤트를 만들지 않는다.
@@ -507,13 +528,14 @@ EVIDENCE_DISPUTED, RENEWAL_DECISION_SAVED
 
 ### 내부 서명
 
-`REQUEST_READY → REQUESTING → SIGNING → COMPLETED / ABORTED / FAILED`
+`REQUEST_READY → REQUESTING → EDITING → SIGNING → COMPLETED / ABORTED / FAILED`
 
 ### 모두싸인 원본 상태
 
 enum은 `DRAFT`, `SCHEDULED`, `ON_PROCESSING`, `ON_GOING`, `COMPLETED`, `ABORTED`,
-`PROCESSING_FAILED`이며 정상 P0 흐름은
-`ON_PROCESSING → ON_GOING → COMPLETED / ABORTED / PROCESSING_FAILED`다.
+`PROCESSING_FAILED`이며 임베디드 P0 흐름은
+`DRAFT → ON_PROCESSING → ON_GOING → COMPLETED / ABORTED /
+PROCESSING_FAILED`다.
 
 ### 이행 항목
 
@@ -527,17 +549,20 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 | Contract `ANALYZING → REVIEW_REQUIRED` | SYSTEM의 분석 성공 | 검증된 분석 결과 | canonical 승격, 첫 명확한 대표 의무 자동 생성, `ANALYSIS_COMPLETED` |
 | Contract `REVIEW_REQUIRED → NEGOTIATING` | OWNER의 조정 요청 발송 | 선택된 1~4개 항목, `confirmed=true` | 공개 토큰·만료시각, 항목 `SENT`, `ADJUSTMENT_SENT` |
 | Contract `NEGOTIATING → READY_TO_SIGN` | OWNER의 최종 조정 확정 | 응답 완료, 항목별 유효한 resolution | 수락 항목 `RESOLVED`, 원안 유지 항목 `KEPT_ORIGINAL`, 확정 문구, `ADJUSTMENT_CONFIRMED` |
-| Contract `READY_TO_SIGN → SIGNING` | OWNER의 서명 요청 | 현재 합의서·버전 일치, 서명자 2명, `confirmed=true` | `Signature=REQUESTING`, 외부 문서 ID, `AuditEvent` |
+| Contract `READY_TO_SIGN` 유지 | OWNER의 임베디드 초안 생성 | 현재 합의서·버전 일치, 서명자 2명, `confirmed=true` | `Signature=EDITING`, `modusign_draft_id`, `SIGNATURE_DRAFT_CREATED`; 발송 없음 |
+| Contract `READY_TO_SIGN → SIGNING` | SYSTEM의 인증된 모두싸인 발송 상태 반영 | 초안과 외부 문서 연결, 최신 원본 `ON_GOING` | `Signature=SIGNING`, 외부 문서 ID, `SIGNATURE_STARTED` |
 | Contract `SIGNING → SIGNED` | SYSTEM의 인증된 모두싸인 완료 반영 | 멱등 웹훅 저장 및 최신 상태 조회 결과 `COMPLETED` | Signature 완료와 `AuditEvent` |
-| Contract `SIGNING → READY_TO_SIGN` | SYSTEM의 서명 중단·실패 반영 | 최신 인증 원본이 `ABORTED`·`PROCESSING_FAILED`이거나 외부 문서 생성 전 로컬 실패 | terminal Signature와 `SIGNATURE_ABORTED`·`SIGNATURE_FAILED` 보존, 자동 재요청 금지 |
+| Contract `SIGNING → READY_TO_SIGN` | SYSTEM의 서명 중단·실패 반영 | 최신 인증 원본이 `ABORTED`·`PROCESSING_FAILED` | terminal Signature와 `SIGNATURE_ABORTED`·`SIGNATURE_FAILED` 보존, 자동 재요청 금지 |
 | Adjustment `DRAFT → SENT` | OWNER의 `/send` | `confirmed=true`, 아직 발송 전 | 토큰, `sent_at`, `expires_at`, `AuditEvent` |
 | Adjustment `SENT → OPENED` | AGENCY의 `/open` | scope·resource·만료 검증 | 최초 `opened_at`, `AuditEvent`; 재호출은 무변경 |
 | Adjustment `SENT / OPENED → RESPONDED` | AGENCY의 `/responses` | 모든 항목의 최초이자 유효한 일괄 응답 | 응답·`responded_at`; SENT이면 같은 시각의 `opened_at`; `AuditEvent` |
 | Adjustment `RESPONDED → CONFIRMED` | OWNER의 최종 확정 | 모든 항목의 유효한 resolution | 관련 ReviewItem 최종 상태, 최종 문구, `ADJUSTMENT_CONFIRMED` |
 | Adjustment `SENT / OPENED → EXPIRED` | SYSTEM의 만료 판정 | 현재 시각이 `expires_at` 이상, 미응답 | 상태와 `AuditEvent`; 이후 응답 금지 |
-| Signature `REQUEST_READY → REQUESTING` | OWNER의 서명 요청 | 확정 합의서·서명자·명시 승인 | 외부 요청의 멱등 실행 |
-| Signature `REQUESTING → SIGNING` | SYSTEM의 외부 상태 반영 | 인증 이벤트와 최신 원본 상태 `ON_GOING` | 원본 상태·fingerprint·`AuditEvent` |
-| Signature `REQUESTING / SIGNING → COMPLETED / ABORTED / FAILED` | SYSTEM의 외부 상태 반영 | 인증 이벤트와 최신 종료 상태 | 종료 상태를 과거 이벤트로 되돌리지 않음 |
+| Signature `REQUEST_READY → REQUESTING` | OWNER의 초안 생성 | 확정 합의서·서명자·명시 승인 | PDF 생성과 외부 초안 호출 시작 |
+| Signature `REQUESTING → EDITING` | OWNER의 초안 생성 성공 | 원본 `DRAFT`, 초안 ID 존재 | `SIGNATURE_DRAFT_CREATED`, 민감 편집 URL은 비저장 |
+| Signature `REQUESTING → FAILED` | SYSTEM의 PDF·초안 생성 실패 | 외부 문서 발송 전 실패 | 완료 시각과 `SIGNATURE_FAILED`, Contract는 `READY_TO_SIGN` 유지 |
+| Signature `EDITING → SIGNING` | SYSTEM의 외부 상태 반영 | 사용자가 편집기에서 발송, 인증 이벤트와 최신 원본 `ON_GOING` | 외부 문서 ID·fingerprint·`SIGNATURE_STARTED` |
+| Signature `EDITING / SIGNING → ABORTED / FAILED`, `SIGNING → COMPLETED` | SYSTEM의 외부 상태 반영 | 인증 이벤트와 최신 종료 상태 | 종료 상태를 과거 이벤트로 되돌리지 않음 |
 | Obligation `PENDING → SUBMITTED` | AGENCY의 증빙 제출 | 유효한 scope·resource·만료, 최초 제출 | URL·`submitted_at`, `AuditEvent` |
 | Obligation `SUBMITTED → APPROVED / DISPUTED` | OWNER의 명시적 검토 API 호출 | 소유권과 유효한 decision | `reviewed_at`, 지급 조건 표시, `AuditEvent` |
 

@@ -1,0 +1,44 @@
+{
+  "case_id": "10-low-ocr-quality",
+  "category": "낮은 OCR 품질",
+  "contract_pages": [
+    {
+      "page": 1,
+      "text": "저화질 스캔본: 남포소품점과 가상프로모션은 2026년 9월 1일부터 2027년 8월 31일까지 계약한다. 총 계약금액은 1,200,000원이다."
+    },
+    {
+      "page": 2,
+      "text": "OCR 흔들림 구간: 블로그 콘텐츠 수량은 8건이다. 첫 납품 기한은 2026년 9월 30일이고 성과 보고는 월 1회 제공한다."
+    }
+  ],
+  "understood_terms": {
+    "duration_text": "12개월",
+    "monthly_amount": 100000,
+    "total_amount": 1200000,
+    "refund_text": "계약서 확인",
+    "termination_text": "계약서 확인",
+    "source_type": "USER_MEMORY"
+  },
+  "observed_terms": [
+    {"field": "contract_start_date", "value": "2026-09-01", "source_page": 1, "source_text": "2026년 9월 1일부터 2027년 8월 31일까지 계약한다.", "confidence": 0.82},
+    {"field": "contract_end_date", "value": "2027-08-31", "source_page": 1, "source_text": "2026년 9월 1일부터 2027년 8월 31일까지 계약한다.", "confidence": 0.82},
+    {"field": "contract_total_amount", "value": 1200000, "source_page": null, "source_text": null, "confidence": 0.42, "verification_status": "MISSING_EVIDENCE"},
+    {"field": "content_quantity", "value": 3, "source_page": 2, "source_text": "블로그 콘텐츠 수량은 8건이다.", "confidence": 0.4, "verification_status": "NEEDS_CHECK"},
+    {"field": "deliverable_due_date", "value": "2026-09-30", "source_page": 2, "source_text": "첫 납품 기한은 2026년 9월 30일이고", "confidence": 0.81},
+    {"field": "reporting_frequency", "value": null, "source_page": null, "source_text": null, "confidence": 0, "verification_status": "NOT_FOUND"}
+  ],
+  "expected_terms": [
+    {"field": "contract_start_date", "value": "2026-09-01", "source_page": 1, "source_text": "2026년 9월 1일부터 2027년 8월 31일까지 계약한다."},
+    {"field": "contract_end_date", "value": "2027-08-31", "source_page": 1, "source_text": "2026년 9월 1일부터 2027년 8월 31일까지 계약한다."},
+    {"field": "contract_total_amount", "value": 1200000, "source_page": 1, "source_text": "총 계약금액은 1,200,000원이다."},
+    {"field": "content_quantity", "value": 8, "source_page": 2, "source_text": "블로그 콘텐츠 수량은 8건이다."},
+    {"field": "deliverable_due_date", "value": "2026-09-30", "source_page": 2, "source_text": "첫 납품 기한은 2026년 9월 30일이고"},
+    {"field": "reporting_frequency", "value": "월 1회", "source_page": 2, "source_text": "성과 보고는 월 1회 제공한다."}
+  ],
+  "expected_signals": [
+    {"field": "contract_total_amount", "signal": "NEEDS_CHECK"},
+    {"field": "content_quantity", "signal": "NEEDS_CHECK"},
+    {"field": "reporting_frequency", "signal": "MISSING"}
+  ],
+  "mismatch_targets": []
+}

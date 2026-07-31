@@ -1,0 +1,39 @@
+{
+  "case_id": "07-shooting-safety-liability",
+  "category": "촬영 안전·손해 책임",
+  "contract_pages": [
+    {
+      "page": 1,
+      "text": "영도카페 촬영 시 현장 안전에 관한 모든 책임은 광고주가 부담한다. 촬영 중 시설 파손의 일체 책임은 광고주에게 있다. 허위·과장 표현은 양측이 게시 전에 확인한다. 고객 초상권 동의와 개인정보 보관은 별도 동의서에 따른다. 제작 콘텐츠 사용권은 계약 기간 동안 양측에 있다."
+    }
+  ],
+  "understood_terms": {
+    "duration_text": "12개월",
+    "monthly_amount": null,
+    "total_amount": null,
+    "refund_text": "계약서 확인",
+    "termination_text": "계약서 확인",
+    "source_type": "USER_MEMORY"
+  },
+  "observed_terms": [
+    {"field": "shooting_safety", "value": "현장 안전에 관한 모든 책임은 광고주가 부담한다.", "source_page": 1, "source_text": "현장 안전에 관한 모든 책임은 광고주가 부담한다.", "confidence": 0.64, "verification_status": "NEEDS_CHECK"},
+    {"field": "facility_damage_liability", "value": "시설 파손의 일체 책임은 광고주에게 있다.", "source_page": 1, "source_text": "촬영 중 시설 파손의 일체 책임은 광고주에게 있다.", "confidence": 0.64, "verification_status": "NEEDS_CHECK"},
+    {"field": "false_advertising_liability", "value": "허위·과장 표현은 양측이 게시 전에 확인한다.", "source_page": 1, "source_text": "허위·과장 표현은 양측이 게시 전에 확인한다.", "confidence": 0.91},
+    {"field": "portrait_rights", "value": "고객 초상권 동의는 별도 동의서에 따른다.", "source_page": 1, "source_text": "고객 초상권 동의와 개인정보 보관은 별도 동의서에 따른다.", "confidence": 0.9},
+    {"field": "personal_information_handling", "value": "개인정보 보관은 별도 동의서에 따른다.", "source_page": 1, "source_text": "고객 초상권 동의와 개인정보 보관은 별도 동의서에 따른다.", "confidence": 0.9},
+    {"field": "content_ownership", "value": "계약 기간 동안 양측 사용", "source_page": 1, "source_text": "제작 콘텐츠 사용권은 계약 기간 동안 양측에 있다.", "confidence": 0.9}
+  ],
+  "expected_terms": [
+    {"field": "shooting_safety", "value": "현장 안전에 관한 모든 책임은 광고주가 부담한다.", "source_page": 1, "source_text": "현장 안전에 관한 모든 책임은 광고주가 부담한다.", "confidence": 0.7, "verification_status": "NEEDS_CHECK"},
+    {"field": "facility_damage_liability", "value": "시설 파손의 일체 책임은 광고주에게 있다.", "source_page": 1, "source_text": "촬영 중 시설 파손의 일체 책임은 광고주에게 있다.", "confidence": 0.7, "verification_status": "NEEDS_CHECK"},
+    {"field": "false_advertising_liability", "value": "허위·과장 표현은 양측이 게시 전에 확인한다.", "source_page": 1, "source_text": "허위·과장 표현은 양측이 게시 전에 확인한다."},
+    {"field": "portrait_rights", "value": "고객 초상권 동의는 별도 동의서에 따른다.", "source_page": 1, "source_text": "고객 초상권 동의와 개인정보 보관은 별도 동의서에 따른다."},
+    {"field": "personal_information_handling", "value": "개인정보 보관은 별도 동의서에 따른다.", "source_page": 1, "source_text": "고객 초상권 동의와 개인정보 보관은 별도 동의서에 따른다."},
+    {"field": "content_ownership", "value": "계약 기간 동안 양측 사용", "source_page": 1, "source_text": "제작 콘텐츠 사용권은 계약 기간 동안 양측에 있다."}
+  ],
+  "expected_signals": [
+    {"field": "shooting_safety", "signal": "NEEDS_CHECK"},
+    {"field": "facility_damage_liability", "signal": "NEEDS_CHECK"}
+  ],
+  "mismatch_targets": []
+}

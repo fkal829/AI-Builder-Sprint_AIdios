@@ -1,0 +1,36 @@
+{
+  "case_id": "09-normal-contract",
+  "category": "정상 계약",
+  "contract_pages": [
+    {
+      "page": 1,
+      "text": "온천마을카페와 가상미디어는 2026년 7월 1일부터 2027년 6월 30일까지 계약한다. 월 대행료는 500,000원이고 총 계약금액은 6,000,000원이다. 중도 해지는 30일 전 통보로 가능하며 해지 이후 제공되지 않은 서비스 대금은 환불한다."
+    }
+  ],
+  "understood_terms": {
+    "duration_text": "12개월",
+    "monthly_amount": 500000,
+    "total_amount": 6000000,
+    "refund_text": "해지 이후 제공되지 않은 서비스 대금은 환불한다.",
+    "termination_text": "30일 전에 알리면 중도해지 가능",
+    "source_type": "USER_MEMORY"
+  },
+  "observed_terms": [
+    {"field": "contract_start_date", "value": "2026-07-01", "source_page": 1, "source_text": "2026년 7월 1일부터 2027년 6월 30일까지 계약한다.", "confidence": 0.99},
+    {"field": "contract_end_date", "value": "2027-06-30", "source_page": 1, "source_text": "2026년 7월 1일부터 2027년 6월 30일까지 계약한다.", "confidence": 0.99},
+    {"field": "monthly_amount", "value": 500000, "source_page": 1, "source_text": "월 대행료는 500,000원이고", "confidence": 0.98},
+    {"field": "contract_total_amount", "value": 6000000, "source_page": 1, "source_text": "총 계약금액은 6,000,000원이다.", "confidence": 0.98},
+    {"field": "refund_condition", "value": "해지 이후 제공되지 않은 서비스 대금은 환불한다.", "source_page": 1, "source_text": "해지 이후 제공되지 않은 서비스 대금은 환불한다.", "confidence": 0.97},
+    {"field": "early_termination_allowed", "value": "YES", "source_page": 1, "source_text": "중도 해지는 30일 전 통보로 가능하며", "confidence": 0.97}
+  ],
+  "expected_terms": [
+    {"field": "contract_start_date", "value": "2026-07-01", "source_page": 1, "source_text": "2026년 7월 1일부터 2027년 6월 30일까지 계약한다."},
+    {"field": "contract_end_date", "value": "2027-06-30", "source_page": 1, "source_text": "2026년 7월 1일부터 2027년 6월 30일까지 계약한다."},
+    {"field": "monthly_amount", "value": 500000, "source_page": 1, "source_text": "월 대행료는 500,000원이고"},
+    {"field": "contract_total_amount", "value": 6000000, "source_page": 1, "source_text": "총 계약금액은 6,000,000원이다."},
+    {"field": "refund_condition", "value": "해지 이후 제공되지 않은 서비스 대금은 환불한다.", "source_page": 1, "source_text": "해지 이후 제공되지 않은 서비스 대금은 환불한다."},
+    {"field": "early_termination_allowed", "value": "YES", "source_page": 1, "source_text": "중도 해지는 30일 전 통보로 가능하며"}
+  ],
+  "expected_signals": [],
+  "mismatch_targets": []
+}

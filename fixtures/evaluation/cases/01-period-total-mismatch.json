@@ -1,0 +1,40 @@
+{
+  "case_id": "01-period-total-mismatch",
+  "category": "기간·총액 불일치",
+  "contract_pages": [
+    {
+      "page": 1,
+      "text": "바다빛카페와 가상홍보사는 2026년 1월 1일부터 2026년 6월 30일까지 계약한다. 월 대행료는 600,000원이고 총 계약금액은 3,600,000원이다. 중도 해지는 가능하다. 중도 해지 시 남은 기간 대금은 환불하지 않는다."
+    }
+  ],
+  "understood_terms": {
+    "duration_text": "12개월",
+    "monthly_amount": 500000,
+    "total_amount": 6000000,
+    "refund_text": "중도 해지 시 남은 기간 대금은 환불하지 않는다.",
+    "termination_text": "중도해지 가능",
+    "source_type": "USER_MEMORY"
+  },
+  "observed_terms": [
+    {"field": "contract_start_date", "value": "2026-01-01", "source_page": 1, "source_text": "2026년 1월 1일부터 2026년 6월 30일까지 계약한다.", "confidence": 0.98},
+    {"field": "contract_end_date", "value": "2026-06-30", "source_page": 1, "source_text": "2026년 1월 1일부터 2026년 6월 30일까지 계약한다.", "confidence": 0.98},
+    {"field": "monthly_amount", "value": 600000, "source_page": 1, "source_text": "월 대행료는 600,000원이고", "confidence": 0.97},
+    {"field": "contract_total_amount", "value": 3600000, "source_page": 1, "source_text": "총 계약금액은 3,600,000원이다.", "confidence": 0.97},
+    {"field": "refund_condition", "value": "중도 해지 시 남은 기간 대금은 환불하지 않는다.", "source_page": 1, "source_text": "중도 해지 시 남은 기간 대금은 환불하지 않는다.", "confidence": 0.95},
+    {"field": "early_termination_allowed", "value": "YES", "source_page": 1, "source_text": "중도 해지는 가능하다.", "confidence": 0.95}
+  ],
+  "expected_terms": [
+    {"field": "contract_start_date", "value": "2026-01-01", "source_page": 1, "source_text": "2026년 1월 1일부터 2026년 6월 30일까지 계약한다."},
+    {"field": "contract_end_date", "value": "2026-06-30", "source_page": 1, "source_text": "2026년 1월 1일부터 2026년 6월 30일까지 계약한다."},
+    {"field": "monthly_amount", "value": 600000, "source_page": 1, "source_text": "월 대행료는 600,000원이고"},
+    {"field": "contract_total_amount", "value": 3600000, "source_page": 1, "source_text": "총 계약금액은 3,600,000원이다."},
+    {"field": "refund_condition", "value": "중도 해지 시 남은 기간 대금은 환불하지 않는다.", "source_page": 1, "source_text": "중도 해지 시 남은 기간 대금은 환불하지 않는다."},
+    {"field": "early_termination_allowed", "value": "YES", "source_page": 1, "source_text": "중도 해지는 가능하다."}
+  ],
+  "expected_signals": [
+    {"field": "contract_end_date", "signal": "MISMATCH"},
+    {"field": "monthly_amount", "signal": "MISMATCH"},
+    {"field": "contract_total_amount", "signal": "MISMATCH"}
+  ],
+  "mismatch_targets": ["contract_end_date", "contract_total_amount"]
+}

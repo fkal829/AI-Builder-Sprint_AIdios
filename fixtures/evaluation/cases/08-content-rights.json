@@ -1,0 +1,36 @@
+{
+  "case_id": "08-content-rights",
+  "category": "콘텐츠 권리",
+  "contract_pages": [
+    {
+      "page": 1,
+      "text": "광안상점 홍보 계약에서 최종 제작 콘텐츠의 저작권은 광고주에게 귀속된다. 광고 계정은 광고주가 소유하고 대행사는 계약 기간에만 접근한다. 인물 촬영은 사전 동의를 받고 개인정보는 납품 후 30일 안에 삭제한다. 허위 광고 문구는 게시하지 않으며 촬영 안전수칙을 준수한다."
+    }
+  ],
+  "understood_terms": {
+    "duration_text": "12개월",
+    "monthly_amount": null,
+    "total_amount": null,
+    "refund_text": "계약서 확인",
+    "termination_text": "계약서 확인",
+    "source_type": "USER_MEMORY"
+  },
+  "observed_terms": [
+    {"field": "content_ownership", "value": "최종 제작 콘텐츠의 저작권은 광고주에게 귀속", "source_page": 1, "source_text": "최종 제작 콘텐츠의 저작권은 광고주에게 귀속된다.", "confidence": 0.95},
+    {"field": "advertising_account_ownership", "value": "광고주 소유, 대행사는 계약 기간에만 접근", "source_page": 1, "source_text": "광고 계정은 광고주가 소유하고 대행사는 계약 기간에만 접근한다.", "confidence": 0.95},
+    {"field": "portrait_rights", "value": "인물 촬영은 사전 동의를 받는다.", "source_page": 1, "source_text": "인물 촬영은 사전 동의를 받고", "confidence": 0.94},
+    {"field": "personal_information_handling", "value": "납품 후 30일 안에 삭제", "source_page": 1, "source_text": "개인정보는 납품 후 30일 안에 삭제한다.", "confidence": 0.94},
+    {"field": "false_advertising_liability", "value": "허위 광고 문구를 게시하지 않는다.", "source_page": 1, "source_text": "허위 광고 문구는 게시하지 않으며", "confidence": 0.93},
+    {"field": "shooting_safety", "value": "촬영 안전수칙 준수", "source_page": 1, "source_text": "촬영 안전수칙을 준수한다.", "confidence": 0.93}
+  ],
+  "expected_terms": [
+    {"field": "content_ownership", "value": "최종 제작 콘텐츠의 저작권은 광고주에게 귀속", "source_page": 1, "source_text": "최종 제작 콘텐츠의 저작권은 광고주에게 귀속된다."},
+    {"field": "advertising_account_ownership", "value": "광고주 소유, 대행사는 계약 기간에만 접근", "source_page": 1, "source_text": "광고 계정은 광고주가 소유하고 대행사는 계약 기간에만 접근한다."},
+    {"field": "portrait_rights", "value": "인물 촬영은 사전 동의를 받는다.", "source_page": 1, "source_text": "인물 촬영은 사전 동의를 받고"},
+    {"field": "personal_information_handling", "value": "납품 후 30일 안에 삭제", "source_page": 1, "source_text": "개인정보는 납품 후 30일 안에 삭제한다."},
+    {"field": "false_advertising_liability", "value": "허위 광고 문구를 게시하지 않는다.", "source_page": 1, "source_text": "허위 광고 문구는 게시하지 않으며"},
+    {"field": "shooting_safety", "value": "촬영 안전수칙 준수", "source_page": 1, "source_text": "촬영 안전수칙을 준수한다."}
+  ],
+  "expected_signals": [],
+  "mismatch_targets": []
+}

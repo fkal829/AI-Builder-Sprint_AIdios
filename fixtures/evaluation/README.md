@@ -1,6 +1,7 @@
 # AI evaluation fixtures
 
-고정 샘플 계약 10건과 사람이 검증한 정답 JSON을 둡니다.
+`cases/`에는 기획안 7.4의 고정 가상 계약 10건을 둔다. 실제 사업자·계약·개인정보를
+사용하지 않는다.
 
 1. 기간·총액 불일치
 2. 환불 설명 누락
@@ -13,4 +14,38 @@
 9. 정상 계약
 10. 낮은 OCR 품질
 
-각 케이스는 계약 원문, 사용자 이해조건 5문항, 기대 추출값, 기대 확인 신호를 한 세트로 유지합니다.
+각 JSON은 다음을 하나의 변경 단위로 유지한다.
+
+- `contract_pages`: 사람이 작성한 가상 계약 원문과 1-based 페이지
+- `understood_terms`: 사용자가 이해한 기간·월 금액·총액·환불·중도해지 5문항
+- `observed_terms`: 외부 네트워크 없이 재현할 오프라인 추출 스냅샷
+- `expected_terms`: 사람이 원문을 보고 검증한 필드 값과 페이지 근거
+- `expected_signals`: 현재 결정적 검토 코드가 만들어야 하는 확인 신호
+- `mismatch_targets`: 기간·총액 불일치 탐지율의 분모가 되는 필드
+
+각 케이스에서 해당 시나리오를 대표하는 핵심 필드 6개를 평가하며 전체 분모는
+60개다. 계약 원문에 없는 값도 `NOT_FOUND` 정답으로 포함한다.
+
+## 실행
+
+```bash
+cd apps/api
+.venv/bin/python -m evaluation
+.venv/bin/python -m evaluation --format markdown
+.venv/bin/python -m pytest tests/test_evaluation_fixtures.py -q
+```
+
+`RESULTS.md`는 실행기가 생성하는 Markdown과 정확히 일치해야 하며 테스트가 이를
+검증한다.
+
+## 지표 정의
+
+- 핵심 필드 추출 정확도: 정답 필드 값과 오프라인 추출 값의 exact match 비율
+- 근거 페이지 연결 정확도: 정답에 페이지가 있는 필드 중 추출 페이지가 일치한 비율
+- 필수 JSON 스키마 성공률: 10개 JSON이 평가·분석 Pydantic 스키마를 통과한 비율
+- 기간·총액 불일치 탐지율: `mismatch_targets` 중 `MISMATCH`가 생성된 비율
+- 근거 없는 확정 경고: `VERIFIED`·`NEEDS_CHECK` 경고에 원문 근거가 빠진 개수
+
+이 평가는 mock 결과를 live 성능으로 포장하지 않기 위한 `OFFLINE_SNAPSHOT` 회귀
+기준선이다. 실제 Upstage·Solar 정확도는 같은 원문을 live Adapter로 실행한 별도
+결과에 날짜, 모델, 프롬프트 버전과 함께 기록한다.

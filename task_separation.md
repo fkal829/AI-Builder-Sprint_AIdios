@@ -322,14 +322,14 @@ B와의 의존성은 세 가지로 정리됩니다. B가 제공하는 `ReviewIte
 
 ## P2 신규 작업: 6.14 광고효과 리포트 확인·집계 (P2-C)
 
-> 근거: `docs/api-명세서.md` 15~19절(6.14 P2-0 확정 설계, 2026-08-01 기준 OpenAPI·
-> runtime·DB migration 미반영). 기존 P0 번호 체계(C-1~C-11)와 독립적으로
+> 근거: `docs/api-명세서.md` 15~19절(6.14 P2-0 확정 설계). OpenAPI 공통 계약과
+> 16.1 접근 계층·기반 migration은 구현됐고, 실제 endpoint 4개는 `planned` 상태다.
+> 기존 P0 번호 체계(C-1~C-11)와 독립적으로
 > `P2-C-*`를 쓴다. P2-B(리포트 업로드·Upstage/Solar 추출)가 만든
 > `PerformanceReport`/`extracted_payload`를 P2-C가 소비한다.
 >
-> **선행 조건:** 17.4의 확정값 7개가 `docs/단디계약최종기획안.md`, OpenAPI,
-> `api-data-contract.md`, 공통 enum·오류에 먼저 반영되는 P2-0 공통 계약 PR이
-> 병합되기 전에는 runtime을 구현하지 않는다. 그 전까지는 같은 스키마의 fake로
+> **선행 조건:** 17.4의 확정값 7개를 반영한 P2-0 공통 계약 PR은 병합 완료됐다.
+> P2-C는 P2-B의 실제 업로드·추출 endpoint가 병합되기 전까지 같은 스키마의 fake로
 > 병행 개발한다.
 
 담당 API:
@@ -506,6 +506,6 @@ GET /contracts/{contract_id}/performance
   계약/월 고유 제약을 먼저 배치하고, P2-C가 revision·flag·문의 snapshot·현재
   projection·PATCH RPC를 후속 migration으로 더한다. 이미 merge된 migration
   파일은 수정하지 않는다.
-- P2-C는 P2-B 기반이 merge되기 전까지 repository fake로 최초 확정·정정
+- P2-C는 P2-B 업로드·추출 runtime이 merge되기 전까지 repository fake로 최초 확정·정정
   동시성·최신 revision 계산·상태·집계 테스트를 먼저 진행하고, merge 후 실제
   저장 연결만 작은 PR로 추가한다.

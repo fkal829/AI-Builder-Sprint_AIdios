@@ -6,7 +6,8 @@
 > Base URL: `/api/v1`<br>
 > 상세 기계 판독 명세: `packages/contracts/openapi/openapi.yaml`<br>
 > 적용 범위: 1~14절은 현재 P0 구현 계약, 15~19절은 6.14 P2-0 확정 설계<br>
-> P2 구현 상태: canonical OpenAPI 4/4 `planned` 등록, runtime 0/4, DB migration 미작성
+> P2 구현 상태: canonical OpenAPI 4/4 `planned` 등록, runtime endpoint 0/4,
+> 16.1 공통 기반 구현
 
 이 문서는 백엔드 API와 개발 순서를 사람이 읽을 수 있도록 정리한다. 1~14절의 P0 제품
 범위와 사용자 흐름은 `docs/기획안.md`, 15~19절의 6.14 P2 변경분은
@@ -18,7 +19,8 @@
 
 15~19절은 `docs/단디계약최종기획안.md` 6.14의 P2-0 확정 설계 구역이다. 현재
 canonical OpenAPI에는 신규 4개 operation을 `planned`로 등록했지만 FastAPI runtime과
-DB migration은 구현하지 않았다. 17.4의 확정값은 기획안, OpenAPI,
+각 operation의 업무 RPC는 아직 구현하지 않았다. 16.1의 공통 접근 계층과 기반
+migration은 구현됐고, 17.4의 확정값은 기획안, OpenAPI,
 `docs/api-data-contract.md`, 공통 enum·오류에 같은 값으로 유지하고 구조 검증을
 통과시킨 뒤 runtime을 추가한다.
 
@@ -1345,8 +1347,8 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 >
 > - 기준: `docs/단디계약최종기획안.md` 6.14·10장·11장·12장·13장
 > - 우선순위: P2 발표 로드맵
-> - 현재 상태: 프론트엔드 화면 목업만 존재, 백엔드 0/4
-> - 기계 계약: canonical OpenAPI 4/4 `planned`, runtime 0/4, DB migration 미작성
+> - 현재 상태: 프론트엔드 화면 목업과 16.1 백엔드 공통 기반 존재, endpoint 0/4
+> - 기계 계약: canonical OpenAPI 4/4 `planned`, runtime 0/4, 기반 DB migration 구현
 > - 선행 의존성: 이행·증빙 API와 기존 대시보드 API는 현재 구현됨
 > - 신규 번호: `P2-B-*`, `P2-C-*`; 기존 B-1~B-16·C-1~C-10과 독립
 
@@ -1393,6 +1395,12 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 | 멱등성 | 업로드·추출·확인 쓰기에 `Idempotency-Key` 필수 |
 | 원본 파일 | `Document.type=PERFORMANCE_REPORT`와 private Storage를 사용하고, 공개 URL·Storage 경로를 일반 응답에 포함하지 않음 |
 | 현재 등록 상태 | 아래 4개는 canonical OpenAPI에 `planned`로 등록, runtime에는 아직 없음 |
+
+16.1 공통 기반은 구현됐다. Bearer 인증은 기존 공통 인증을 재사용하며, owner-scoped
+Contract·report·source Document 조회, 쓰기 허용 상태 guard, 월 중복 preflight와 DB
+고유 제약, multipart 멱등 fingerprint 구성요소, 성과 경로 `no-store`, private Document
+경계를 공통 service·repository·migration에서 제공한다. 16.2~16.5의 네 endpoint와
+업무 RPC는 계속 `planned`이며 runtime operation 수는 0/4다.
 
 `period`는 API에서 `YYYY-MM`으로 받고 `(contract_id, period)`를 DB 고유 제약으로
 보호한다. 같은 `Idempotency-Key`와 같은 요청은 최초 응답을 재생하고, 다른 요청으로
@@ -1726,9 +1734,8 @@ report revision은 flag에서 유도한다. 조회 시 다시 만들거나 외�
   `PERFORMANCE_REPORT_UPLOADED`, `PERFORMANCE_REPORT_EXTRACTED`,
   `PERFORMANCE_REPORT_CONFIRMED`, `PERFORMANCE_REPORT_FLAGGED`,
   `PERFORMANCE_REPORT_CORRECTED`, `PERFORMANCE_REPORT_EXTRACTION_RECOVERED`
-- P2 migration 전에는 위 값을 별도 `PerformanceAuditEventType` 계획 enum으로 유지한다.
-  DB CHECK를 확장하는 후속 변경에서 기존 `AuditEventType`에 병합하며, 그 전에는 runtime이
-  이 이벤트를 저장하지 않는다.
+- 16.1 기반 migration에서 DB CHECK를 확장하고 위 값을 기존 `AuditEventType`에
+  병합했다. 실제 이벤트 생성은 각 16.2~16.4 원자 쓰기 RPC가 구현된 뒤에만 수행한다.
 - 업로드는 `Document` 메타데이터·report·감사 이벤트, 추출은
   `extracted_payload`·상태·감사 이벤트, 확정·정정은 revision·flag·문의 문안
   snapshot·현재 projection·감사 이벤트를 각각 원자 저장한다.

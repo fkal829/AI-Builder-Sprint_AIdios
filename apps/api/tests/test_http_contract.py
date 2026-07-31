@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 from uvicorn.logging import AccessFormatter
 
+from app.core.exceptions import ResourceNotFound
 from app.core.http import CANONICAL_OPERATION_IDS, install_http_contract
 from app.core.logging import (
     PUBLIC_TOKEN_REDACTION,
@@ -89,6 +90,31 @@ async def test_invalid_transition_body_and_header_share_request_id() -> None:
 
     assert response.status_code == 409
     assert response.json()["requestId"] == response.headers["X-Request-ID"]
+
+
+async def test_performance_success_and_error_responses_are_never_cached() -> None:
+    test_app = FastAPI()
+    install_http_contract(test_app)
+
+    @test_app.get("/api/v1/contracts/contract-id/performance")
+    async def performance_success() -> dict[str, bool]:
+        return {"ok": True}
+
+    @test_app.post("/api/v1/contracts/contract-id/performance-reports")
+    async def performance_error() -> None:
+        raise ResourceNotFound()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app),
+        base_url="http://testserver",
+    ) as client:
+        success = await client.get("/api/v1/contracts/contract-id/performance")
+        error = await client.post("/api/v1/contracts/contract-id/performance-reports")
+
+    assert success.status_code == 200
+    assert error.status_code == 404
+    assert success.headers["Cache-Control"] == "no-store"
+    assert error.headers["Cache-Control"] == "no-store"
 
 
 @pytest.mark.parametrize(

@@ -90,6 +90,13 @@ RPC도 같은 작업의 주 계약 문서와 모든 선택 자료를 함께 `FAI
 DB 커밋 뒤 RPC 응답이 유실돼도 같은 키 재시도는 최초 token ID와 만료시각을 재생하며
 두 번째 토큰이나 `EVIDENCE_LINK_CREATED` 이벤트를 만들지 않는다.
 
+`20260801010000_add_performance_report_foundation.sql`은 16.1 광고효과 공통 기반으로
+`Document.type=PERFORMANCE_REPORT`, 계약·월별 고유 `performance_reports`, 같은 계약의
+전용 원본 연결, 허용 계약 상태 쓰기 guard와 owner 조회 RLS를 추가한다. 기존 일반
+문서 RPC에서는 성과 원본 생성을 계속 차단하고, 계획된 성과 감사 이벤트 6종을 공통
+`AuditEventType` DB CHECK에 병합한다. 업로드·추출·확정 원자 RPC와 revision·flag는
+16.2~16.4 후속 migration에서 추가한다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

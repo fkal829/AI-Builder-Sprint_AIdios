@@ -21,6 +21,7 @@ from app.services.dashboard import DashboardService
 from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.obligations import ObligationService
+from app.services.performance import PerformanceAccessGuard
 from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
 from app.services.revised_contracts import RevisedContractService
@@ -191,6 +192,12 @@ async def get_idempotency_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> IdempotencyService:
     return IdempotencyService(supabase)
+
+
+async def get_performance_access_guard(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> PerformanceAccessGuard:
+    return PerformanceAccessGuard(supabase)
 
 
 async def get_counterproposal_comparator(

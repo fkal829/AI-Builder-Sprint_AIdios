@@ -142,6 +142,8 @@ GET  /contracts/{contract_id}/agreement
 - 클라이언트가 임의의 최종 합의 문구를 보내지 못하게 하고, 서버가 저장된 요청·응답 기록에서 최종 문구를 결정한다.
 - 최대 4개 조항의 `광고대행 계약조건 변경·확인 합의서`를 생성한다.
 - 합의서에 변경 전·후 문구, 거절/철회 이유, 원계약 유지 원칙, 양측 서명란을 포함한다.
+- 원본 계약 PDF는 변경하지 않는다. 확정 합의서 PDF를 별도 렌더링해 private Storage에
+  저장하고, 경로·SHA-256·페이지 수를 합의서 생성 및 감사 이벤트와 원자적으로 기록한다.
 
 완료 조건:
 
@@ -149,6 +151,7 @@ GET  /contracts/{contract_id}/agreement
 - 수용 조항은 `RESOLVED`, 원안 유지 조항은 `KEPT_ORIGINAL`으로 처리한다.
 - 원계약 문서 ID와 검증된 `signed_date`가 없으면 합의서 생성을 거부한다.
 - 근거 없는 요약은 임의로 채우지 않고 `추가 확인 필요`로 표시한다.
+- PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를 실패 처리하고 저장된 파일을 정리한다.
 
 ### C-7. 모두싸인 Adapter 및 임베디드 서명 초안
 
@@ -169,8 +172,9 @@ GET  /contracts/{contract_id}/signature
 - 합의서 ID·버전과 `confirmed=true`를 검증한다.
 - OWNER와 AGENCY 각각 1명, 총 2명의 서명자를 검증한다.
 - 이메일/카카오 서명 방식 형식을 검증한다.
-- 확정 합의서를 메모리에서 PDF로 생성하고 Modusign `POST /embedded-drafts`에
-  Base64 PDF로 전달한다.
+- C-6에서 private Storage에 확정·저장한 합의서 PDF를 읽어 SHA-256 무결성을 검증한 뒤,
+  Modusign `POST /embedded-drafts`에 Base64 PDF로 전달한다. C-7에서 PDF를 다시
+  렌더링하지 않는다.
 - 연락처는 외부 Adapter 전달에만 사용하고 API 응답·DB·로그에 저장하지 않는다.
 - `editor_url`과 `expires_at`은 `Cache-Control: no-store` 생성 응답으로만 반환하며
   DB·로그·멱등 재생값에 저장하지 않는다.
@@ -184,7 +188,8 @@ GET  /contracts/{contract_id}/signature
   `REQUESTING → EDITING`, 원본 상태를 `DRAFT`로 저장한다.
 - `modusign_draft_id`와 `SIGNATURE_DRAFT_CREATED` 감사 이벤트를 저장한다.
 - 같은 멱등 키 재호출은 민감 편집 URL을 재생·재발급하지 않고 `409`로 막는다.
-- PDF 또는 외부 초안 생성 실패는 `FAILED`로 남기되 계약은 `READY_TO_SIGN`을 유지한다.
+- 저장된 PDF 읽기·무결성 검증 또는 외부 초안 생성 실패는 `FAILED`로 남기되 계약은
+  `READY_TO_SIGN`을 유지한다.
 - 실패·중단 뒤 자동 재요청하지 않는다.
 - mock·HTTP MockTransport 테스트와 실제 모두싸인 PDF 초안 생성 테스트를 통과한다.
 

@@ -376,6 +376,12 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 원계약 문서 ID와 검증된 canonical `signed_date`가 없으면 합의서를 생성하지 않고
 `INVALID_STATUS_TRANSITION`으로 거부한다.
 
+원본 계약 PDF는 변경하지 않는다. 확정된 구조화 합의서는 별도 PDF로 한 번 렌더링하여
+private Storage에 저장하며, 저장 경로·SHA-256·페이지 수·합의서 버전·`AGREEMENT_CREATED`
+감사 이벤트를 원자적으로 기록한다. 저장 경로와 무결성 메타데이터는 내부 전용이므로
+`AgreementResponse`에 포함하지 않는다. PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를
+실패 처리하고 저장된 파일을 정리한다.
+
 ## 8. 모두싸인 계약
 
 > **C-7 변경(2026-07-31):** 템플릿 기반 즉시 발송을 제거하고
@@ -390,9 +396,9 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 - `EMAIL`은 email 형식, `KAKAO`는 하이픈 없는 국내 휴대전화 번호 형식을 사용한다.
 - 두 서명자의 역할과 연락처는 중복될 수 없다.
 - 연락처 원문은 모두싸인 Adapter 전달에만 사용하고 API 응답·DB·로그에 저장하지 않는다.
-- 서버는 확정 합의서를 메모리에서 PDF로 생성하고 모두싸인 `POST /embedded-drafts`의
-  `file.base64`, `file.extension=pdf`로 전달한다. 합의서 원문을 로컬 임시 파일이나
-  로그에 남기지 않는다.
+- 서버는 C-6이 private Storage에 확정·저장한 합의서 PDF를 읽고 SHA-256을 검증한 뒤,
+  모두싸인 `POST /embedded-drafts`의 `file.base64`, `file.extension=pdf`로 전달한다.
+  C-7은 PDF를 다시 렌더링하지 않으며 합의서 원문을 로컬 임시 파일이나 로그에 남기지 않는다.
 - 응답은 `signature`, `editor_url`, `expires_at`을 가진다. `editor_url`은 약 2시간
   유효한 민감 URL이며 `Cache-Control: no-store`로 한 번만 반환하고 DB·로그·멱등
   재생값에 저장하지 않는다.

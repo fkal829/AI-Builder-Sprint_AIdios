@@ -857,7 +857,10 @@ canonical `signed_date`가 없으면 `409 INVALID_STATUS_TRANSITION`으로 거�
 조건은 `원계약에서 확인되지 않아 추가 확인 필요`라고 명시하며 임의로 채우지 않는다.
 `KEPT_ORIGINAL` 조항은 `REJECTED` 또는 `WITHDRAWN`이고, 대행사 거절이면 비어 있지 않은
 `reason`을 보존한다.
-생성된 합의서 버전과 `AGREEMENT_CREATED` 감사 이벤트를 하나의 트랜잭션으로 기록한다.
+원본 계약 PDF는 변경하지 않는다. 확정 합의서는 별도 PDF로 한 번 렌더링해 private Storage에
+저장하고, 저장 경로·SHA-256·페이지 수·합의서 버전·`AGREEMENT_CREATED` 감사 이벤트를 하나의
+트랜잭션으로 기록한다. 이 파일 메타데이터는 내부용이며 `AgreementResponse`에는 노출하지 않는다.
+PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를 실패 처리하고 저장된 파일을 정리한다.
 
 ### 6.2 합의서 조회
 
@@ -920,8 +923,8 @@ canonical `signed_date`가 없으면 `409 INVALID_STATUS_TRANSITION`으로 거�
 - `KAKAO`는 하이픈 없는 국내 휴대전화 번호
 - 역할과 연락처 중복 금지
 - 연락처 원문을 모두싸인 Adapter에만 전달하고 API 응답·DB·로그에 저장하지 않음
-- 서버가 확정 합의서를 메모리에서 PDF로 생성하고 모두싸인
-  `POST /embedded-drafts`에 Base64 PDF로 전달
+- 서버가 C-6에서 private Storage에 확정·저장한 합의서 PDF를 읽어 SHA-256 무결성을 검증한 뒤
+  모두싸인 `POST /embedded-drafts`에 Base64 PDF로 전달. C-7은 PDF를 다시 렌더링하지 않음
 - `Signature=REQUESTING → EDITING`, `modusign_status=DRAFT`,
   `modusign_draft_id`와 `SIGNATURE_DRAFT_CREATED` 감사 이벤트를 저장
 - 이 단계에서는 Contract를 `READY_TO_SIGN`으로 유지하며 자동 발송하지 않음
@@ -1253,8 +1256,8 @@ C는 B의 분석 결과가 완성될 때까지 기다리지 않고 고정 `Revie
 | C-3 | 공개 토큰·멱등 키 기반 | B의 공통 저장 기반으로 hash·scope·만료·동일 요청 재생 테스트 통과 |
 | C-4 | 조정 초안·상세·발송 | B의 ReviewItem fixture로 미리보기와 계약당 1회 `/send` |
 | C-5 | 대행사 공개 조회·열람 기록·1회 응답 | GET 무변경, `/open` 최초 시각 유지, 전체 항목 정확히 한 번 제출 |
-| C-6 | 최종 확정·합의서 생성·조회 | 임의 최종 문구 거부, 원계약 체결일, 합의서 최대 4조항 |
-| C-7 | 모두싸인 `mock/live` Adapter와 임베디드 초안 | 합의서 PDF, 서명자 2명, `EDITING`, 민감 URL 비저장 검증 |
+| C-6 | 최종 확정·합의서 생성·조회 | 임의 최종 문구 거부, 원계약 보존, 합의서 PDF private 저장·SHA-256, 최대 4조항 |
+| C-7 | 모두싸인 `mock/live` Adapter와 임베디드 초안 | C-6 저장 PDF 무결성 검증, 서명자 2명, `EDITING`, 민감 URL 비저장 검증 |
 | C-8 | 웹훅 인증·중복·순서 역전 처리 | 즉시 204, 종료 상태 회귀 방지 |
 | C-9 | D-day·갱신 날짜 계산 | 한국 날짜 경계와 D-30·D-14·D-7 테스트 통과 |
 | C-10 | 대시보드 집계 | 상태 집합·distinct·D-day·금액 집계 테스트 통과 |

@@ -5,9 +5,8 @@ import { useParams } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { Timeline } from "@/components/Timeline";
 import { useAsync } from "@/lib/hooks";
-import { adapter, isUsingMock } from "@/lib/adapter";
+import { adapter, isUsingMock, type LiveSignature } from "@/lib/adapter";
 import { MODUSIGN_STATUS_LABEL, modusignStep } from "@/lib/status";
-import type { SignatureState } from "@/lib/types";
 
 type SignerFields = {
   ownerName: string;
@@ -27,7 +26,7 @@ const EMPTY_SIGNERS: SignerFields = {
    초안 생성만으로 발송되지 않으며, 사용자가 모두싸인 편집기에서 다시 확인하고 보낸다. */
 export default function SignaturePage() {
   const { id } = useParams<{ id: string }>();
-  const state = useAsync(() => adapter.getContract(id), [id]);
+  const state = useAsync(() => adapter.getSignatureView(id), [id]);
   const [signers, setSigners] = useState<SignerFields>(EMPTY_SIGNERS);
   const [creating, setCreating] = useState(false);
   const [editorUrl, setEditorUrl] = useState<string | null>(null);
@@ -39,6 +38,12 @@ export default function SignaturePage() {
     signers.ownerEmail.includes("@") &&
     signers.agencyEmail.includes("@") &&
     signers.ownerEmail.trim() !== signers.agencyEmail.trim();
+  const canCreateDraft = isUsingMock || (state.status === "ready"
+    && (
+      state.data.signature === null
+      || state.data.signature.status === "FAILED"
+      || state.data.signature.status === "ABORTED"
+    ));
 
   const createDraft = async () => {
     if (!isComplete || creating) return;
@@ -82,7 +87,7 @@ export default function SignaturePage() {
       title="서명 준비 · 상태"
       backHref="/dashboard"
       footer={
-        state.status === "ready" && state.data.signature.ownerSigned && state.data.signature.agencySigned ? (
+        state.status === "ready" && state.data.signature?.modusignStatus === "COMPLETED" ? (
           <CTAButton href={`/contracts/${id}/obligations`}>
             산출물 증빙 확인하기
           </CTAButton>
@@ -90,7 +95,7 @@ export default function SignaturePage() {
       }
     >
       <div className="flex flex-col gap-5">
-        {!editorUrl && (
+        {canCreateDraft && !editorUrl && (
           <SignatureDraftForm
             signers={signers}
             onChange={setSigners}
@@ -127,10 +132,19 @@ export default function SignaturePage() {
         {state.status === "loading" && (
           <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
         )}
+        {state.status === "error" && (
+          <p className="py-10 text-center text-sm font-bold text-amber800">⚠ {state.error}</p>
+        )}
 
         {state.status === "ready" && (
           <>
-            <SignatureStatus sig={state.data.signature} />
+            {state.data.signature ? (
+              <SignatureStatus sig={state.data.signature} />
+            ) : (
+              <div className="rounded-xl border border-gray200 bg-white p-4 text-sm text-gray500">
+                아직 생성된 모두싸인 초안이 없습니다.
+              </div>
+            )}
             <div>
               <h3 className="mb-3 text-[13px] font-bold text-gray700">감사 타임라인</h3>
               <Timeline events={state.data.timeline} />
@@ -199,13 +213,14 @@ function SignatureDraftForm({
   );
 }
 
-function SignatureStatus({ sig }: { sig: SignatureState }) {
-  const step = modusignStep(sig.modusign);
+function SignatureStatus({ sig }: { sig: LiveSignature }) {
+  const externalStatus = sig.modusignStatus ?? "DRAFT";
+  const step = modusignStep(externalStatus);
   const labels = ["처리 중", "서명 진행 중", "서명 완료"];
 
   return (
     <div className="rounded-xl border border-gray200 bg-white p-4">
-      <div className="text-sm font-black text-ink">{MODUSIGN_STATUS_LABEL[sig.modusign]}</div>
+      <div className="text-sm font-black text-ink">{MODUSIGN_STATUS_LABEL[externalStatus]}</div>
       <div className="mt-3 flex gap-1.5">
         {[0, 1, 2].map((index) => (
           <div
@@ -223,13 +238,23 @@ function SignatureStatus({ sig }: { sig: SignatureState }) {
           </span>
         ))}
       </div>
-      <div className="mt-3 text-xs text-gray700">
-        {sig.ownerSigned ? "사장님 서명 완료" : "사장님 서명 대기"} ·{" "}
-        {sig.agencySigned ? "대행사 서명 완료" : "대행사 서명 대기 중"}
-      </div>
+      <div className="mt-3 text-xs text-gray700">내부 처리 상태: {signatureStatusLabel(sig.status)}</div>
       {sig.documentId && (
         <div className="mt-1 text-[10px] text-gray500">모두싸인 문서 ID: {sig.documentId}</div>
       )}
     </div>
   );
+}
+
+function signatureStatusLabel(status: LiveSignature["status"]): string {
+  const labels: Record<LiveSignature["status"], string> = {
+    REQUEST_READY: "초안 생성 대기",
+    REQUESTING: "초안 생성 중",
+    EDITING: "편집기 확인 중",
+    SIGNING: "양측 서명 진행 중",
+    COMPLETED: "양측 서명 완료",
+    ABORTED: "서명 중단",
+    FAILED: "처리 실패",
+  };
+  return labels[status];
 }

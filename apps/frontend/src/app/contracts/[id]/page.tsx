@@ -89,16 +89,22 @@ function RiskBadge({ risk }: { risk: ClauseRisk }) {
 
 export default function AnalysisViewerPage() {
   const { id } = useParams<{ id: string }>();
-  const state = useAsync(() => adapter.getContract(id), [id]);
-
   return (
     <AppScreen size="wide" backHref="/dashboard">
-      {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>
-      )}
-      {state.status === "ready" && (isUsingMock ? <ViewerBody data={state.data} contractId={id} /> : <LiveViewer contractId={id} />)}
+      {isUsingMock ? <MockViewer contractId={id} /> : <LiveViewer contractId={id} />}
     </AppScreen>
   );
+}
+
+function MockViewer({ contractId }: { contractId: string }) {
+  const state = useAsync(() => adapter.getContract(contractId), [contractId]);
+  if (state.status === "loading") {
+    return <p className="py-10 text-center text-sm text-gray500">불러오는 중…</p>;
+  }
+  if (state.status === "error") {
+    return <p className="py-10 text-center text-sm text-amber800">⚠ {state.error}</p>;
+  }
+  return <ViewerBody data={state.data} contractId={contractId} />;
 }
 
 function LiveViewer({ contractId }: { contractId: string }) {
@@ -109,6 +115,9 @@ function LiveViewer({ contractId }: { contractId: string }) {
   if (state.status === "loading") return <p className="py-10 text-center text-sm text-gray500">분석 결과를 불러오는 중…</p>;
   if (state.status === "error") return <p className="py-10 text-center text-sm text-amber800">⚠ {state.error}</p>;
   const data = { ...state.data, items: state.data.items.map((item) => ({ ...item, userChoice: choices[item.id] ?? item.userChoice })) };
+  const requestCount = data.items.filter(
+    (item) => item.userChoice === "REQUEST" || item.userChoice === "COMPROMISE",
+  ).length;
 
   const select = async (itemId: string, choice: SuggestionChoice) => {
     setSavingId(itemId);
@@ -123,7 +132,17 @@ function LiveViewer({ contractId }: { contractId: string }) {
   return <div className="mx-auto flex max-w-3xl flex-col gap-5">
     <header className="rounded-2xl bg-ink px-6 py-5 text-white"><h1 className="text-xl font-black">{data.title}</h1><p className="mt-1 text-sm text-white/70">{data.counterpartyName} · 원문 근거와 함께 확인해요</p></header>
     {data.understood && <LayerBlock layer="understood" label="내가 이해한 조건"><div className="grid gap-1 text-sm"><span>기간 · {data.understood.durationText}</span><span>월 금액 · {data.understood.monthlyAmount?.toLocaleString() ?? "기억 안 남"}원</span><span>총액 · {data.understood.totalAmount?.toLocaleString() ?? "기억 안 남"}원</span></div></LayerBlock>}
-    {data.items.length === 0 ? <p className="rounded-xl bg-white p-6 text-center text-sm text-gray500">현재 표시할 확인 항목이 없어요.</p> : data.items.map((item) => <article key={item.id} className="rounded-2xl bg-white p-5 ring-1 ring-gray200"><div className="mb-3 flex items-center justify-between"><b className="text-sm text-ink">{SIGNAL_META[item.type]}</b>{item.sourceConfidence != null && <span className="text-xs text-gray500">근거 확신도 {Math.round(item.sourceConfidence * 100)}%</span>}</div><LayerBlock layer="original" label={item.sourcePage ? `계약서 원문 · ${item.sourcePage}쪽` : "원문 근거를 찾지 못함"}>{item.sourceText ?? "원문 근거가 없어 확인이 필요합니다."}</LayerBlock><div className="mt-3"><LayerBlock layer="ai" label="AI가 본 차이 · 추정">{item.plainExplanation}</LayerBlock></div><div className="mt-3"><LayerBlock layer="official" label="확인 기준">{item.basisText}</LayerBlock></div><div className="mt-3 grid gap-2">{([['ACCEPT','원안 수용',item.suggestionAccept],['COMPROMISE','절충안',item.suggestionCompromise],['REQUEST','요청안',item.suggestionRequest]] as const).map(([choice,label,text]) => <button key={choice} type="button" disabled={savingId === item.id} onClick={() => void select(item.id, choice)} className={`rounded-lg border p-3 text-left text-sm ${item.userChoice === choice ? 'border-amber700 bg-amber100 font-bold' : 'border-gray300 bg-white'}`}><span className="text-xs text-gray500">{label}</span><br />{text}</button>)}</div></article>)}</div>;
+    {data.items.length === 0 ? <p className="rounded-xl bg-white p-6 text-center text-sm text-gray500">현재 표시할 확인 항목이 없어요.</p> : data.items.map((item) => <article key={item.id} className="rounded-2xl bg-white p-5 ring-1 ring-gray200"><div className="mb-3 flex items-center justify-between"><b className="text-sm text-ink">{SIGNAL_META[item.type]}</b>{item.sourceConfidence != null && <span className="text-xs text-gray500">근거 확신도 {Math.round(item.sourceConfidence * 100)}%</span>}</div><LayerBlock layer="original" label={item.sourcePage ? `계약서 원문 · ${item.sourcePage}쪽` : "원문 근거를 찾지 못함"}>{item.sourceText ?? "원문 근거가 없어 확인이 필요합니다."}</LayerBlock><div className="mt-3"><LayerBlock layer="ai" label="AI가 본 차이 · 추정">{item.plainExplanation}</LayerBlock></div><div className="mt-3"><LayerBlock layer="official" label="확인 기준">{item.basisText}</LayerBlock></div><div className="mt-3 grid gap-2">{([['ACCEPT','원안 수용',item.suggestionAccept],['COMPROMISE','절충안',item.suggestionCompromise],['REQUEST','요청안',item.suggestionRequest]] as const).map(([choice,label,text]) => <button key={choice} type="button" disabled={savingId === item.id} onClick={() => void select(item.id, choice)} className={`rounded-lg border p-3 text-left text-sm ${item.userChoice === choice ? 'border-amber700 bg-amber100 font-bold' : 'border-gray300 bg-white'}`}><span className="text-xs text-gray500">{label}</span><br />{text}</button>)}</div></article>)}
+    <a
+      href={`/contracts/${contractId}/request`}
+      aria-disabled={requestCount === 0}
+      className={`flex h-12 items-center justify-center rounded-lg text-sm font-bold ${
+        requestCount > 0 ? "bg-ink text-white" : "pointer-events-none bg-gray200 text-gray500"
+      }`}
+    >
+      조정 요청 {requestCount}건 확인하기
+    </a>
+  </div>;
 }
 
 function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: string }) {

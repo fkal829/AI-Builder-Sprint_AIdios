@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
-import { adapter, type RevisedContractReview } from "@/lib/adapter";
+import { adapter, isUsingMock, type RevisedContractReview } from "@/lib/adapter";
 
 export default function RevisedContractPage() {
   const { id } = useParams<{ id: string }>();
@@ -20,7 +20,11 @@ export default function RevisedContractPage() {
     setError(null);
     try {
       const adjustmentId =
-        window.localStorage.getItem(`dandi:last-adjustment:${id}`) ?? "mock-adjustment";
+        window.localStorage.getItem(`dandi:last-adjustment:${id}`)
+        ?? (isUsingMock ? "mock-adjustment" : null);
+      if (!adjustmentId) {
+        throw new Error("이 브라우저에서 확정한 조정 요청을 찾지 못했습니다.");
+      }
       const document = await adapter.uploadRevisedContract(id, file);
       const nextReview = await adapter.createRevisedContractReview(
         id,

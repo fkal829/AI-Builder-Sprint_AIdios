@@ -1,7 +1,8 @@
 # 단디계약 — 프론트엔드
 
 부산 관광상권 소상공인용 AI 광고대행 계약 CLM. Next.js(App Router) + TypeScript + Tailwind CSS v4.
-와이어프레임 v2와 최종기획안의 **P0 전체**를 목업 데이터로 완결되게 구현했습니다.
+와이어프레임 v2와 최종기획안의 **P0 전체**를 구현했으며, 명시적인 mock/API 모드로
+전환할 수 있습니다. 광고효과 기록·대조(6.14)는 계획대로 P2 화면 목업입니다.
 
 > 읽지 못한 계약을 읽어주고, 하지 못한 말을 대신해준다.
 
@@ -19,7 +20,8 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 
 1. **판정하지 않는다** — 경고색(빨강) 없음. "다릅니다 / 근거를 찾지 못했습니다 / 확인이 필요합니다"만 사용.
 2. **다섯 층위 분리** — 원문(사실)·내가 이해한 조건·AI 해석(추정)·공식 기준·조정 요청안(미확정)을 색·라벨로 항상 구분 → `components/LayerBlock.tsx`.
-3. **타이핑 없이 완주** — 업로드~서명 필수 경로는 버튼·선택만. 자유 입력(톤완충)은 P1 접힘 경로.
+3. **선택 중심 완주** — 계약 조건과 조정 결과는 버튼·선택으로 진행하며, 서명자 연락처와
+   증빙 URL처럼 외부 처리에 필요한 값만 직접 입력합니다.
 4. **근거 필수** — 모든 지적 옆에 원문 페이지·문장 → `components/SourceLink.tsx`.
 5. **비가역 행동 전 확인** — 발송·서명 전 모달 → `components/ConfirmModal.tsx`.
 6. **조정 이력을 지우지 않는다** — 수락·거절·역제안과 수정 계약서 대조 결과를 함께 보존.
@@ -59,7 +61,7 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 
 ```
 src/
-├─ app/                 # App Router 라우트 (전부 목업 데이터로 동작)
+├─ app/                 # App Router 라우트 (P0 mock/API 모드, 6.14 P2 목업)
 ├─ components/          # 재사용 컴포넌트
 │  ├─ ClauseCard.tsx    #  ★ 조항 카드 — variant="row" | "detail" 두 변형
 │  ├─ LayerBlock.tsx    #  층위 분리 프리미티브(원칙 #2)
@@ -79,20 +81,14 @@ src/
 
 ## 실제 API 연동
 
-`lib/adapter.ts`의 `DataAdapter` 인터페이스만 구현해 교체합니다. 화면 코드는 그대로.
-엔드포인트 매핑은 기획안 §12 참고. 외부 상태(모두싸인 등)는 `lib/status.ts`에서 쉬운
-한국어로 매핑하고 내부 enum은 별도 유지합니다.
+`lib/adapter.ts`의 `MockAdapter`와 `ApiAdapter`가 같은 `DataAdapter` 계약을 구현합니다.
+API 모드에서는 대시보드, 계약 생성·업로드·분석, 검토 선택, 조정 링크·응답 확정,
+수정 계약서 대조, 모두싸인 초안·상태·타임라인, 증빙 링크·제출·검토, 재계약 결정까지
+P0 경로가 실제 FastAPI를 호출합니다. 조정·증빙 공개 링크는 자동 발송하지 않으며 사용자가
+기존 채널로 직접 전달합니다.
 
-```ts
-// class RealAdapter implements DataAdapter { fetch(`${BASE}/api/v1/...`) }
-// export const adapter = USE_MOCK ? new MockAdapter() : new RealAdapter();
-```
-
-현재는 대행사 공개 조정 응답 화면(`/r/[token]`), 공개 증빙 제출 화면
-(`/r/[token]/evidence`), 소상공인 대시보드가 실 API 연동을 지원합니다. `.env.local`에
-다음을 설정하면 나머지 화면은 목업으로 유지하면서 해당 화면이 API를 호출합니다. 조정 응답 토큰의
-scope는 `ADJUSTMENT_RESPONSE`, 증빙 제출 토큰의 scope는 `OBLIGATION_EVIDENCE`이므로
-서로 재사용할 수 없으며, 증빙은 소유자가 별도로 발급한 증빙 제출 링크로 접근해야 합니다.
+조정 응답 토큰의 scope는 `ADJUSTMENT_RESPONSE`, 증빙 제출 토큰의 scope는
+`OBLIGATION_EVIDENCE`이므로 서로 재사용할 수 없습니다. `.env.local`에는 다음을 설정합니다.
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
@@ -106,6 +102,8 @@ API 키·서비스 키·운영용 정적 토큰을 넣지 않습니다. 운영 �
 
 ## 참고
 
-- 모든 데이터는 가상(목업)입니다.
+- mock 모드와 `/`, `/states` 데모 화면의 데이터는 모두 가상입니다.
+- API 모드의 6.14 광고효과 화면은 P2 목업이며 performance API를 호출하지 않습니다.
+- 운영 소유자 인증 공급자는 아직 확정되지 않았고 로컬 데모 Bearer 토큰만 연결돼 있습니다.
 - 디자인 토큰(amber/paper/ink/gray, 경고색 없음)은 `app/globals.css`의 `@theme`.
 - Gaegu 폰트는 판단 메모/개발 주석 전용 — 서비스 실제 화면에는 쓰지 않습니다.

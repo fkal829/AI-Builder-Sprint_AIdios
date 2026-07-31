@@ -100,10 +100,10 @@ curl -X POST \
 ```
 
 최초 응답은 `202 QUEUED`이며 백그라운드 작업이 Document Parse, 구조화 추출,
-최대 2회의 Evaluator Loop, 원문 근거 검증을 수행합니다. 같은 멱등 키와 같은 요청은
-최초 `202` 응답을 재생하고, 다른 요청은 `409 IDEMPOTENCY_CONFLICT`로 거부합니다.
-mock 분석 결과도 `source_page`, `source_text`, `confidence` 필드를 유지하며 찾지 못한
-값의 원문 필드는 `null`입니다.
+최대 2회의 Evaluator Loop, 원문 근거 검증, Solar 항목별 설명·3종 문구 생성을
+수행합니다. 같은 멱등 키와 같은 요청은 최초 `202` 응답을 재생하고, 다른 요청은
+`409 IDEMPOTENCY_CONFLICT`로 거부합니다. mock 분석 결과도 `source_page`,
+`source_text`, `confidence` 필드를 유지하며 찾지 못한 값의 원문 필드는 `null`입니다.
 
 ## Upstage live 모드
 
@@ -111,12 +111,21 @@ mock 분석 결과도 `source_page`, `source_text`, `confidence` 필드를 유�
 
 - Document Parse: `/v1/document-digitization`
 - Universal Extraction: `/v1/information-extraction/chat/completions`
+- Solar Chat: `/v1/chat/completions`
 
 PDF는 문서 항목 하나로 보내고 Universal Extraction의 location 좌표를 Document Parse
 요소에 다시 연결해 `source_page`와 `source_text`를 검증합니다. Upstage의 `high`,
 `low` confidence는 각각 `0.9`, `0.4`로 정규화하며 `low`는 근거를 보존한
 `NEEDS_CHECK`로 처리합니다. 이 값은 확률 보정값으로 해석하지 않습니다. 원문 위치를
 검증하지 못한 값은 `MISSING_EVIDENCE`로 저장합니다.
+
+Solar는 서버 규칙이 만든 누락·불일치·불명확 후보에 항목별 쉬운 설명과
+원안 수용·절충·요청 문구만 붙입니다. 기본 모델은
+`UPSTAGE_SOLAR_MODEL=solar-pro3`, timeout은
+`UPSTAGE_SOLAR_TIMEOUT_SECONDS=120`입니다. 응답은 strict JSON Schema와
+Pydantic으로 검증하며 잘못된 응답은 고정 문구로 대체하지 않고
+`FAILED/ANALYSIS_SCHEMA_INVALID`로 처리합니다. mock의 Solar 문구는 실제 API
+응답이 아닙니다.
 
 ## Supabase live 준비
 

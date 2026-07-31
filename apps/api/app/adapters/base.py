@@ -2,7 +2,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.core.enums import ExtractedField
-from app.schemas.analysis import ExtractedTermCandidate
+from app.schemas.analysis import (
+    ExtractedTermCandidate,
+    SolarReviewInput,
+    SolarReviewOutput,
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,14 @@ class DocumentAnalysisAdapter(Protocol):
         parsed_document: ParsedDocument,
         target_fields: tuple[ExtractedField, ...],
     ) -> list[ExtractedTermCandidate]: ...
+
+
+class ContractReviewAdapter(Protocol):
+    async def generate_review_content(
+        self,
+        *,
+        items: list[SolarReviewInput],
+    ) -> list[SolarReviewOutput]: ...
 
 
 class SignatureAdapter(Protocol):

@@ -475,6 +475,14 @@ Document Parse와 Universal Extraction의 location 메타데이터를 연결해
 필드만 한 번 재추출하며 두 번째 결과도 Pydantic AI 스키마에 맞지 않으면
 `FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다.
 
+추출·근거 검증 뒤 서버 코드가 누락, 불일치, 명시적인 불명확 표현과 책임 확인
+후보를 판정한다. Solar Adapter는 후보별 최소 원문·사용자 이해조건을 받아 쉬운 설명과
+원안 수용·절충·요청 문구만 생성한다. 출력 UUID, 문구, 비보정 자기평가값과 한계는
+strict JSON Schema와 Pydantic으로 검증하며 Solar가 신호, 근거, 계산 결과, 상태를
+변경하게 하지 않는다. Solar timeout·HTTP·스키마 오류는 고정 문구로 대체하지 않고
+`FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다. Solar 호출은 추출
+`attempt_count`에 포함하지 않는다.
+
 완료 저장은 `ExtractedTerm`, `ReviewItem`, 비어 있는 Contract canonical 값,
 `AnalysisTask=COMPLETED`, `Contract=REVIEW_REQUIRED`,
 `ANALYSIS_COMPLETED` 이벤트를 하나의 DB 트랜잭션으로 기록한다. 기존 non-null canonical
@@ -598,6 +606,11 @@ AI 재실행은 사용자가 확정한 선택을 덮어쓰지 않는다. 선택 
 검토 판단의 `model_confidence`와 비어 있지 않은
 `model_limitations`를 함께 반환하고, `DETERMINISTIC` 항목에서는 두 필드가 모두
 `null`이다.
+현재 결정 규칙이 신호를 판정하고 Solar가 설명·3종 문구를 생성한 결과는
+`detection_method=HYBRID`다. Solar Chat이 별도의 보정 confidence를 제공하지 않으므로
+`model_confidence`는 문구가 입력 범위를 반영했다는 모델의 비보정 자기평가값이며,
+법적 판단 정확도나 원문 추출의 `source_confidence`로 해석하지 않는다. 이 한계는
+`model_limitations`에도 포함한다.
 `UNREVIEWED`의 `user_choice`는 `null`이고 이후 상태에서는 저장된 선택을 반환한다.
 
 ## 5. 조정 요청·대행사 응답 — C

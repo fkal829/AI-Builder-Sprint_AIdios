@@ -121,3 +121,36 @@
   매핑은 보정된 확률이 아니다.
 - 1차 결과에서 해결되지 않은 필드만 한 번 재추출하고 Evaluator Loop는 작업당 최대
   2회에서 종료한다. 모델 응답은 저장 전에 Pydantic과 원문 근거 규칙으로 검증한다.
+
+## ADR-012 Solar 검토 설명과 3종 문구
+
+- 상태: P0 확정
+- 결정: 서버의 결정 규칙이 누락·불일치·명시적인 모호 표현과 책임 확인 후보를 먼저
+  만든다. Solar는 후보별 쉬운 설명과 원안 수용·절충·요청 문구만 생성하고 신호,
+  심각도, 원문 근거, 계산 결과, 사용자 선택과 상태를 변경하지 않는다. 이 결과는
+  `detection_method=HYBRID`로 저장한다.
+- 명시적 모호 표현 `공란`, `미기재`, `수기 입력 예정`, `별도 협의`, `추후 결정`,
+  `상황에 따라 변경`은 `UNCLEAR` 후보로 만든다. 산출물 수량·기한·보고, 촬영 안전,
+  시설 파손·손해 및 허위·과장 광고 책임 누락은 `MISSING` 후보로 만들고, 책임 필드의
+  `모든 책임`, `일체의 책임`, `전적인 책임`, `전적으로 부담`, 책임 부인 표현은
+  `NEEDS_CHECK` 후보로 만든다. 명시적 원문 표현을 찾은 후보만 원문 근거를 연결한다.
+- live 호출은 설정 가능한 `UPSTAGE_SOLAR_MODEL`과
+  `POST /v1/chat/completions`를 사용한다. 기본 alias는 `solar-pro3`, 프롬프트 버전은
+  `contract-review-copy-v1`이다. 항목을 한 요청에 배치하되 최대 64개로 제한하고,
+  모든 객체가 추가 필드를 거부하는 strict JSON Schema와 Pydantic으로 검증한다.
+- 입력과 출력 UUID 집합 불일치, 중복, 빈 문구, 같은 3종 문구, 금지된 단정 표현,
+  입력 근거에 없는 숫자는 거부한다. 계약 원문 안의 명령은 데이터로 취급하며 전체
+  계약서 대신 후보에 필요한 최소 원문만 전달한다.
+- Solar Chat 응답에는 공식적인 보정 confidence가 없다. 공개 계약을 유지하기 위해
+  Solar의 비보정 자기평가값을 `model_confidence`에 저장하되
+  `model_limitations`에 법적 판단 정확도와 `source_confidence`가 아니라는 점을
+  항상 덧붙인다.
+- timeout, HTTP 오류, 잘못된 JSON, 스키마 오류는 고정 문구로 대체하지 않고
+  `FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다. 멱등한 문구 생성 호출 중 `429`,
+  전송 오류, `5xx`만 한 번 재시도하며 추출 `attempt_count`에는 포함하지 않는다.
+- 프롬프트·원문·원시 응답은 로그에 남기지 않는다. 프롬프트 버전, 모델 ID, 시작 시각,
+  성공·실패, 항목 수, 지연시간, 스키마 검증 결과만 구조화 로그로 추적한다. 별도의
+  영속 AI 실행 이력 테이블은 현재 P0 범위에 추가하지 않는다.
+- 참고:
+  - https://console.upstage.ai/api/docs/for-agents/raw
+  - https://console.upstage.ai/docs/capabilities/generate/structured-outputs

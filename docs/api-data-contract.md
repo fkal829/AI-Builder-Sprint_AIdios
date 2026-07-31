@@ -272,6 +272,9 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 - 규칙 기반 결과의 `model_limitations`도 `null`이다. 모델 기반 또는 혼합 결과는
   `model_confidence`와 비어 있지 않은 `model_limitations`를 함께 반환해 조항 카드에
   확신도와 한계를 분리 표시한다.
+- Solar Chat은 보정된 confidence를 별도로 제공하지 않는다. Solar 검토 문구가 포함된
+  `HYBRID` 결과의 `model_confidence`는 제공된 입력을 반영했다는 비보정
+  자기평가값이며, 이 의미와 한계를 `model_limitations`에 함께 표시한다.
 - `VERIFIED`와 `NEEDS_CHECK`는 `source_document_id`, `source_page`, `source_text`,
   `source_confidence`가 모두 필요하고 `NOT_FOUND`, `MISSING_EVIDENCE`에서는 네 필드가
   모두 `null`이다. `source_confidence`는 원문 추출 근거의 확신도이며 검토 판단의

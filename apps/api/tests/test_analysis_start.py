@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from pypdf import PdfWriter
 
 from app.adapters.base import ParsedDocument, ParsedPage
+from app.adapters.solar import SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
 from app.adapters.upstage import UpstageAdapter, UpstageExtractionError
 from app.api.dependencies import get_analysis_service, get_supabase_adapter
@@ -51,6 +52,11 @@ class AlwaysInvalidExtractAdapter:
         raise UpstageExtractionError("invalid schema")
 
 
+class MissingSolarOutputAdapter:
+    async def generate_review_content(self, *, items):
+        return []
+
+
 @pytest.fixture
 async def analysis_context(monkeypatch):
     async def run_inline(function, *args, **kwargs):
@@ -68,6 +74,11 @@ async def analysis_context(monkeypatch):
     )
     analysis_service = AnalysisService(
         adapter=UpstageAdapter(
+            mode="mock",
+            api_key="",
+            base_url="https://api.upstage.ai",
+        ),
+        reviewer=SolarReviewAdapter(
             mode="mock",
             api_key="",
             base_url="https://api.upstage.ai",
@@ -189,6 +200,23 @@ async def test_starts_idempotent_analysis_and_processes_mock_result(analysis_con
     assert completed.attempt_count == 2
     assert completed.result is not None
     assert completed.result.extracted_terms
+    assert completed.result.review_items
+    assert all(
+        item.detection_method.value == "HYBRID"
+        and item.model_confidence is not None
+        and item.model_limitations is not None
+        for item in completed.result.review_items
+    )
+    assert len(
+        {
+            (
+                item.suggestion_accept,
+                item.suggestion_compromise,
+                item.suggestion_request,
+            )
+            for item in completed.result.review_items
+        }
+    ) > 1
     assert {term.field for term in completed.result.extracted_terms} == set(ExtractedField)
     assert any(
         term.source_page is not None
@@ -245,11 +273,18 @@ async def test_compares_understood_duration_and_termination(analysis_context) ->
 
     task = repository.mock_analysis_tasks[UUID(response.json()["data"]["id"])]
     assert task.result is not None
-    explanations = {item.plain_explanation for item in task.result.review_items}
-    assert "사용자가 이해한 계약기간과 계약 원문의 계약기간이 다릅니다." in explanations
-    assert (
-        "사용자가 이해한 중도해지 가능 여부와 계약 원문의 조건이 다릅니다."
-        in explanations
+    explanations = [item.plain_explanation for item in task.result.review_items]
+    assert any(
+        explanation.startswith(
+            "사용자가 이해한 계약기간과 계약 원문의 계약기간이 다릅니다."
+        )
+        for explanation in explanations
+    )
+    assert any(
+        explanation.startswith(
+            "사용자가 이해한 중도해지 가능 여부와 계약 원문의 조건이 다릅니다."
+        )
+        for explanation in explanations
     )
 
 
@@ -343,6 +378,28 @@ async def test_failed_analysis_can_only_be_restarted_explicitly_with_new_key(
     assert [event.event_type for event in repository.mock_audit_events].count(
         "ANALYSIS_RESTARTED"
     ) == 1
+
+
+async def test_invalid_solar_output_fails_analysis_without_partial_review_items(
+    analysis_context,
+) -> None:
+    client, repository, service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    service.reviewer = MissingSolarOutputAdapter()
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"document_id": str(document_id), "supporting_document_ids": []},
+    )
+
+    task = repository.mock_analysis_tasks[UUID(response.json()["data"]["id"])]
+    assert response.status_code == 202
+    assert task.status == AnalysisStatus.FAILED
+    assert task.error_code.value == "ANALYSIS_SCHEMA_INVALID"
+    assert task.result is None
+    assert not repository.mock_review_items
 
 
 async def test_analysis_start_requires_auth_and_idempotency_header(analysis_context) -> None:

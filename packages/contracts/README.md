@@ -3,6 +3,7 @@
 프런트엔드와 API가 함께 지켜야 하는 안정적인 경계만 둡니다.
 
 - `schemas/`: AI 구조화 결과와 외부 공개 payload의 JSON Schema
+  - `performance-extracted-payload.schema.json`: 광고효과 지표 후보와 원문 근거 계약
 - `state-machines.json`: 내부 enum과 허용 상태 전환
 - `openapi/`: 구현된 P0와 `planned` P2를 구분한 OpenAPI 명세 및 생성 TypeScript 타입 출력 위치
 

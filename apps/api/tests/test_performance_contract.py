@@ -280,6 +280,71 @@ def test_confirmed_payload_requires_nullable_keys_and_preserves_zero() -> None:
     assert unknown.published_content_count is None
 
 
+@pytest.mark.parametrize(
+    "field",
+    (
+        "impressions",
+        "likes",
+        "comments",
+        "reach",
+        "saves",
+        "shares",
+        "published_content_count",
+        "inquiries",
+        "reservations",
+        "purchases",
+    ),
+)
+def test_confirmed_payload_rejects_negative_non_negative_metrics(field: str) -> None:
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(**confirmed_payload_values(**{field: -1}))
+
+
+def test_confirmed_payload_allows_negative_follower_net_change_but_rejects_boolean() -> None:
+    payload = PerformanceConfirmedPayloadInput(
+        **confirmed_payload_values(follower_net_change=-12)
+    )
+
+    assert payload.follower_net_change == -12
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(
+            **confirmed_payload_values(published_content_count=True)
+        )
+
+
+def test_published_content_count_candidate_preserves_not_found_and_zero() -> None:
+    base_payload = make_extracted_payload().model_dump()
+    unknown = PerformanceExtractedPayload(
+        **{
+            **base_payload,
+            "published_content_count": make_non_negative_candidate(
+                None,
+                status=PerformanceMetricVerificationStatus.NOT_FOUND,
+            ).model_dump(),
+        }
+    )
+    zero = PerformanceExtractedPayload(
+        **{
+            **base_payload,
+            "published_content_count": make_non_negative_candidate(0).model_dump(),
+        }
+    )
+
+    assert "published_content_count" in unknown.model_dump()
+    assert unknown.published_content_count.value is None
+    assert zero.published_content_count.value == 0
+    with pytest.raises(ValidationError):
+        make_non_negative_candidate(-1)
+    with pytest.raises(ValidationError):
+        PerformanceNonNegativeMetricCandidate(
+            value=None,
+            source_page=None,
+            source_text=None,
+            confidence=0.5,
+            verification_status=PerformanceMetricVerificationStatus.NEEDS_CHECK,
+        )
+
+
 def test_revision_validates_decimal_half_up_engagement_rate() -> None:
     report_id = uuid4()
     payload = make_confirmed_payload(

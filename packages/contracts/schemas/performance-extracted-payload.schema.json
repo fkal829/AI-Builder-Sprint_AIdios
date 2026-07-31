@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dandi-contract.local/schemas/performance-extracted-payload.schema.json",
+  "title": "PerformanceExtractedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "impressions",
+    "likes",
+    "comments",
+    "reach",
+    "saves",
+    "shares",
+    "follower_net_change",
+    "published_content_count"
+  ],
+  "properties": {
+    "impressions": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
+    "likes": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
+    "comments": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
+    "reach": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
+    "saves": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
+    "shares": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
+    "follower_net_change": {"$ref": "#/$defs/PerformanceSignedMetricCandidate"},
+    "published_content_count": {
+      "$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"
+    }
+  },
+  "$defs": {
+    "PerformanceMetricVerificationStatus": {
+      "type": "string",
+      "enum": ["VERIFIED", "NOT_FOUND", "NEEDS_CHECK"]
+    },
+    "PerformanceNonNegativeMetricCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "source_page",
+        "source_text",
+        "confidence",
+        "verification_status"
+      ],
+      "properties": {
+        "value": {"type": ["integer", "null"], "minimum": 0},
+        "source_page": {"type": ["integer", "null"], "minimum": 1},
+        "source_text": {"type": ["string", "null"], "minLength": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "verification_status": {
+          "$ref": "#/$defs/PerformanceMetricVerificationStatus"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"verification_status": {"const": "VERIFIED"}}
+          },
+          "then": {
+            "properties": {
+              "value": {"type": "integer", "minimum": 0},
+              "source_page": {"type": "integer", "minimum": 1},
+              "source_text": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"verification_status": {"const": "NOT_FOUND"}}
+          },
+          "then": {
+            "properties": {
+              "value": {"type": "null"},
+              "source_page": {"type": "null"},
+              "source_text": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"verification_status": {"const": "NEEDS_CHECK"}}
+          },
+          "then": {
+            "properties": {
+              "source_page": {"type": "integer", "minimum": 1},
+              "source_text": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    },
+    "PerformanceSignedMetricCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "source_page",
+        "source_text",
+        "confidence",
+        "verification_status"
+      ],
+      "properties": {
+        "value": {"type": ["integer", "null"]},
+        "source_page": {"type": ["integer", "null"], "minimum": 1},
+        "source_text": {"type": ["string", "null"], "minLength": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "verification_status": {
+          "$ref": "#/$defs/PerformanceMetricVerificationStatus"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"verification_status": {"const": "VERIFIED"}}
+          },
+          "then": {
+            "properties": {
+              "value": {"type": "integer"},
+              "source_page": {"type": "integer", "minimum": 1},
+              "source_text": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"verification_status": {"const": "NOT_FOUND"}}
+          },
+          "then": {
+            "properties": {
+              "value": {"type": "null"},
+              "source_page": {"type": "null"},
+              "source_text": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"verification_status": {"const": "NEEDS_CHECK"}}
+          },
+          "then": {
+            "properties": {
+              "source_page": {"type": "integer", "minimum": 1},
+              "source_text": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

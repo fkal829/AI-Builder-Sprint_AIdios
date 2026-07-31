@@ -55,6 +55,8 @@ from app.repositories.documents import DocumentRecord
 from app.repositories.idempotency import IdempotencyClaim, IdempotencyRecord
 from app.repositories.obligations import (
     EvidenceLinkCreateOutcome,
+    EvidenceReviewOutcome,
+    EvidenceReviewResult,
     EvidenceSubmissionOutcome,
     ObligationRecord,
 )
@@ -973,6 +975,106 @@ class SupabaseAdapter:
         except (TypeError, ValueError) as error:
             raise ExternalStorageFailure(
                 "증빙 URL 제출 저장 결과를 확인할 수 없습니다."
+            ) from error
+
+    async def review_obligation_evidence_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        obligation_id: UUID,
+        decision: ObligationStatus,
+        reviewed_at: datetime,
+    ) -> EvidenceReviewResult:
+        if decision not in {ObligationStatus.APPROVED, ObligationStatus.DISPUTED}:
+            raise ValueError("증빙 검토 결정은 APPROVED 또는 DISPUTED여야 합니다.")
+
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return EvidenceReviewResult(
+                        outcome=EvidenceReviewOutcome.NOT_FOUND,
+                        obligation=None,
+                    )
+                obligation = self._mock_obligations.get(contract_id)
+                if obligation is None or obligation.id != obligation_id:
+                    return EvidenceReviewResult(
+                        outcome=EvidenceReviewOutcome.NOT_FOUND,
+                        obligation=None,
+                    )
+                if obligation.status != ObligationStatus.SUBMITTED:
+                    return EvidenceReviewResult(
+                        outcome=EvidenceReviewOutcome.INVALID_STATUS_TRANSITION,
+                        obligation=_obligation_record_from_mock(obligation),
+                    )
+
+                reviewed = replace(
+                    obligation,
+                    status=decision,
+                    reviewed_at=reviewed_at,
+                    payment_condition_met=decision == ObligationStatus.APPROVED,
+                    updated_at=reviewed_at,
+                )
+                self._mock_obligations[contract_id] = reviewed
+                event_type = (
+                    "EVIDENCE_APPROVED"
+                    if decision == ObligationStatus.APPROVED
+                    else "EVIDENCE_DISPUTED"
+                )
+                summary = (
+                    "소유자가 산출물 증빙을 승인했습니다."
+                    if decision == ObligationStatus.APPROVED
+                    else "소유자가 산출물 증빙에 이의를 제기했습니다."
+                )
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type=event_type,
+                        actor_type="OWNER",
+                        summary=summary,
+                        created_at=reviewed_at,
+                    )
+                )
+                return EvidenceReviewResult(
+                    outcome=EvidenceReviewOutcome.REVIEWED,
+                    obligation=_obligation_record_from_mock(reviewed),
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_obligation_id": str(obligation_id),
+            "p_decision": decision.value,
+            "p_reviewed_at": reviewed_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "review_obligation_evidence_with_audit",
+                    params,
+                ).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("증빙 검토 저장에 실패했습니다.") from error
+        payload = response.data[0] if isinstance(response.data, list) else response.data
+        if not isinstance(payload, dict):
+            raise ExternalStorageFailure("증빙 검토 저장 결과를 확인할 수 없습니다.")
+        try:
+            outcome = EvidenceReviewOutcome(payload["outcome"])
+            obligation_payload = payload.get("obligation")
+            return EvidenceReviewResult(
+                outcome=outcome,
+                obligation=(
+                    _obligation_record_from_row(obligation_payload)
+                    if isinstance(obligation_payload, dict)
+                    else None
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "증빙 검토 저장 결과를 확인할 수 없습니다."
             ) from error
 
     async def list_audit_events(

@@ -1,10 +1,12 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
 from app.core.enums import ObligationStatus
+from app.repositories.public_tokens import PublicTokenRecord
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,12 @@ class ObligationRecord:
     payment_condition_met: bool
 
 
+class EvidenceLinkCreateOutcome(StrEnum):
+    CREATED = "CREATED"
+    NOT_FOUND = "NOT_FOUND"
+    INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
+
+
 class ObligationRepository(Protocol):
     async def list_owned_obligations(
         self,
@@ -33,3 +41,12 @@ class ObligationRepository(Protocol):
         owner_id: UUID,
         contract_id: UUID,
     ) -> Sequence[ObligationRecord] | None: ...
+
+    async def create_obligation_evidence_link_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        obligation_id: UUID,
+        public_token: PublicTokenRecord,
+    ) -> EvidenceLinkCreateOutcome: ...

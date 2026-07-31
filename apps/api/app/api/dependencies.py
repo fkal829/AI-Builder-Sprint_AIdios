@@ -153,7 +153,16 @@ async def get_contract_service(
 async def get_obligation_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> ObligationService:
-    return ObligationService(supabase)
+    settings = get_settings()
+    return ObligationService(
+        supabase,
+        idempotency=IdempotencyService(supabase),
+        public_tokens=PublicTokenService(
+            supabase,
+            signing_secret=settings.public_token_secret,
+        ),
+        public_app_base_url=settings.public_app_base_url,
+    )
 
 
 async def get_public_token_service(

@@ -2,9 +2,9 @@ from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.enums import ObligationStatus
+from app.core.enums import ObligationStatus, PublicTokenScope
 
 
 class Obligation(BaseModel):
@@ -70,3 +70,24 @@ class Obligation(BaseModel):
 
 
 ObligationList = Annotated[list[Obligation], Field(max_length=1)]
+
+
+class PublicLinkCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expires_in_hours: int = Field(ge=1, le=168)
+
+
+class PublicLink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    public_url: AnyHttpUrl
+    scope: Literal[PublicTokenScope.OBLIGATION_EVIDENCE]
+    expires_at: datetime
+
+    @field_validator("expires_at")
+    @classmethod
+    def require_expiry_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("증빙 제출 링크 만료 시각은 시간대 정보를 포함해야 합니다.")
+        return value

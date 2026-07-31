@@ -81,8 +81,11 @@ ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS: dict[
 ] = {
     InternalSignatureStatus.REQUEST_READY: {InternalSignatureStatus.REQUESTING},
     InternalSignatureStatus.REQUESTING: {
+        InternalSignatureStatus.EDITING,
+        InternalSignatureStatus.FAILED,
+    },
+    InternalSignatureStatus.EDITING: {
         InternalSignatureStatus.SIGNING,
-        InternalSignatureStatus.COMPLETED,
         InternalSignatureStatus.ABORTED,
         InternalSignatureStatus.FAILED,
     },
@@ -242,25 +245,25 @@ AUDIT_RULES: dict[tuple[StateEntityType, StrEnum, StrEnum], AuditRule] = {
         StateEntityType.INTERNAL_SIGNATURE,
         InternalSignatureStatus.REQUEST_READY,
         InternalSignatureStatus.REQUESTING,
-    ): _audit_rule(AuditEventType.SIGNATURE_REQUESTED, actors=(AuditActorType.OWNER,)),
+    ): _audit_rule(AuditEventType.SIGNATURE_DRAFT_CREATED, actors=(AuditActorType.OWNER,)),
     (
         StateEntityType.INTERNAL_SIGNATURE,
         InternalSignatureStatus.REQUESTING,
+        InternalSignatureStatus.EDITING,
+    ): _audit_rule(AuditEventType.SIGNATURE_DRAFT_CREATED, actors=(AuditActorType.OWNER,)),
+    (
+        StateEntityType.INTERNAL_SIGNATURE,
+        InternalSignatureStatus.EDITING,
         InternalSignatureStatus.SIGNING,
     ): _audit_rule(AuditEventType.SIGNATURE_STARTED, actors=(AuditActorType.SYSTEM,)),
     (
         StateEntityType.INTERNAL_SIGNATURE,
-        InternalSignatureStatus.REQUESTING,
-        InternalSignatureStatus.COMPLETED,
-    ): _audit_rule(AuditEventType.SIGNATURE_COMPLETED, actors=(AuditActorType.SYSTEM,)),
-    (
-        StateEntityType.INTERNAL_SIGNATURE,
         InternalSignatureStatus.SIGNING,
         InternalSignatureStatus.COMPLETED,
     ): _audit_rule(AuditEventType.SIGNATURE_COMPLETED, actors=(AuditActorType.SYSTEM,)),
     (
         StateEntityType.INTERNAL_SIGNATURE,
-        InternalSignatureStatus.REQUESTING,
+        InternalSignatureStatus.EDITING,
         InternalSignatureStatus.ABORTED,
     ): _audit_rule(AuditEventType.SIGNATURE_ABORTED, actors=(AuditActorType.SYSTEM,)),
     (
@@ -271,6 +274,11 @@ AUDIT_RULES: dict[tuple[StateEntityType, StrEnum, StrEnum], AuditRule] = {
     (
         StateEntityType.INTERNAL_SIGNATURE,
         InternalSignatureStatus.REQUESTING,
+        InternalSignatureStatus.FAILED,
+    ): _audit_rule(AuditEventType.SIGNATURE_FAILED, actors=(AuditActorType.SYSTEM,)),
+    (
+        StateEntityType.INTERNAL_SIGNATURE,
+        InternalSignatureStatus.EDITING,
         InternalSignatureStatus.FAILED,
     ): _audit_rule(AuditEventType.SIGNATURE_FAILED, actors=(AuditActorType.SYSTEM,)),
     (

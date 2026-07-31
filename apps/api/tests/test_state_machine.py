@@ -108,11 +108,11 @@ def test_every_allowed_edge_has_an_audit_rule() -> None:
         ),
         (
             InternalSignatureStatus.REQUESTING,
-            InternalSignatureStatus.COMPLETED,
+            InternalSignatureStatus.EDITING,
             ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS,
         ),
         (
-            InternalSignatureStatus.REQUESTING,
+            InternalSignatureStatus.EDITING,
             InternalSignatureStatus.SIGNING,
             ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS,
         ),

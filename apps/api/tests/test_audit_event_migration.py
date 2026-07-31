@@ -8,13 +8,17 @@ MIGRATION_PATH = (
     REPOSITORY_ROOT
     / "supabase"
     / "migrations"
-    / "20260730250000_expand_contract_audit_event_types.sql"
+    / "20260730280000_add_signature_requests.sql"
 )
 
 
 def test_latest_audit_event_constraint_matches_public_enum() -> None:
     migration = MIGRATION_PATH.read_text(encoding="utf-8")
-    persisted_event_types = set(re.findall(r"'([A-Z][A-Z_]+)'", migration))
+    constraint = re.search(
+        r"check \(event_type in \((?P<values>.*?)\)\)", migration, flags=re.DOTALL
+    )
+    assert constraint is not None
+    persisted_event_types = set(re.findall(r"'([A-Z][A-Z_]+)'", constraint["values"]))
 
     assert persisted_event_types == {event_type.value for event_type in AuditEventType}
     assert "drop constraint if exists audit_events_event_type_check" in migration

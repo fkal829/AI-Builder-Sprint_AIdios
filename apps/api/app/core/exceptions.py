@@ -63,6 +63,15 @@ class AnalysisStartUnavailable(ApiException):
         )
 
 
+class ModusignRequestFailed(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=502,
+            code=ErrorCode.MODUSIGN_REQUEST_FAILED,
+            message="Unable to create the signature request.",
+        )
+
+
 class PublicTokenExpired(ApiException):
     def __init__(self, *, code: ErrorCode) -> None:
         super().__init__(

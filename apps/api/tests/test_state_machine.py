@@ -13,6 +13,7 @@ from app.core.enums import (
     InternalSignatureStatus,
     ModusignStatus,
     ObligationStatus,
+    StateEntityType,
 )
 from app.main import invalid_status_transition_handler
 from app.services.state_machine import (
@@ -71,6 +72,19 @@ def test_rejects_skipped_contract_transition() -> None:
 
 def test_allows_signature_failure_to_return_contract_to_ready_to_sign() -> None:
     ensure_contract_transition(ContractStatus.SIGNING, ContractStatus.READY_TO_SIGN)
+
+
+def test_revised_contract_confirmation_moves_negotiation_to_signature_ready() -> None:
+    rule = AUDIT_RULES[
+        (
+            StateEntityType.CONTRACT,
+            ContractStatus.NEGOTIATING,
+            ContractStatus.READY_TO_SIGN,
+        )
+    ]
+
+    assert rule.event_types == frozenset({AuditEventType.REVISED_CONTRACT_CONFIRMED})
+    assert rule.actor_types == frozenset({AuditActorType.OWNER})
 
 
 def test_every_allowed_edge_has_an_audit_rule() -> None:

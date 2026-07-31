@@ -28,6 +28,7 @@ from app.api.dependencies import (
     get_idempotency_service,
     get_obligation_service,
     get_review_item_service,
+    get_revised_contract_service,
     get_signature_service,
     get_understood_term_service,
 )
@@ -60,6 +61,11 @@ from app.schemas.obligations import (
     PublicLink,
     PublicLinkCreate,
 )
+from app.schemas.revised_contracts import (
+    RevisedContractReview,
+    RevisedContractReviewConfirmation,
+    RevisedContractReviewCreate,
+)
 from app.schemas.signatures import (
     EmbeddedSignatureDraft,
     EmbeddedSignatureDraftCreate,
@@ -78,6 +84,7 @@ from app.services.documents import (
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
 from app.services.obligations import ObligationService
 from app.services.review_items import ReviewItemService
+from app.services.revised_contracts import RevisedContractService
 from app.services.signatures import SignatureService
 from app.services.understood_terms import UnderstoodTermService
 
@@ -89,6 +96,78 @@ NO_STORE_RESPONSE_HEADERS = {
         "schema": {"type": "string", "example": "no-store"},
     }
 }
+
+
+@router.post(
+    "/{contract_id}/revised-contract-reviews",
+    response_model=ApiResponse[RevisedContractReview],
+    status_code=201,
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약 또는 문서를 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "대조 생성 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "대조 요청 검증 실패"},
+    },
+)
+async def create_revised_contract_review(
+    request: Request,
+    contract_id: UUID,
+    payload: RevisedContractReviewCreate,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[RevisedContractService, Depends(get_revised_contract_service)],
+) -> ApiResponse[RevisedContractReview]:
+    review = await service.create_review(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        payload=payload,
+    )
+    return ApiResponse(data=review, error=None, request_id=request_id(request))
+
+
+@router.get(
+    "/{contract_id}/revised-contract-reviews/latest",
+    response_model=ApiResponse[RevisedContractReview],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "대조 결과를 찾을 수 없음"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
+async def get_latest_revised_contract_review(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[RevisedContractService, Depends(get_revised_contract_service)],
+) -> ApiResponse[RevisedContractReview]:
+    review = await service.get_latest(owner_id=owner_id, contract_id=contract_id)
+    return ApiResponse(data=review, error=None, request_id=request_id(request))
+
+
+@router.post(
+    "/{contract_id}/revised-contract-reviews/{review_id}/confirmation",
+    response_model=ApiResponse[RevisedContractReview],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "대조 결과를 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "최종 확인 상태 충돌"},
+        422: {"model": ApiResponse[None], "description": "확인 요청 검증 실패"},
+    },
+)
+async def confirm_revised_contract_review(
+    request: Request,
+    contract_id: UUID,
+    review_id: UUID,
+    payload: RevisedContractReviewConfirmation,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[RevisedContractService, Depends(get_revised_contract_service)],
+) -> ApiResponse[RevisedContractReview]:
+    review = await service.confirm(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        review_id=review_id,
+        payload=payload,
+    )
+    return ApiResponse(data=review, error=None, request_id=request_id(request))
 
 
 @router.post(
@@ -118,12 +197,13 @@ async def confirm_adjustment(
 
 @router.post(
     "/{contract_id}/agreement",
+    deprecated=True,
     response_model=ApiResponse[Agreement],
     status_code=201,
     responses={
         401: {"model": ApiResponse[None], "description": "인증 실패"},
         404: {"model": ApiResponse[None], "description": "계약을 찾을 수 없음"},
-        409: {"model": ApiResponse[None], "description": "합의서 생성 상태 충돌"},
+        409: {"model": ApiResponse[None], "description": "레거시 합의서 생성 상태 충돌"},
         422: {"model": ApiResponse[None], "description": "요청 검증 실패"},
     },
 )
@@ -144,6 +224,7 @@ async def create_agreement(
 
 @router.get(
     "/{contract_id}/agreement",
+    deprecated=True,
     response_model=ApiResponse[Agreement],
     responses={
         401: {"model": ApiResponse[None], "description": "인증 실패"},

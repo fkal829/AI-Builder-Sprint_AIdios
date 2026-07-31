@@ -8,14 +8,34 @@ import { useAsync } from "@/lib/hooks";
 import { adapter } from "@/lib/adapter";
 import type { ContractDetail } from "@/lib/types";
 
-/* ⑦ 발송 후 대기 + 역제안 비교. 역제안이 오면 ⑥~⑦ 루프로 다시 들어감. */
+/* ⑦ 발송 후 대기 + 역제안 비교. P0는 응답 한 번 뒤 사람이 결과를 확정한다. */
 export default function ResponsesPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const state = useAsync(() => adapter.getContract(id), [id]);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [view, setView] = useState<"normal" | "no_response" | "all_rejected">(
     "normal",
   );
+
+  const continueToRevision = async () => {
+    if (confirming) return;
+    setConfirming(true);
+    setConfirmError(null);
+    try {
+      const adjustmentId =
+        window.localStorage.getItem(`dandi:last-adjustment:${id}`) ?? "mock-adjustment";
+      await adapter.confirmAdjustmentResult(id, adjustmentId);
+      router.push(`/contracts/${id}/revision`);
+    } catch (error) {
+      setConfirmError(
+        error instanceof Error ? error.message : "조정 결과를 확정하지 못했습니다.",
+      );
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   return (
     <AppScreen
@@ -26,8 +46,8 @@ export default function ResponsesPage() {
       }
       footer={
         view === "normal" && state.status === "ready" ? (
-          <CTAButton href={`/contracts/${id}/agreement`}>
-            변경·확인 합의서 만들기
+          <CTAButton onClick={continueToRevision}>
+            {confirming ? "확정 중…" : "응답 확정하고 수정 계약서 확인하기"}
           </CTAButton>
         ) : undefined
       }
@@ -62,10 +82,10 @@ export default function ResponsesPage() {
                 여기서 멈출게요
               </button>
               <button
-                onClick={() => router.push(`/contracts/${id}/agreement`)}
+                onClick={continueToRevision}
                 className="h-11 flex-1 rounded-lg border border-gray300 bg-white text-[13px] font-bold text-gray500"
               >
-                원안대로 진행
+                원안대로 최종 계약서 확인
               </button>
             </div>
           }
@@ -73,7 +93,12 @@ export default function ResponsesPage() {
       )}
 
       {state.status === "ready" && view === "normal" && (
-        <ResponsesBody data={state.data} contractId={id} />
+        <>
+          <ResponsesBody data={state.data} onConfirm={continueToRevision} />
+          {confirmError && (
+            <p className="mt-3 text-xs font-bold text-red-700">{confirmError}</p>
+          )}
+        </>
       )}
     </AppScreen>
   );
@@ -104,10 +129,10 @@ function ViewSwitch({
 
 function ResponsesBody({
   data,
-  contractId,
+  onConfirm,
 }: {
   data: ContractDetail;
-  contractId: string;
+  onConfirm: () => void;
 }) {
   const requested = useMemo(
     () =>
@@ -175,18 +200,17 @@ function ResponsesBody({
             유지돼요. 확인해보세요.
           </div>
           <div className="mt-3 flex flex-col gap-2">
-            <a
-              href={`/contracts/${contractId}/agreement`}
+            <button
+              type="button"
+              onClick={onConfirm}
               className="flex h-11 items-center justify-center rounded-lg border-2 border-amber700 bg-amber50 text-[13px] font-bold text-ink"
             >
-              역제안 수락 — {counter.agencyResponse?.counterText}으로 합의
-            </a>
-            <a
-              href={`/contracts/${contractId}/request`}
-              className="flex h-11 items-center justify-center rounded-lg border border-gray300 bg-white text-[13px] font-medium text-gray700"
-            >
-              다시 조정 요청하기
-            </a>
+              역제안 수락 후 수정 계약서 확인
+            </button>
+            <p className="text-center text-[11px] leading-relaxed text-gray500">
+              P0에서는 조정 응답을 한 번만 받습니다. 수정본이 다르면 기존 채널로 다시
+              요청해주세요.
+            </p>
           </div>
         </div>
       )}

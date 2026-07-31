@@ -7,6 +7,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field
 
 class DocumentType(StrEnum):
     CONTRACT = "CONTRACT"
+    REVISED_CONTRACT = "REVISED_CONTRACT"
     PROPOSAL = "PROPOSAL"
     ESTIMATE = "ESTIMATE"
     MESSAGE = "MESSAGE"

@@ -1,1 +1,1 @@
-"""안심홍보계약 API package."""
+"""단디계약 API package."""

@@ -4,7 +4,7 @@
 
 C는 계약 생명주기 중 계약·조정·전자서명·재계약·대시보드를 담당한다.
 
-- 담당: 계약 생성·목록·상세·감사 타임라인, 계약/조정/서명 상태 전이, 조정 요청과 대행사 공개 응답, 합의서, 모두싸인, 만료·재계약, 대시보드
+- 담당: 계약 생성·목록·상세·감사 타임라인, 계약/조정/서명 상태 전이, 조정 요청과 대행사 공개 응답, 수정 계약서 대조, 모두싸인, 만료·재계약, 대시보드
 - B 담당: 문서 업로드·Storage, 사용자 이해조건, AI 분석·추출, ReviewItem 생성·선택, 이행 항목·증빙, 공통 repository/AuditEvent 기반
 - 공통 원칙: 상태 변경과 감사 이벤트는 하나의 트랜잭션으로 저장하고, OpenAPI·Pydantic·migration·테스트를 함께 변경한다.
 
@@ -126,36 +126,34 @@ POST /public/adjustment-requests/{token}/responses
 - 만료·중복 응답·누락 항목을 정확히 거부한다.
 - `SENT/OPENED → RESPONDED` 전이와 감사 이벤트를 기록한다.
 
-### C-6. 최종 조정 확정 및 합의서 생성
+### C-6. 최종 조정 확정 및 수정 계약서 대조
 
 대상 API:
 
 ```text
 POST /contracts/{contract_id}/adjustment-confirmation
-POST /contracts/{contract_id}/agreement
-GET  /contracts/{contract_id}/agreement
+POST /contracts/{contract_id}/revised-contract-reviews
+GET  /contracts/{contract_id}/revised-contract-reviews/latest
+POST /contracts/{contract_id}/revised-contract-reviews/{review_id}/confirmation
 ```
 
 구현 기능:
 
 - 소상공인이 각 조항별로 `ACCEPT_REQUEST`, `ACCEPT_COUNTERPROPOSAL`, `KEEP_ORIGINAL` 중 하나를 선택한다.
 - 클라이언트가 임의의 최종 합의 문구를 보내지 못하게 하고, 서버가 저장된 요청·응답 기록에서 최종 문구를 결정한다.
-- 최대 4개 조항의 `광고대행 계약조건 변경·확인 합의서`를 생성한다.
-- 합의서에 변경 전·후 문구, 거절/철회 이유, 원계약 유지 원칙, 양측 서명란을 포함한다.
-- 원본 계약 PDF는 변경하지 않는다. 확정 합의서 PDF를 별도 렌더링해 private Storage에
-  저장하고, 경로·SHA-256·페이지 수를 합의서 생성 및 감사 이벤트와 원자적으로 기록한다.
+- 대행사가 기존 채널로 보낸 최신 `REVISED_CONTRACT` PDF와 확정 문구를 대조한다.
+- 정확 문구만 `MATCHED`로 표시하고 나머지는 사용자의 직접 확인을 요구한다.
+- 최신 검토의 모든 항목을 확인하면 문서 ID·SHA-256을 고정하고 `READY_TO_SIGN`으로 전이한다.
 
 완료 조건:
 
-- `NEGOTIATING → READY_TO_SIGN`으로 전이한다.
+- 조정 확정 때는 `NEGOTIATING`을 유지하고 수정 계약서 최종 확인 때 `READY_TO_SIGN`으로 전이한다.
 - 수용 조항은 `RESOLVED`, 원안 유지 조항은 `KEPT_ORIGINAL`으로 처리한다.
-- 원계약 문서 ID와 검증된 `signed_date`가 없으면 합의서 생성을 거부한다.
-- 근거 없는 요약은 임의로 채우지 않고 `추가 확인 필요`로 표시한다.
-- PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를 실패 처리하고 저장된 파일을 정리한다.
+- 최신 수정본이 아니거나 확정 항목이 빠지면 최종 확인을 거부한다.
 
 ### C-7. 모두싸인 Adapter 및 임베디드 서명 초안
 
-> **변경(2026-07-31):** 템플릿 기반 즉시 발송 방식에서, 템플릿 없이 합의서 PDF를
+> **변경(2026-07-31):** 템플릿 기반 즉시 발송 방식에서, 확인한 수정 계약서 PDF를
 > 업로드하고 사용자가 모두싸인 편집기에서 서명란을 배치한 뒤 직접 발송하는 임베디드
 > 방식으로 전환했다.
 
@@ -169,10 +167,10 @@ GET  /contracts/{contract_id}/signature
 구현 기능:
 
 - Modusign `mock/live` Adapter를 분리한다.
-- 합의서 ID·버전과 `confirmed=true`를 검증한다.
+- 최신 확정 수정 계약서 대조 ID와 `confirmed=true`를 검증한다.
 - OWNER와 AGENCY 각각 1명, 총 2명의 서명자를 검증한다.
 - 이메일/카카오 서명 방식 형식을 검증한다.
-- C-6에서 private Storage에 확정·저장한 합의서 PDF를 읽어 SHA-256 무결성을 검증한 뒤,
+- C-6에서 확인한 수정 계약서 PDF를 읽어 SHA-256 무결성을 검증한 뒤,
   Modusign `POST /embedded-drafts`에 Base64 PDF로 전달한다. C-7에서 PDF를 다시
   렌더링하지 않는다.
 - 연락처는 외부 Adapter 전달에만 사용하고 API 응답·DB·로그에 저장하지 않는다.
@@ -278,7 +276,7 @@ GET /dashboard
 → 조정 요청 발송
 → 대행사 공개 응답
 → 최종 확정
-→ 합의서 생성
+→ 수정 계약서 업로드·대조·확인
 → 모두싸인 임베디드 초안·사용자 발송·웹훅 완료
 → 재계약 신호 및 대시보드 반영
 ```
@@ -302,7 +300,7 @@ B와의 의존성은 세 가지로 정리됩니다. B가 제공하는 `ReviewIte
 | 제공 항목 | C에서 사용하는 기능 |
 | --- | --- |
 | `ReviewItem` 및 선택 상태 | 조정 초안 생성, 발송 항목 동결, 최종 조정 확정 |
-| 검증된 canonical 계약 값 | 계약 상세, 합의서의 원계약 요약, D-day, 대시보드 금액 집계 |
+| 검증된 canonical 계약 값 | 계약 상세, 수정 계약서 대조 기준, D-day, 대시보드 금액 집계 |
 | 공통 repository와 `AuditEvent` 트랜잭션 | 계약·조정·서명·재계약 상태 변경 기록 |
 | 역제안 비교 서비스 | 소유자용 조정 상세의 비교 설명 |
 

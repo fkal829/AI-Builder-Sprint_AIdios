@@ -1,4 +1,4 @@
-# 안심홍보계약 API
+# 단디계약 API
 
 계약 상태 전환, 결정론적 계산, AI 분석 orchestration, Supabase 저장, 모두싸인 연동을 담당하는 FastAPI 앱입니다.
 
@@ -172,19 +172,19 @@ Pydantic으로 검증하며 잘못된 응답은 고정 문구로 대체하지 �
 대체하지 않고 `502 ANALYSIS_SCHEMA_INVALID`를 반환하며 저장된 대행사 응답은
 유지합니다.
 
-## Modusign embedded-draft mode (C-7 API change)
+## 모두싸인 임베디드 초안 모드(C-7)
 
-The default `MODUSIGN_MODE=mock` never calls Modusign and is used by automated tests.
-To enable a real no-template embedded draft, set `MODUSIGN_MODE=live` together with
-`MODUSIGN_ACCOUNT_EMAIL` and `MODUSIGN_API_KEY` in the server-only `.env` file.
-Set `MODUSIGN_EMBEDDED_REDIRECT_URL` to an HTTPS frontend URL only when users should return
-there after final sending. C-6 renders the confirmed amendment agreement exactly once and stores
-it in private Storage with its SHA-256. C-7 downloads and verifies that immutable artifact before
-calling `POST /embedded-drafts`; it does not render a second copy. It returns a short-lived editor
-URL but never sends a signing request.
-The user must place signature fields and press send in the Modusign editor. Set
-`AGREEMENT_PDF_FONT_PATH` to a Korean TTF font in non-Windows deployments. Do not commit the
-`.env` file or log signer contact values, agreement contents, or the embedded editor URL.
+기본 `MODUSIGN_MODE=mock`은 모두싸인을 호출하지 않으며 자동 테스트에서 사용합니다.
+실제 무템플릿 임베디드 초안을 사용하려면 서버 전용 `.env`에 `MODUSIGN_MODE=live`,
+`MODUSIGN_ACCOUNT_EMAIL`, `MODUSIGN_API_KEY`를 설정합니다. 최종 발송 뒤 서비스로 돌아와야
+할 때만 `MODUSIGN_EMBEDDED_REDIRECT_URL`에 HTTPS 프런트 URL을 설정합니다.
+
+C-6은 대행사가 전달하고 소상공인이 업로드한 수정 계약서 PDF를 확정 조정 내용과 대조한
+뒤 문서 ID와 SHA-256을 고정합니다. C-7은 이 PDF를 다시 내려받아 해시를 검증하고
+`POST /embedded-drafts`에 그대로 전달합니다. 서비스가 별도 합의서나 계약서를 렌더링하지
+않으며, 반환된 단기 편집기 URL만으로 서명 요청이 발송되지는 않습니다. 사용자가 모두싸인
+편집기에서 서명 위치와 문서를 확인한 뒤 직접 발송해야 합니다. `.env`, 서명자 연락처,
+계약 원문, 수정 계약서 내용과 편집기 URL을 커밋하거나 로그로 남기지 않습니다.
 
 For C-8 webhook reconciliation, set a long random `MODUSIGN_WEBHOOK_SECRET` in the server-only
 `.env` file and configure the identical `X-Modusign-Webhook-Secret` custom header in Modusign's

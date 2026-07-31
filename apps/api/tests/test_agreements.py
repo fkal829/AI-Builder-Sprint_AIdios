@@ -171,7 +171,7 @@ async def test_confirmation_resolves_items_and_creates_deterministic_agreement(
 
     assert confirmed.status_code == 200
     assert confirmed.json()["data"]["status"] == "CONFIRMED"
-    assert adapter.mock_contracts[contract_id].status == ContractStatus.READY_TO_SIGN
+    assert adapter.mock_contracts[contract_id].status == ContractStatus.NEGOTIATING
     assert adapter.mock_review_items[review_items[0].id].status == ReviewItemStatus.RESOLVED
     assert adapter.mock_review_items[review_items[1].id].status == ReviewItemStatus.RESOLVED
     assert (
@@ -189,6 +189,7 @@ async def test_confirmation_resolves_items_and_creates_deterministic_agreement(
     adapter._mock_contracts[contract_id] = replace(
         adapter._mock_contracts[contract_id],
         signed_date=date(2026, 7, 1),
+        status=ContractStatus.READY_TO_SIGN,
     )
     document_id = uuid4()
     adapter._mock_documents[document_id] = DocumentRecord(

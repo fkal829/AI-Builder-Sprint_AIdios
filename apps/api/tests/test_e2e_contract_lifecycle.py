@@ -331,7 +331,7 @@ async def test_representative_contract_flows_end_to_end_through_the_real_api(
     )
     assert confirmed.status_code == 200
     assert confirmed.json()["data"]["status"] == "CONFIRMED"
-    assert repository.mock_contracts[contract_id].status == ContractStatus.READY_TO_SIGN
+    assert repository.mock_contracts[contract_id].status == ContractStatus.NEGOTIATING
 
     # A rejected transition: an already-CONFIRMED request cannot be resent.
     resend_after_confirm = await client.post(
@@ -341,30 +341,48 @@ async def test_representative_contract_flows_end_to_end_through_the_real_api(
     )
     assert resend_after_confirm.status_code == 409
 
-    # 12. Generate the agreement PDF from the confirmed clauses.
-    agreement_created = await client.post(
-        f"/api/v1/contracts/{contract_id}/agreement",
-        headers=auth_headers(idempotency_key=uuid4()),
-    )
-    assert agreement_created.status_code == 201
-    agreement = agreement_created.json()["data"]
-    assert agreement["contract_id"] == str(contract_id)
-    assert len(agreement["clauses"]) == 3
-
-    agreement_fetched = await client.get(
-        f"/api/v1/contracts/{contract_id}/agreement",
+    # 12. Upload the agency's revised PDF and compare it with confirmed clauses.
+    revised_upload = await client.post(
+        f"/api/v1/contracts/{contract_id}/documents",
         headers=auth_headers(),
+        data={"type": "REVISED_CONTRACT"},
+        files={"file": ("revised-contract.pdf", make_pdf(), "application/pdf")},
     )
-    assert agreement_fetched.status_code == 200
-    assert agreement_fetched.json()["data"] == agreement
+    assert revised_upload.status_code == 201
+    revised_document_id = revised_upload.json()["data"]["id"]
+    review_created = await client.post(
+        f"/api/v1/contracts/{contract_id}/revised-contract-reviews",
+        headers=auth_headers(),
+        json={
+            "adjustment_request_id": adjustment_id,
+            "document_id": revised_document_id,
+        },
+    )
+    assert review_created.status_code == 201
+    revision_review = review_created.json()["data"]
+    assert len(revision_review["items"]) == 3
 
-    # 13. Create the embedded signature draft (mock Modusign, no live call).
+    review_confirmed = await client.post(
+        f"/api/v1/contracts/{contract_id}/revised-contract-reviews/"
+        f"{revision_review['id']}/confirmation",
+        headers=auth_headers(),
+        json={
+            "confirmed_review_item_ids": [
+                item["review_item_id"] for item in revision_review["items"]
+            ],
+            "confirmed": True,
+        },
+    )
+    assert review_confirmed.status_code == 200
+    assert review_confirmed.json()["data"]["status"] == "CONFIRMED"
+    assert repository.mock_contracts[contract_id].status == ContractStatus.READY_TO_SIGN
+
+    # 13. Create the embedded signature draft from that exact revised PDF.
     embedded_draft = await client.post(
         f"/api/v1/contracts/{contract_id}/signature-embedded-drafts",
         headers=auth_headers(idempotency_key=uuid4()),
         json={
-            "agreement_id": agreement["id"],
-            "agreement_version": agreement["version"],
+            "revised_contract_review_id": revision_review["id"],
             "confirmed": True,
             "signers": [
                 {

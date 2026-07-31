@@ -1,4 +1,4 @@
-# 안심홍보계약 API 명세서
+# 단디계약 API 명세서
 
 <!-- markdownlint-configure-file {"MD013": false} -->
 
@@ -8,7 +8,7 @@
 > 적용 범위: 해커톤 P0
 
 이 문서는 백엔드 API와 개발 순서를 사람이 읽을 수 있도록 정리한다. 제품 범위와 사용자
-흐름의 최상위 기준은 저장소 상위의 `../기획안.md`이며 이 파일은 수정하지 않는다.
+흐름의 최상위 기준은 `docs/기획안.md`다.
 그 범위 안에서 필드·enum·응답의 기계 판독 기준은
 `packages/contracts/openapi/openapi.yaml`, 영속·전이 불변식의 기준은
 `docs/api-data-contract.md`다. 세 문서는 같은 변경에서 함께 맞춘다. 이 문서의 파일
@@ -22,7 +22,7 @@
 
 - **B — 문서·AI·공통 기반·이행:** FastAPI 공통 기반, DB·Storage, 문서·분석,
   이행 항목과 증빙 API
-- **C — 계약·모두싸인·대시보드:** 계약 생애주기, 조정, 합의서, 모두싸인, 일정·집계
+- **C — 계약·모두싸인·대시보드:** 계약 생애주기, 조정, 수정 계약서 대조, 모두싸인, 일정·집계
 - **D — 배포·QA 검증:** 배포·환경변수 확인, E2E 실행, 데모 데이터와 테스트 증빙;
   백엔드 endpoint·service·repository 구현은 맡지 않음
 
@@ -54,8 +54,9 @@ B는 기존 6개 문서·AI API에 공통 health와 이행·증빙 4개를 더 �
 | C | `POST` | `/public/adjustment-requests/{token}/open` | 대행사 최초 열람 기록 |
 | C | `POST` | `/public/adjustment-requests/{token}/responses` | 대행사 1회 응답 제출 |
 | C | `POST` | `/contracts/{contract_id}/adjustment-confirmation` | 최종 조정 결과 확정 |
-| C | `POST` | `/contracts/{contract_id}/agreement` | 변경·확인 합의서 생성 |
-| C | `GET` | `/contracts/{contract_id}/agreement` | 변경·확인 합의서 조회 |
+| C | `POST` | `/contracts/{contract_id}/revised-contract-reviews` | 수정 계약서 대조 생성 |
+| C | `GET` | `/contracts/{contract_id}/revised-contract-reviews/latest` | 최신 대조 조회 |
+| C | `POST` | `/contracts/{contract_id}/revised-contract-reviews/{review_id}/confirmation` | 대조 최종 확인 |
 | C | `POST` | `/contracts/{contract_id}/signature-embedded-drafts` | 모두싸인 임베디드 서명 초안 생성 |
 | C | `GET` | `/contracts/{contract_id}/signature` | 서명 상태 조회 |
 | C | `POST` | `/webhooks/modusign` | 모두싸인 웹훅 수신 |
@@ -100,7 +101,7 @@ Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 - 분석 시작
 - 조정 요청 초안 생성
 - 조정 링크 활성화
-- 합의서 생성
+- 수정 계약서 대조 생성·최종 확인
 - 모두싸인 임베디드 서명 초안 생성
 - 증빙 제출 링크 생성
 
@@ -299,7 +300,8 @@ DOCUMENT_UPLOADED, UNDERSTOOD_TERMS_SAVED,
 ANALYSIS_STARTED, ANALYSIS_RESTARTED, ANALYSIS_COMPLETED, ANALYSIS_FAILED,
 REVIEW_ITEM_SELECTION_UPDATED, ADJUSTMENT_DRAFT_CREATED, ADJUSTMENT_SENT,
 ADJUSTMENT_OPENED, ADJUSTMENT_RESPONDED, ADJUSTMENT_CONFIRMED,
-ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, SIGNATURE_DRAFT_CREATED,
+ADJUSTMENT_EXPIRED, AGREEMENT_CREATED, REVISED_CONTRACT_REVIEW_CREATED,
+REVISED_CONTRACT_CONFIRMED, SIGNATURE_DRAFT_CREATED,
 SIGNATURE_REQUESTED, SIGNATURE_STARTED,
 SIGNATURE_COMPLETED, SIGNATURE_ABORTED, SIGNATURE_FAILED, OBLIGATION_CREATED,
 EVIDENCE_LINK_CREATED, EVIDENCE_SUBMITTED, EVIDENCE_APPROVED,
@@ -837,50 +839,32 @@ P0에서는 계약당 실제 발송·응답 라운드를 한 번만 허용한다
 조정·계약 상태, 항목 상태, 최종 문구와 `ADJUSTMENT_CONFIRMED` 감사 이벤트를 하나의
 트랜잭션으로 기록한다.
 
-## 6. 합의서·모두싸인 — C
+## 6. 수정 계약서 대조·모두싸인 — C
 
-### 6.1 합의서 생성
+### 6.1 수정 계약서 대조 생성
 
-`POST /api/v1/contracts/{contract_id}/agreement`
+`POST /api/v1/contracts/{contract_id}/revised-contract-reviews`
 
 - 인증: Bearer
-- 담당: C
-- 필수 헤더: `Idempotency-Key`
-- 요청 body: 없음
-- 성공: `201 AgreementResponse`
+- 요청: 확정된 `adjustment_request_id`, 최신 `REVISED_CONTRACT` `document_id`
+- 성공: `201 RevisedContractReviewResponse`
 - 오류: `401`, `404`, `409`, `422`
 
-합의서는 현재 확정된 조정 결과로 1~4개 조항을 만든다. 원계약 문서 ID와 검증된
-canonical `signed_date`가 없으면 `409 INVALID_STATUS_TRANSITION`으로 거부한다.
-합의서는 다음을 포함한다.
+확정 문구를 수정 계약서 각 페이지에서 정규화해 정확히 찾은 경우만 `MATCHED`로 표시하고
+`source_page`, `source_text`, 결정적 `confidence=1.0`을 보존한다. 찾지 못하거나 표현이
+다르면 `NEEDS_CONFIRMATION`이며 자동으로 합의 반영을 확정하지 않는다.
 
-- `id`, `version`, `contract_id`
-- 제목 `광고대행 계약조건 변경·확인 합의서`
-- 원계약 제목·체결일·문서 ID
-- 필수 `condition_summary` 네 그룹: 계약기간·총액·결제, 산출물·채널·보고,
-  해지·환불·자동갱신, 권리·촬영 안전·시설 파손·손해 책임·초상권·개인정보
-- 조항별 분류, 변경 전·후 문구, 사유와 `AGREED`/`KEPT_ORIGINAL` 결과
-- `disposition=AGREED/REJECTED/WITHDRAWN`으로 합의·대행사 거절·소유자 철회 구분
-- 변경하지 않은 원계약 조건의 유지 방침
-- `OWNER`, `AGENCY` 양측 서명란
+### 6.2 최신 대조 조회·최종 확인
 
-`condition_summary`는 검증된 원계약 값과 확정 조항으로 결정적으로 만들고, 근거가 없는
-조건은 `원계약에서 확인되지 않아 추가 확인 필요`라고 명시하며 임의로 채우지 않는다.
-`KEPT_ORIGINAL` 조항은 `REJECTED` 또는 `WITHDRAWN`이고, 대행사 거절이면 비어 있지 않은
-`reason`을 보존한다.
-원본 계약 PDF는 변경하지 않는다. 확정 합의서는 별도 PDF로 한 번 렌더링해 private Storage에
-저장하고, 저장 경로·SHA-256·페이지 수·합의서 버전·`AGREEMENT_CREATED` 감사 이벤트를 하나의
-트랜잭션으로 기록한다. 이 파일 메타데이터는 내부용이며 `AgreementResponse`에는 노출하지 않는다.
-PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를 실패 처리하고 저장된 파일을 정리한다.
+- `GET /api/v1/contracts/{contract_id}/revised-contract-reviews/latest`
+- `POST /api/v1/contracts/{contract_id}/revised-contract-reviews/{review_id}/confirmation`
 
-### 6.2 합의서 조회
+최종 확인 요청은 최신 검토의 모든 `review_item_id`를 정확히 한 번씩 포함하고
+`confirmed=true`여야 한다. 성공하면 검토와 모든 항목을 확정하고 Contract를
+`NEGOTIATING → READY_TO_SIGN`으로 바꾼다. 이전 검토와 수정본은 삭제하지 않는다.
 
-`GET /api/v1/contracts/{contract_id}/agreement`
-
-- 인증: Bearer
-- 담당: C
-- 성공: `200 AgreementResponse`
-- 오류: `401`, `404`, `422`
+기존 `/agreement` 생성·조회 API와 관련 테이블은 이전 데이터 호환을 위한 deprecated
+경로이며 새 P0 정상 흐름에서는 호출하지 않는다.
 
 ### 6.3 모두싸인 임베디드 서명 초안 생성
 
@@ -902,8 +886,7 @@ PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를 실패
 
 ```json
 {
-  "agreement_id": "agreement_uuid",
-  "agreement_version": 1,
+  "revised_contract_review_id": "revision_review_uuid",
   "signers": [
     {
       "role": "OWNER",
@@ -934,8 +917,8 @@ PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를 실패
 - `KAKAO`는 하이픈 없는 국내 휴대전화 번호
 - 역할과 연락처 중복 금지
 - 연락처 원문을 모두싸인 Adapter에만 전달하고 API 응답·DB·로그에 저장하지 않음
-- 서버가 C-6에서 private Storage에 확정·저장한 합의서 PDF를 읽어 SHA-256 무결성을 검증한 뒤
-  모두싸인 `POST /embedded-drafts`에 Base64 PDF로 전달. C-7은 PDF를 다시 렌더링하지 않음
+- 서버가 최신 확정 대조의 수정 계약서 PDF를 읽어 SHA-256 무결성을 검증한 뒤
+  모두싸인 `POST /embedded-drafts`에 Base64 PDF로 전달. PDF를 다시 렌더링하지 않음
 - `Signature=REQUESTING → EDITING`, `modusign_status=DRAFT`,
   `modusign_draft_id`와 `SIGNATURE_DRAFT_CREATED` 감사 이벤트를 저장
 - 이 단계에서는 Contract를 `READY_TO_SIGN`으로 유지하며 자동 발송하지 않음
@@ -969,7 +952,7 @@ PDF 저장 또는 메타데이터 기록에 실패하면 생성 전체를 실패
 
 PDF 생성 또는 외부 초안 생성 실패는 `502`를 반환하고 `Signature=FAILED`를 보존하되
 Contract는 `READY_TO_SIGN`을 유지한다. 실패·중단 뒤 자동 재요청하지 않으며 사용자가
-현재 합의서를 다시 확인하고 새 `Idempotency-Key`와 `confirmed=true`로 요청해야 한다.
+현재 수정 계약서를 다시 확인하고 새 `Idempotency-Key`와 `confirmed=true`로 요청해야 한다.
 
 ### 6.4 서명 상태 조회
 
@@ -1279,7 +1262,7 @@ C는 B의 분석 결과가 완성될 때까지 기다리지 않고 고정 `Revie
 | C-3 | 공개 토큰·멱등 키 기반 | B의 공통 저장 기반으로 hash·scope·만료·동일 요청 재생 테스트 통과 |
 | C-4 | 조정 초안·상세·발송 | B의 ReviewItem fixture로 미리보기와 계약당 1회 `/send` |
 | C-5 | 대행사 공개 조회·열람 기록·1회 응답 | GET 무변경, `/open` 최초 시각 유지, 전체 항목 정확히 한 번 제출 |
-| C-6 | 최종 확정·합의서 생성·조회 | 임의 최종 문구 거부, 원계약 보존, 합의서 PDF private 저장·SHA-256, 최대 4조항 |
+| C-6 | 최종 확정·수정 계약서 대조·확인 | 임의 최종 문구 거부, 원문 근거 보존, 최신 PDF ID·SHA-256, 최대 4조항 |
 | C-7 | 모두싸인 `mock/live` Adapter와 임베디드 초안 | C-6 저장 PDF 무결성 검증, 서명자 2명, `EDITING`, 민감 URL 비저장 검증 |
 | C-8 | 웹훅 인증·중복·순서 역전 처리 | 즉시 204, 종료 상태 회귀 방지 |
 | C-9 | D-day·갱신 날짜 계산 | 한국 날짜 경계와 D-30·D-14·D-7 테스트 통과 |
@@ -1322,8 +1305,8 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 | Day 1 | 단일 서버·`/docs`·`/health`·DB 연결(B), Upstage Parse(B), 모두싸인 QuickStart(C), 배포 체크리스트(D) |
 | Day 2 | `계약 생성(C) → 문서 업로드·원문 접근(B) → 5문항(B) → 분석 시작·조회(B)` |
 | Day 3 | `ReviewItem 생성·선택(B) → 조정 초안(C)` |
-| Day 4 | `공개 조정 링크·응답(C) → 역제안 비교(B) → 최종 확정·합의서(C)`, 공개 흐름 검증(D) |
-| Day 5 | `합의서(C) → 모두싸인 임베디드 편집·사용자 발송·웹훅(C) → 대표 산출물·증빙 승인(B)`, 전체 E2E 실행(D) |
+| Day 4 | `공개 조정 링크·응답(C) → 역제안 비교(B) → 최종 확정·수정 계약서 대조(C)`, 공개 흐름 검증(D) |
+| Day 5 | `수정 계약서 확인(C) → 모두싸인 임베디드 편집·사용자 발송·웹훅(C) → 대표 산출물·증빙 승인(B)`, 전체 E2E 실행(D) |
 | Day 6 | 계약 목록·D-day·대시보드·타임라인(C) → 전체 P0 회귀(B·C) → 배포본 완료 검증(D) |
 | Day 7 | 새 기능 없이 P0 버그 수정, 문서·데모 안정화 |
 

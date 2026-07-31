@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ansim-contract-api"
 version = "0.1.0"
-description = "안심홍보계약 FastAPI backend"
+description = "단디계약 FastAPI backend"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1.0",

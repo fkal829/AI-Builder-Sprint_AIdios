@@ -19,6 +19,8 @@ export default function RequestPreviewPage() {
   const router = useRouter();
   const state = useAsync(() => adapter.getContract(id), [id]);
   const [confirm, setConfirm] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   // 뷰어에서 인라인으로 작성한 초안이 있으면 우선 사용(없으면 목업 userChoice로 폴백)
   const [draft, setDraft] = useState<RequestDraft | null>(null);
@@ -60,6 +62,28 @@ export default function RequestPreviewPage() {
     delete next[clauseId];
     setDraft(next);
     saveRequestDraft(id, next);
+  };
+
+  const sendRequest = async () => {
+    if (sending || items.length === 0) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const adjustment = await adapter.createAdjustmentDraft(
+        id,
+        items.map((item) => item.id),
+      );
+      await adapter.sendAdjustmentDraft(id, adjustment.id);
+      window.localStorage.setItem(`dandi:last-adjustment:${id}`, adjustment.id);
+      router.push(`/contracts/${id}/responses`);
+    } catch (error) {
+      setSendError(
+        error instanceof Error ? error.message : "조정 요청을 발송하지 못했습니다.",
+      );
+      setConfirm(false);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -111,6 +135,7 @@ export default function RequestPreviewPage() {
             발송 전 미리보기예요. 대행사는 회원가입 없이 토큰 링크로 이 요청서를
             열람합니다.
           </p>
+          {sendError && <p className="text-xs font-bold text-red-700">{sendError}</p>}
         </div>
       )}
 
@@ -123,10 +148,10 @@ export default function RequestPreviewPage() {
             같은 요청서를 다시 수정할 수 없어요.
           </>
         }
-        confirmLabel="네, 발송할게요"
+        confirmLabel={sending ? "발송 중…" : "네, 발송할게요"}
         cancelLabel="다시 볼게요"
         onCancel={() => setConfirm(false)}
-        onConfirm={() => router.push(`/contracts/${id}/responses`)}
+        onConfirm={sendRequest}
       />
     </AppScreen>
   );

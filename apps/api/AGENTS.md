@@ -8,14 +8,17 @@
 
 ## Product
 
-`안심홍보계약`은 부산 관광상권 소상공인이 광고대행 계약에서 자신이 이해한 조건과 실제
+`단디계약`은 부산 관광상권 소상공인이 광고대행 계약에서 자신이 이해한 조건과 실제
 계약 문서를 비교하고, 근거가 연결된 조정 요청을 작성하고, 모두싸인 전자서명과 첫 번째
 산출물 확인 및 만료 일정까지 관리하도록 돕는 AI 기반 계약 생애주기 관리(CLM) 서비스다.
 
 P0 데모 경로는 다음과 같다.
 
 `계약서 업로드 → 이해조건 5문항 → 조건 추출 → 불일치·누락 검토 → 조정 요청 링크 →`
-`대행사 1회 응답 → 변경·확인 합의서 → 모두싸인 서명 → 산출물 증빙 확인 → 만료·재계약 확인`
+`대행사 1회 응답 → 수정 계약서 업로드·대조 → 모두싸인 서명 → 산출물 증빙 확인 → 만료·재계약 확인`
+
+광고효과 기록·대조(기획안 6.14)는 관리 단계의 P2 화면 목업이며 백엔드 추출·저장 API는
+아직 구현하지 않는다.
 
 이 서비스는 법률 자문, 사기 판정, 위법성 판정, 승소 가능성 예측을 제공하지 않는다.
 사용자와 계약 상대방이 같은 조건을 확인하고 합의 과정을 기록하도록 돕는 것이 목적이다.
@@ -24,7 +27,7 @@ P0 데모 경로는 다음과 같다.
 
 작업 전에 변경 범위와 관련된 문서를 먼저 읽는다.
 
-- 최상위 제품·P0/P1 기준: `../기획안.md` (읽기 전용이며 이 파일과 충돌하는 하위 문서를 우선 수정한다)
+- 최상위 제품·P0/P1 기준: `docs/기획안.md`
 - 현재 제품 범위와 구조: `docs/product-scope.md`, `docs/architecture.md`
 - 백엔드 런타임·의존성: `apps/api/pyproject.toml`, `apps/api/README.md`, `apps/api/.env.example`
 - 공개 API의 path·field·enum·응답 스키마: `packages/contracts/openapi/openapi.yaml`
@@ -41,7 +44,7 @@ P0 데모 경로는 다음과 같다.
 확인한다.
 
 API 응답, 영속 상태, AI 스키마를 변경할 때는 관련 명세를 구현과 같은 변경에 포함한다.
-우선순위는 `../기획안.md`가 항상 가장 높다. 그 아래에서 공개 HTTP 계약은
+우선순위는 `docs/기획안.md`가 항상 가장 높다. 그 아래에서 공개 HTTP 계약은
 `packages/contracts/openapi/openapi.yaml`, 영속·보안 규칙은 `docs/api-data-contract.md`가
 각자의 기준이며, `docs/api-명세서.md`는 두 계약을 사람이 읽을 수 있게 설명한다. 문서와
 코드가 충돌하면 조용히 한쪽에 맞추지 말고 기획안 기준으로 관련 문서와 구현을 함께 맞춘다.
@@ -280,7 +283,7 @@ Day 1 환경 구축 완료 조건:
 - 원안 수용·절충안·요청안 3종 문구
 - 만료되는 공개 토큰 기반 조정 요청 링크
 - 대행사의 가입 없는 수락·거절·역제안 1회 응답
-- 최대 4개 조정 조항을 담는 변경·확인 합의서
+- 최대 4개 확정 조항과 대행사 수정 계약서의 근거 기반 대조·소유자 확인
 - 모두싸인 실제 요청, 상태 조회, 웹훅, 완료·중단·실패 처리
 - append-only 성격의 계약 감사 타임라인
 - 대표 산출물 1건의 URL 증빙 제출과 승인·이의 처리
@@ -305,7 +308,7 @@ P0 정상 흐름이나 오류 처리가 깨져 있으면 P1 기능을 시작하�
 - 게시물 URL의 실제 존재 여부 자동 검증
 - 업체 신뢰점수, 사기·불법·승소 가능성 판정
 - 반복 자동 협상 Agent
-- 범용 가변 길이 합의서 편집기
+- 계약서 또는 변경 합의서 자동 작성·가변 길이 문서 편집기
 - `정부지원 대상` 저장·분석 필드 또는 별도 API
 - 사용자의 승인 없는 자동 발송·서명·이행 승인·재계약
 
@@ -421,7 +424,7 @@ Adapter는 모두싸인 원본 상태를 canonical `Signature` 상태로만 변�
 최신 `COMPLETED`는 Contract `SIGNING → SIGNED`, 최신 `ABORTED`·
 `PROCESSING_FAILED` 또는 외부 문서 생성 전 로컬 실패는
 Contract `SIGNING → READY_TO_SIGN`으로 처리한다. 실패·중단 시도를 자동 재요청하지
-않으며 사용자가 현재 합의서를 다시 확인하고 새 멱등 키로 명시적으로 요청해야 한다.
+않으며 사용자가 현재 수정 계약서를 다시 확인하고 새 멱등 키로 명시적으로 요청해야 한다.
 `SIGNING`은 `ON_GOING`과 외부 문서 ID·마지막 이벤트·요청 시각이 있어야 하고,
 `COMPLETED`는 원본 `COMPLETED`와 외부 문서 ID·마지막 이벤트·요청·완료 시각을 모두
 보존한다. `ABORTED`도 같은 추적 필드와 원본 `ABORTED`를 보존한다.
@@ -478,9 +481,10 @@ C  POST  /api/v1/public/adjustment-requests/{token}/open
 C  POST  /api/v1/public/adjustment-requests/{token}/responses
 C  POST  /api/v1/contracts/{contract_id}/adjustment-confirmation
 
-C  POST  /api/v1/contracts/{contract_id}/agreement
-C  GET   /api/v1/contracts/{contract_id}/agreement
-C  POST  /api/v1/contracts/{contract_id}/signature-requests
+C  POST  /api/v1/contracts/{contract_id}/revised-contract-reviews
+C  GET   /api/v1/contracts/{contract_id}/revised-contract-reviews/latest
+C  POST  /api/v1/contracts/{contract_id}/revised-contract-reviews/{review_id}/confirmation
+C  POST  /api/v1/contracts/{contract_id}/signature-embedded-drafts
 C  GET   /api/v1/contracts/{contract_id}/signature
 C  POST  /api/v1/webhooks/modusign
 
@@ -529,12 +533,11 @@ C  GET   /api/v1/dashboard
 - 모두싸인 웹훅처럼 vendor가 응답 형식을 정한 endpoint에는 공통 envelope를 강제하지
   않고 공식 명세의 acknowledgment 형식을 따른다.
 
-다음 6개 작업에는 UUID 형식의 `Idempotency-Key`가 필수다.
+다음 5개 작업에는 UUID 형식의 `Idempotency-Key`가 필수다.
 
 - 분석 시작
 - 조정 요청 초안 생성
 - 조정 링크 활성화
-- 합의서 생성
 - 모두싸인 서명 요청
 - 산출물 증빙 링크 생성
 
@@ -570,8 +573,9 @@ C  GET   /api/v1/dashboard
   `KEEP_ORIGINAL` 중 하나만 허용한다. 클라이언트가 임의의 최종 문구를 보내지 않으며
   서버가 저장된 요청·응답에서 최종 문구를 결정한다. 앞의 두 resolution은 관련
   `ReviewItem`을 `SENT → RESOLVED`, `KEEP_ORIGINAL`은
-  `SENT → KEPT_ORIGINAL`로 바꾸며, 조정·계약 상태, 항목 상태, 최종 문구와
-  `ADJUSTMENT_CONFIRMED` 감사 이벤트를 하나의 트랜잭션으로 기록한다.
+  `SENT → KEPT_ORIGINAL`로 바꾸며, 조정 상태, 항목 상태, 최종 문구와
+  `ADJUSTMENT_CONFIRMED` 감사 이벤트를 하나의 트랜잭션으로 기록한다. 이때 Contract는
+  `NEGOTIATING`을 유지하며 수정 계약서 최종 확인 전에는 서명 준비 상태가 되지 않는다.
 
 인증 공급자는 기획안에서 확정되지 않았다. 임의로 특정 공급자를 도입하지 않는다.
 인증이 연결되면 `owner_id`는 검증된 서버 측 인증 컨텍스트에서 얻는다. 연결 전 데모
@@ -586,7 +590,7 @@ README와 `docs/DECISIONS.md`에 한계를 기록한다.
 - 인증 공급자, 사용자 모델, 데모 인증의 종료 조건
 - PDF·선택 자료 크기, 페이지 수, 보존·삭제 제한
 - `contract_signed_date`를 원문에서 확인하지 못했을 때의 사용자 확인·정정 경로
-- 합의서 생성 형식, 템플릿 버전, 미서명·서명 문서 보관 정책
+- 수정 계약서 대조 형식, 문서 버전, 미서명·서명 문서 보관 정책
 - 멱등 키, 요청 hash와 최초 응답의 보관·정리 기간
 - `SIGNED → IN_PROGRESS → COMPLETED / RENEWAL_DUE` 전이의 정확한 날짜·이행 조건
 
@@ -657,17 +661,12 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
 
 ### Modusign
 
-- 합의서 생성은 원계약 문서 ID와 검증된 canonical `signed_date`가 있을 때만 허용한다.
-  원계약 체결일이 없으면 `INVALID_STATUS_TRANSITION`으로 거부하고 날짜를 만들지 않는다.
-- 조정 슬롯과 별도로 계약기간·총액·결제, 산출물·채널·보고, 해지·환불·갱신,
-  권리·촬영 안전·시설 파손·손해 책임·초상권·개인정보의 네 `condition_summary` 그룹을
-  합의서에 필수로 만든다. 검증 근거가 없는 조건은 미확인임을 명시하고 만들어내지 않는다.
-  조항의 `disposition`은 `AGREED`, `REJECTED`, `WITHDRAWN`으로 합의·대행사 거절·
-  소유자 철회를 구분하며 거절 사유를 보존한다.
-- 템플릿 조회, 서명자 2명 지정, 최대 4개 조정 슬롯 매핑, 서명 요청, 상태 조회,
-  웹훅 수신을 Adapter로 구현한다.
-- 서명 요청에는 현재 계약에서 확정된 `agreement_id`, `agreement_version`과
-  `confirmed=true`가 필요하다. 서버가 계약·합의서·버전의 일치를 검증한다.
+- 조정 결과 확정 뒤 대행사가 기존 채널로 보낸 `REVISED_CONTRACT` PDF를 업로드한다.
+  최신 수정본과 확정 문구를 원문 페이지·문장·confidence와 함께 대조하며, 정확 문구를
+  찾지 못하면 자동 확정하지 않고 `NEEDS_CONFIRMATION`으로 표시한다.
+- 소유자가 최신 대조의 모든 항목을 확인했을 때만 Contract를 `READY_TO_SIGN`으로 바꾼다.
+- 서명 요청에는 최신 확정 `revised_contract_review_id`와 `confirmed=true`가 필요하다.
+  서버는 문서 ID와 SHA-256을 다시 검증하고 해당 PDF 자체를 모두싸인에 전달한다.
 - 서명자는 `OWNER` 한 명과 `AGENCY` 한 명으로 정확히 두 명이다. 이름은 2~30자이며
   `EMAIL`은 이메일 형식, `KAKAO`는 하이픈 없는 국내 휴대전화 번호 형식이어야 한다.
   역할과 연락처 중복을 거부한다.
@@ -677,9 +676,7 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
 - API와 실제 상태값은 구현 시 모두싸인 공식 문서를 다시 확인한다. 웹훅 등록에는
   `X-Modusign-Webhook-Secret` custom header를 쓰고 서버의
   `MODUSIGN_WEBHOOK_SECRET` 환경변수와 같은 secret 값을 설정한다.
-- 합의서의 원계약 대비 법적 우선순위를 단정하는 문구는 승인된 템플릿이나 법률 검토 없이
-  생성하지 않는다.
-- 합의서 버전과 서명자 집합을 기준으로 멱등 키 또는 유일성 제약을 두어 더블클릭과 동시
+- 수정 계약서 대조 ID와 서명자 집합을 기준으로 멱등 키 또는 유일성 제약을 두어 더블클릭과 동시
   요청이 여러 서명 문서를 만들지 않게 한다. 다만 이전 시도가 `ABORTED` 또는 `FAILED`로
   종료된 뒤에는 새 `Idempotency-Key`와 `confirmed=true`로 새 `Signature` 시도를 만들 수
   있고, 단일 조회는 가장 최근 시도를 반환한다. 이전 terminal 시도와 외부 문서 ID는
@@ -806,6 +803,7 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
   `ANALYSIS_FAILED`, `REVIEW_ITEM_SELECTION_UPDATED`, `ADJUSTMENT_DRAFT_CREATED`,
   `ADJUSTMENT_SENT`, `ADJUSTMENT_OPENED`, `ADJUSTMENT_RESPONDED`,
   `ADJUSTMENT_CONFIRMED`, `ADJUSTMENT_EXPIRED`, `AGREEMENT_CREATED`,
+  `REVISED_CONTRACT_REVIEW_CREATED`, `REVISED_CONTRACT_CONFIRMED`,
   `SIGNATURE_REQUESTED`, `SIGNATURE_STARTED`, `SIGNATURE_COMPLETED`,
   `SIGNATURE_ABORTED`, `SIGNATURE_FAILED`, `OBLIGATION_CREATED`,
   `EVIDENCE_LINK_CREATED`, `EVIDENCE_SUBMITTED`, `EVIDENCE_APPROVED`,
@@ -866,7 +864,7 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
 - Pydantic AI 스키마와 근거 누락 시 `확인 필요` 처리
 - 기간·총액·해지·환불 불일치와 빈칸 확인 신호
 - 외부 Adapter의 timeout·실패 매핑
-- 모두싸인 서명자 역할·연락처 형식·중복과 합의서 버전 검증
+- 모두싸인 서명자 역할·연락처 형식·중복과 최신 수정 계약서 ID·SHA-256 검증
 - 모두싸인 웹훅 secret, fingerprint 중복, 즉시 204·비동기 처리, 순서 역전,
   종료 상태 보호
 - 산출물 `PENDING → SUBMITTED → APPROVED / DISPUTED`

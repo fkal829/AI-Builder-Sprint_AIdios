@@ -46,8 +46,9 @@ class SignatureSigner(BaseModel):
 class EmbeddedSignatureDraftCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    agreement_id: UUID
-    agreement_version: int = Field(ge=1)
+    revised_contract_review_id: UUID | None = None
+    agreement_id: UUID | None = None
+    agreement_version: int | None = Field(default=None, ge=1)
     signers: list[SignatureSigner] = Field(min_length=2, max_length=2)
     confirmed: Literal[True]
 
@@ -59,6 +60,16 @@ class EmbeddedSignatureDraftCreate(BaseModel):
             raise ValueError("Exactly one OWNER and one AGENCY signer are required.")
         if len(set(contacts)) != len(contacts):
             raise ValueError("Signer contacts must not be duplicated.")
+        uses_revision = self.revised_contract_review_id is not None
+        uses_legacy_agreement = self.agreement_id is not None or self.agreement_version is not None
+        if uses_revision == uses_legacy_agreement:
+            raise ValueError(
+                "Provide a revised_contract_review_id or a legacy agreement ID/version, not both."
+            )
+        if uses_legacy_agreement and (
+            self.agreement_id is None or self.agreement_version is None
+        ):
+            raise ValueError("Legacy agreement ID and version must be supplied together.")
         return self
 
 

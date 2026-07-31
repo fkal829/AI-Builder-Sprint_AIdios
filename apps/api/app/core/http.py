@@ -43,6 +43,18 @@ CANONICAL_OPERATION_IDS = {
         "/public/adjustment-requests/{token}/responses",
     ): "submitAdjustmentResponses",
     ("POST", "/contracts/{contract_id}/adjustment-confirmation"): "confirmAdjustment",
+    (
+        "POST",
+        "/contracts/{contract_id}/revised-contract-reviews",
+    ): "createRevisedContractReview",
+    (
+        "GET",
+        "/contracts/{contract_id}/revised-contract-reviews/latest",
+    ): "getLatestRevisedContractReview",
+    (
+        "POST",
+        "/contracts/{contract_id}/revised-contract-reviews/{review_id}/confirmation",
+    ): "confirmRevisedContractReview",
     ("POST", "/contracts/{contract_id}/agreement"): "createAgreement",
     ("GET", "/contracts/{contract_id}/agreement"): "getAgreement",
     (

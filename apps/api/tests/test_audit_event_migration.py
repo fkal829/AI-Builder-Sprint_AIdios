@@ -8,7 +8,7 @@ MIGRATION_PATH = (
     REPOSITORY_ROOT
     / "supabase"
     / "migrations"
-    / "20260730280000_add_signature_requests.sql"
+    / "20260731010000_add_revised_contract_verification.sql"
 )
 
 

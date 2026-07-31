@@ -99,7 +99,7 @@ async def validate_document(
         raise InvalidDocument("선언한 Content-Type과 실제 파일 형식이 일치하지 않습니다.")
 
     if document_type != DocumentType.MESSAGE and detected_content_type != PDF_CONTENT_TYPE:
-        raise InvalidDocument("계약서·제안서·견적서는 PDF만 업로드할 수 있습니다.")
+        raise InvalidDocument("계약서·수정 계약서·제안서·견적서는 PDF만 업로드할 수 있습니다.")
     if document_type == DocumentType.MESSAGE and detected_content_type not in {
         PDF_CONTENT_TYPE,
         PNG_CONTENT_TYPE,

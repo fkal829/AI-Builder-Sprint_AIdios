@@ -23,6 +23,7 @@ from app.services.idempotency import IdempotencyService
 from app.services.obligations import ObligationService
 from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
+from app.services.revised_contracts import RevisedContractService
 from app.services.signatures import SignatureService
 from app.services.understood_terms import UnderstoodTermService
 from app.services.webhooks import ModusignWebhookService
@@ -229,6 +230,18 @@ async def get_agreement_service(
     )
 
 
+async def get_revised_contract_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    upstage: Annotated[UpstageAdapter, Depends(get_upstage_adapter)],
+) -> RevisedContractService:
+    return RevisedContractService(
+        repository=supabase,
+        documents=supabase,
+        storage=supabase,
+        parser=upstage,
+    )
+
+
 async def get_signature_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
     modusign: Annotated[ModusignAdapter, Depends(get_modusign_adapter)],
@@ -236,6 +249,8 @@ async def get_signature_service(
     return SignatureService(
         repository=supabase,
         agreements=supabase,
+        revisions=supabase,
+        documents=supabase,
         storage=supabase,
         modusign=modusign,
         embedded_redirect_url=get_settings().modusign_embedded_redirect_url,

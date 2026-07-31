@@ -1,4 +1,4 @@
-# 안심홍보계약 — 프론트엔드
+# 단디계약 — 프론트엔드
 
 부산 관광상권 소상공인용 AI 광고대행 계약 CLM. Next.js(App Router) + TypeScript + Tailwind CSS v4.
 와이어프레임 v2와 최종기획안의 **P0 전체**를 목업 데이터로 완결되게 구현했습니다.
@@ -22,7 +22,7 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 3. **타이핑 없이 완주** — 업로드~서명 필수 경로는 버튼·선택만. 자유 입력(톤완충)은 P1 접힘 경로.
 4. **근거 필수** — 모든 지적 옆에 원문 페이지·문장 → `components/SourceLink.tsx`.
 5. **비가역 행동 전 확인** — 발송·서명 전 모달 → `components/ConfirmModal.tsx`.
-6. **거절된 것을 지우지 않는다** — 합의서에 합의·원안유지 조항이 gray 톤으로 나란히 남음.
+6. **조정 이력을 지우지 않는다** — 수락·거절·역제안과 수정 계약서 대조 결과를 함께 보존.
 7. **실패·빈 상태 구현** — `/states` 갤러리 + 각 화면 내 분기.
 8. **'지급 조건 충족' ≠ 실제 송금** — 산출물 화면에 문구 명시.
 
@@ -38,10 +38,11 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 | ⑤ 조항 카드 상세/문구선택 | `/contracts/[id]/clauses/[clauseId]` |
 | ⑥ 조정 요청서 미리보기 | `/contracts/[id]/request` |
 | ⑦ 발송 대기 + 역제안 비교 | `/contracts/[id]/responses` |
-| ⑧ 변경·확인 합의서 | `/contracts/[id]/agreement` |
+| ⑧ 수정 계약서 업로드·대조 | `/contracts/[id]/revision` |
 | ⑨ 모두싸인 상태 + 타임라인 | `/contracts/[id]/signature` |
 | ⑩ 산출물 증빙 확인 | `/contracts/[id]/obligations` |
-| ⑪ 만료·재계약 검토 | `/contracts/[id]/renewal` |
+| ⑪ 광고효과 기록·대조 | `/contracts/[id]/performance` |
+| ⑫ 만료·재계약 검토 | `/contracts/[id]/renewal` |
 
 ### 대행사 공개 (무가입 · 토큰 접근)
 | 화면 | 경로 |

@@ -6,6 +6,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.adapters.modusign import ModusignAdapter
+from app.adapters.solar import SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
 from app.adapters.upstage import UpstageAdapter
 from app.core.config import get_settings
@@ -62,6 +63,22 @@ async def get_upstage_adapter() -> UpstageAdapter:
 
 
 @lru_cache
+def _get_solar_review_adapter() -> SolarReviewAdapter:
+    settings = get_settings()
+    return SolarReviewAdapter(
+        mode=settings.upstage_mode,
+        api_key=settings.upstage_api_key,
+        base_url=settings.upstage_base_url,
+        timeout_seconds=settings.upstage_solar_timeout_seconds,
+        model=settings.upstage_solar_model,
+    )
+
+
+async def get_solar_review_adapter() -> SolarReviewAdapter:
+    return _get_solar_review_adapter()
+
+
+@lru_cache
 def _get_modusign_adapter() -> ModusignAdapter:
     settings = get_settings()
     return ModusignAdapter(
@@ -106,9 +123,11 @@ async def get_understood_term_service(
 async def get_analysis_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
     upstage: Annotated[UpstageAdapter, Depends(get_upstage_adapter)],
+    solar: Annotated[SolarReviewAdapter, Depends(get_solar_review_adapter)],
 ) -> AnalysisService:
     return AnalysisService(
         adapter=upstage,
+        reviewer=solar,
         contracts=supabase,
         documents=supabase,
         understood_terms=supabase,

@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID
@@ -219,6 +220,101 @@ class ReviewItem(StrictModel):
             and self.user_choice == SuggestionChoice.ACCEPT
         ):
             raise ValueError("조정 대상으로 선택한 항목에는 ACCEPT를 사용할 수 없습니다.")
+        return self
+
+
+UNSAFE_SOLAR_REVIEW_PATTERNS = (
+    r"사기(?:의심)?업체",
+    r"불법계약",
+    r"안전한업체",
+    r"승소(?:할)?가능",
+    r"승소확률",
+    r"법률자문.{0,12}(?:대체|대신)(?:합니다|한다|할수있|가능)",
+)
+
+
+class SolarReviewInput(StrictModel):
+    review_item_id: UUID
+    signal: ReviewSignalType
+    severity: ReviewSeverity
+    verification_status: VerificationStatus
+    field_labels: list[str] = Field(min_length=1, max_length=11)
+    deterministic_explanation: str = Field(min_length=1, max_length=600)
+    contract_values: list[str] = Field(max_length=11)
+    user_understanding: str | None = Field(default=None, min_length=1, max_length=400)
+    source_excerpt: str | None = Field(default=None, min_length=1, max_length=1200)
+
+    @model_validator(mode="after")
+    def validate_text(self) -> "SolarReviewInput":
+        values = [
+            *self.field_labels,
+            self.deterministic_explanation,
+            *self.contract_values,
+        ]
+        if self.user_understanding is not None:
+            values.append(self.user_understanding)
+        if self.source_excerpt is not None:
+            values.append(self.source_excerpt)
+        if any(not value.strip() for value in values):
+            raise ValueError("Solar 검토 입력 문자열은 비어 있을 수 없습니다.")
+        return self
+
+
+class SolarReviewBatchInput(StrictModel):
+    items: list[SolarReviewInput] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_unique_ids(self) -> "SolarReviewBatchInput":
+        item_ids = [item.review_item_id for item in self.items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("Solar 검토 입력 ID는 중복될 수 없습니다.")
+        return self
+
+
+class SolarReviewOutput(StrictModel):
+    review_item_id: UUID
+    plain_explanation: str = Field(min_length=1, max_length=600)
+    suggestion_accept: str = Field(min_length=1, max_length=600)
+    suggestion_compromise: str = Field(min_length=1, max_length=600)
+    suggestion_request: str = Field(min_length=1, max_length=600)
+    self_reported_confidence: float = Field(strict=True, ge=0, le=1)
+    model_limitations: str = Field(min_length=1, max_length=600)
+
+    @model_validator(mode="after")
+    def validate_safe_distinct_copy(self) -> "SolarReviewOutput":
+        text_values = (
+            self.plain_explanation,
+            self.suggestion_accept,
+            self.suggestion_compromise,
+            self.suggestion_request,
+            self.model_limitations,
+        )
+        if any(not value.strip() for value in text_values):
+            raise ValueError("Solar 검토 출력 문자열은 비어 있을 수 없습니다.")
+        suggestions = {
+            self.suggestion_accept.strip(),
+            self.suggestion_compromise.strip(),
+            self.suggestion_request.strip(),
+        }
+        if len(suggestions) != 3:
+            raise ValueError("Solar의 원안·절충·요청 문구는 서로 달라야 합니다.")
+        normalized = re.sub(r"[\W_]+", "", " ".join(text_values)).lower()
+        if any(
+            re.search(pattern, normalized)
+            for pattern in UNSAFE_SOLAR_REVIEW_PATTERNS
+        ):
+            raise ValueError("Solar 검토 출력에 허용되지 않은 단정 표현이 있습니다.")
+        return self
+
+
+class SolarReviewBatchOutput(StrictModel):
+    items: list[SolarReviewOutput] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_unique_ids(self) -> "SolarReviewBatchOutput":
+        item_ids = [item.review_item_id for item in self.items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("Solar 검토 출력 ID는 중복될 수 없습니다.")
         return self
 
 

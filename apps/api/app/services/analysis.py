@@ -6,7 +6,8 @@ from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
-from app.adapters.base import DocumentAnalysisAdapter, ParsedDocument
+from app.adapters.base import ContractReviewAdapter, DocumentAnalysisAdapter, ParsedDocument
+from app.adapters.solar import SOLAR_CONFIDENCE_LIMITATION
 from app.adapters.upstage import UpstageDocumentParseError, UpstageExtractionError
 from app.core.enums import (
     AnalysisStatus,
@@ -38,6 +39,8 @@ from app.schemas.analysis import (
     ExtractedTerm,
     ExtractedTermCandidate,
     ReviewItem,
+    SolarReviewInput,
+    SolarReviewOutput,
 )
 from app.schemas.documents import DocumentType
 from app.schemas.understood_terms import UnderstoodTerm
@@ -74,6 +77,76 @@ ANALYSIS_FIELDS = (
     ExtractedField.FALSE_ADVERTISING_LIABILITY,
 )
 
+REVIEW_FIELD_LABELS: dict[ExtractedField, str] = {
+    ExtractedField.CONTRACT_PARTY_OWNER: "광고주 계약 당사자",
+    ExtractedField.CONTRACT_PARTY_AGENCY: "광고대행사 계약 당사자",
+    ExtractedField.CONTRACT_SIGNED_DATE: "계약 체결일",
+    ExtractedField.CONTRACT_START_DATE: "계약 시작일",
+    ExtractedField.CONTRACT_END_DATE: "계약 종료일",
+    ExtractedField.MONTHLY_AMOUNT: "월 납부액",
+    ExtractedField.CONTRACT_TOTAL_AMOUNT: "총 계약금액",
+    ExtractedField.PAYMENT_METHOD: "결제 방식",
+    ExtractedField.AUTO_RENEWAL: "자동갱신 여부",
+    ExtractedField.CONTRACT_RENEWAL_TYPE: "갱신 유형",
+    ExtractedField.TERMINATION_NOTICE_DATE: "해지 통보기한",
+    ExtractedField.EARLY_TERMINATION_ALLOWED: "중도해지 가능 여부",
+    ExtractedField.TERMINATION_PENALTY_RATE: "중도해지 위약금",
+    ExtractedField.REFUND_CONDITION: "환불 조건",
+    ExtractedField.ADVERTISING_CHANNEL: "광고 채널",
+    ExtractedField.CONTENT_TYPE: "산출물 유형",
+    ExtractedField.CONTENT_QUANTITY: "산출물 수량",
+    ExtractedField.DELIVERABLE_DUE_DATE: "산출물 기한",
+    ExtractedField.POSTING_FREQUENCY: "게시 빈도",
+    ExtractedField.REPORTING_FREQUENCY: "보고 의무",
+    ExtractedField.PERFORMANCE_GUARANTEE: "성과 보장 조건",
+    ExtractedField.ADVERTISING_ACCOUNT_OWNERSHIP: "광고 계정 소유권",
+    ExtractedField.CONTENT_OWNERSHIP: "콘텐츠 소유권",
+    ExtractedField.SHOOTING_SAFETY: "촬영 안전",
+    ExtractedField.PORTRAIT_RIGHTS: "초상권",
+    ExtractedField.PERSONAL_INFORMATION_HANDLING: "개인정보 처리",
+    ExtractedField.FACILITY_DAMAGE_LIABILITY: "시설 파손·손해 책임",
+    ExtractedField.FALSE_ADVERTISING_LIABILITY: "허위·과장 광고 책임",
+}
+
+AMBIGUOUS_CONTRACT_PHRASES = (
+    "공란",
+    "미기재",
+    "수기 입력 예정",
+    "별도 협의",
+    "추후 결정",
+    "상황에 따라 변경",
+)
+ONE_SIDED_RESPONSIBILITY_PHRASES = (
+    "모든 책임",
+    "일체의 책임",
+    "일체 책임",
+    "전적인 책임",
+    "전적으로 부담",
+    "책임지지 않는다",
+    "책임을 지지 않는다",
+)
+P0_IMPORTANT_MISSING_FIELDS = {
+    ExtractedField.CONTENT_QUANTITY,
+    ExtractedField.DELIVERABLE_DUE_DATE,
+    ExtractedField.REPORTING_FREQUENCY,
+    ExtractedField.SHOOTING_SAFETY,
+    ExtractedField.FACILITY_DAMAGE_LIABILITY,
+    ExtractedField.FALSE_ADVERTISING_LIABILITY,
+}
+DELIVERABLE_FIELDS = {
+    ExtractedField.ADVERTISING_CHANNEL,
+    ExtractedField.CONTENT_TYPE,
+    ExtractedField.CONTENT_QUANTITY,
+    ExtractedField.DELIVERABLE_DUE_DATE,
+    ExtractedField.POSTING_FREQUENCY,
+    ExtractedField.REPORTING_FREQUENCY,
+}
+SAFETY_RESPONSIBILITY_FIELDS = {
+    ExtractedField.SHOOTING_SAFETY,
+    ExtractedField.FACILITY_DAMAGE_LIABILITY,
+    ExtractedField.FALSE_ADVERTISING_LIABILITY,
+}
+
 
 class AnalysisPipelineFailure(RuntimeError):
     def __init__(self, *, error_code: ErrorCode, attempt_count: int) -> None:
@@ -87,6 +160,7 @@ class AnalysisService:
         self,
         *,
         adapter: DocumentAnalysisAdapter,
+        reviewer: ContractReviewAdapter,
         contracts: ContractRepository,
         documents: DocumentRepository,
         understood_terms: UnderstoodTermRepository,
@@ -95,6 +169,7 @@ class AnalysisService:
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.adapter = adapter
+        self.reviewer = reviewer
         self.contracts = contracts
         self.documents = documents
         self.understood_terms = understood_terms
@@ -256,14 +331,27 @@ class AnalysisService:
                 owner_id=owner_id,
                 contract_id=task.contract_id,
             )
+            review_items = _build_review_items(
+                contract_id=task.contract_id,
+                terms=all_terms,
+                understood=understood,
+                contract=contract,
+            )
+            solar_inputs = _build_solar_review_inputs(
+                reviews=review_items,
+                terms=all_terms,
+                understood=understood,
+                contract=contract,
+            )
+            solar_outputs = await self.reviewer.generate_review_content(
+                items=solar_inputs,
+            )
             result = Analysis(
                 contract_id=task.contract_id,
                 extracted_terms=all_terms,
-                review_items=_build_review_items(
-                    contract_id=task.contract_id,
-                    terms=all_terms,
-                    understood=understood,
-                    contract=contract,
+                review_items=_apply_solar_review_content(
+                    reviews=review_items,
+                    outputs=solar_outputs,
                 ),
             )
             completed = await self.analyses.complete_analysis_with_audit(
@@ -460,19 +548,102 @@ def _build_review_items(
         if term is None:
             continue
         if term.verification_status != VerificationStatus.VERIFIED:
+            found_specific_signal = False
+            if term.verification_status == VerificationStatus.NEEDS_CHECK:
+                ambiguous_phrase = _find_phrase(term, AMBIGUOUS_CONTRACT_PHRASES)
+                if ambiguous_phrase is not None:
+                    reviews.append(
+                        _review_for_term(
+                            contract_id=contract_id,
+                            term=term,
+                            signal=ReviewSignalType.UNCLEAR,
+                            severity=ReviewSeverity.CHECK,
+                            explanation=(
+                                f"{REVIEW_FIELD_LABELS[field]} 조건에 "
+                                f"'{ambiguous_phrase}' 표현이 있어 적용 기준이 "
+                                "명확하지 않습니다."
+                            ),
+                        )
+                    )
+                    found_specific_signal = True
+                if field in SAFETY_RESPONSIBILITY_FIELDS:
+                    one_sided_phrase = _find_phrase(
+                        term,
+                        ONE_SIDED_RESPONSIBILITY_PHRASES,
+                    )
+                    if one_sided_phrase is not None:
+                        reviews.append(
+                            _review_for_term(
+                                contract_id=contract_id,
+                                term=term,
+                                signal=ReviewSignalType.NEEDS_CHECK,
+                                severity=ReviewSeverity.IMPORTANT,
+                                explanation=(
+                                    f"{REVIEW_FIELD_LABELS[field]} 조건에 "
+                                    f"'{one_sided_phrase}' 표현이 있어 책임 범위와 "
+                                    "주체를 추가로 확인해야 합니다."
+                                ),
+                            )
+                        )
+                        found_specific_signal = True
+            if not found_specific_signal:
+                reviews.append(
+                    _review_for_term(
+                        contract_id=contract_id,
+                        term=term,
+                        signal=(
+                            ReviewSignalType.MISSING
+                            if term.verification_status == VerificationStatus.NOT_FOUND
+                            else ReviewSignalType.NEEDS_CHECK
+                        ),
+                        severity=(
+                            ReviewSeverity.IMPORTANT
+                            if field in P0_IMPORTANT_MISSING_FIELDS
+                            else ReviewSeverity.CHECK
+                        ),
+                        explanation=_unresolved_explanation(
+                            field=field,
+                            verification_status=term.verification_status,
+                        ),
+                    )
+                )
+
+    for term in contract_terms.values():
+        if term.verification_status != VerificationStatus.VERIFIED:
+            continue
+        ambiguous_phrase = _find_phrase(term, AMBIGUOUS_CONTRACT_PHRASES)
+        if ambiguous_phrase is not None:
             reviews.append(
                 _review_for_term(
                     contract_id=contract_id,
                     term=term,
-                    signal=(
-                        ReviewSignalType.MISSING
-                        if term.verification_status == VerificationStatus.NOT_FOUND
-                        else ReviewSignalType.NEEDS_CHECK
-                    ),
+                    signal=ReviewSignalType.UNCLEAR,
                     severity=ReviewSeverity.CHECK,
-                    explanation=f"{field.value} 조건을 계약 원문에서 명확히 확인하지 못했습니다.",
+                    explanation=(
+                        f"{REVIEW_FIELD_LABELS[term.field]} 조건에 "
+                        f"'{ambiguous_phrase}' 표현이 있어 적용 기준이 명확하지 않습니다."
+                    ),
                 )
             )
+        if term.field in SAFETY_RESPONSIBILITY_FIELDS:
+            one_sided_phrase = _find_phrase(
+                term,
+                ONE_SIDED_RESPONSIBILITY_PHRASES,
+            )
+            if one_sided_phrase is not None:
+                reviews.append(
+                    _review_for_term(
+                        contract_id=contract_id,
+                        term=term,
+                        signal=ReviewSignalType.NEEDS_CHECK,
+                        severity=ReviewSeverity.IMPORTANT,
+                        explanation=(
+                            f"{REVIEW_FIELD_LABELS[term.field]} 조건에 "
+                            f"'{one_sided_phrase}' 표현이 있어 책임 범위와 주체를 "
+                            "추가로 확인해야 합니다."
+                        ),
+                    )
+                )
 
     if contract is not None:
         canonical_fields = (
@@ -617,6 +788,204 @@ def _canonical_term_value(term: ExtractedTerm) -> object:
     return term.value
 
 
+def _unresolved_explanation(
+    *,
+    field: ExtractedField,
+    verification_status: VerificationStatus,
+) -> str:
+    label = REVIEW_FIELD_LABELS[field]
+    if verification_status == VerificationStatus.NOT_FOUND:
+        if field in DELIVERABLE_FIELDS:
+            return (
+                f"계약 원문에서 산출물의 {label} 조건을 찾지 못했습니다. "
+                "실제 제공 범위를 확인해야 합니다."
+            )
+        if field in SAFETY_RESPONSIBILITY_FIELDS:
+            return (
+                f"계약 원문에서 {label} 조건을 찾지 못했습니다. "
+                "안전 조치와 책임 주체를 확인해야 합니다."
+            )
+        return f"계약 원문에서 {label} 조건을 찾지 못했습니다."
+    if verification_status == VerificationStatus.MISSING_EVIDENCE:
+        return (
+            f"{label} 값은 추출됐지만 이를 뒷받침하는 계약 원문 위치를 "
+            "확인하지 못했습니다."
+        )
+    return f"계약 원문의 {label} 조건은 사용자 확인이 더 필요합니다."
+
+
+def _find_phrase(
+    term: ExtractedTerm,
+    phrases: tuple[str, ...],
+) -> str | None:
+    values = [term.source_text, str(term.value) if term.value is not None else None]
+    normalized = _normalized_text(" ".join(value for value in values if value))
+    for phrase in phrases:
+        if _normalized_text(phrase) in normalized:
+            return phrase
+    return None
+
+
+def _build_solar_review_inputs(
+    *,
+    reviews: list[ReviewItem],
+    terms: list[ExtractedTerm],
+    understood: UnderstoodTerm | None,
+    contract: ContractRecord | None,
+) -> list[SolarReviewInput]:
+    terms_by_id = {term.id: term for term in terms}
+    inputs: list[SolarReviewInput] = []
+    for review in reviews:
+        related_terms: list[ExtractedTerm] = []
+        for term_id in review.related_extracted_term_ids:
+            term = terms_by_id.get(term_id)
+            if term is None:
+                raise ValueError("검토 항목의 관련 추출 필드를 찾을 수 없습니다.")
+            related_terms.append(term)
+        labels = list(
+            dict.fromkeys(REVIEW_FIELD_LABELS[term.field] for term in related_terms)
+        )
+        contract_values = [
+            _bounded_context(
+                f"{REVIEW_FIELD_LABELS[term.field]}: "
+                f"{term.value if term.value is not None else '계약 원문에서 확인되지 않음'}",
+                limit=400,
+            )
+            for term in related_terms
+        ]
+        inputs.append(
+            SolarReviewInput(
+                review_item_id=review.id,
+                signal=review.type,
+                severity=review.severity,
+                verification_status=review.verification_status,
+                field_labels=labels,
+                deterministic_explanation=_bounded_context(
+                    review.plain_explanation,
+                    limit=600,
+                ),
+                contract_values=contract_values,
+                user_understanding=_review_comparison_context(
+                    review=review,
+                    related_terms=related_terms,
+                    understood=understood,
+                    contract=contract,
+                ),
+                source_excerpt=(
+                    _bounded_context(review.source_text, limit=1200)
+                    if review.source_text is not None
+                    else None
+                ),
+            )
+        )
+    return inputs
+
+
+def _review_comparison_context(
+    *,
+    review: ReviewItem,
+    related_terms: list[ExtractedTerm],
+    understood: UnderstoodTerm | None,
+    contract: ContractRecord | None,
+) -> str | None:
+    fields = {term.field for term in related_terms}
+    if understood is not None and "사용자가 이해한" in review.plain_explanation:
+        if {
+            ExtractedField.CONTRACT_START_DATE,
+            ExtractedField.CONTRACT_END_DATE,
+        }.issubset(fields):
+            return _bounded_context(
+                f"사용자가 이해한 계약기간: {understood.duration_text}",
+                limit=400,
+            )
+        understood_values: tuple[tuple[ExtractedField, str, object | None], ...] = (
+            (ExtractedField.MONTHLY_AMOUNT, "월 납부액", understood.monthly_amount),
+            (
+                ExtractedField.CONTRACT_TOTAL_AMOUNT,
+                "총 계약금액",
+                understood.total_amount,
+            ),
+            (ExtractedField.REFUND_CONDITION, "환불 조건", understood.refund_text),
+            (
+                ExtractedField.EARLY_TERMINATION_ALLOWED,
+                "중도해지 가능 여부",
+                understood.termination_text,
+            ),
+        )
+        for field, label, value in understood_values:
+            if field in fields and value is not None:
+                return _bounded_context(
+                    f"사용자가 이해한 {label}: {value}",
+                    limit=400,
+                )
+
+    if contract is not None and "저장된" in review.plain_explanation:
+        canonical_values: tuple[tuple[ExtractedField, str, object | None], ...] = (
+            (ExtractedField.CONTRACT_SIGNED_DATE, "계약 체결일", contract.signed_date),
+            (ExtractedField.CONTRACT_START_DATE, "계약 시작일", contract.start_date),
+            (ExtractedField.CONTRACT_END_DATE, "계약 종료일", contract.end_date),
+            (
+                ExtractedField.TERMINATION_NOTICE_DATE,
+                "해지 통보기한",
+                contract.termination_notice_date,
+            ),
+            (
+                ExtractedField.CONTRACT_RENEWAL_TYPE,
+                "갱신 유형",
+                contract.renewal_type,
+            ),
+            (
+                ExtractedField.CONTRACT_TOTAL_AMOUNT,
+                "총 계약금액",
+                contract.total_amount,
+            ),
+        )
+        for field, label, value in canonical_values:
+            if field in fields and value is not None:
+                return _bounded_context(f"저장된 {label}: {value}", limit=400)
+    return None
+
+
+def _apply_solar_review_content(
+    *,
+    reviews: list[ReviewItem],
+    outputs: list[SolarReviewOutput],
+) -> list[ReviewItem]:
+    outputs_by_id = {output.review_item_id: output for output in outputs}
+    if len(outputs_by_id) != len(outputs):
+        raise ValueError("Solar 검토 출력 ID는 중복될 수 없습니다.")
+    if set(outputs_by_id) != {review.id for review in reviews}:
+        raise ValueError("Solar 검토 출력 ID가 검토 후보와 일치하지 않습니다.")
+
+    merged: list[ReviewItem] = []
+    for review in reviews:
+        output = outputs_by_id[review.id]
+        limitations = output.model_limitations.strip()
+        if SOLAR_CONFIDENCE_LIMITATION not in limitations:
+            limitations = f"{limitations} {SOLAR_CONFIDENCE_LIMITATION}"
+        payload = review.model_dump(mode="python")
+        payload.update(
+            {
+                "detection_method": DetectionMethod.HYBRID,
+                "model_confidence": output.self_reported_confidence,
+                "model_limitations": limitations,
+                "plain_explanation": output.plain_explanation.strip(),
+                "suggestion_accept": output.suggestion_accept.strip(),
+                "suggestion_compromise": output.suggestion_compromise.strip(),
+                "suggestion_request": output.suggestion_request.strip(),
+            }
+        )
+        merged.append(ReviewItem.model_validate(payload))
+    return merged
+
+
+def _bounded_context(value: str, *, limit: int) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 1]}…"
+
+
 def _review_for_term(
     *,
     contract_id: UUID,
@@ -638,6 +1007,13 @@ def _review_for_term(
         }
         else VerificationStatus.NEEDS_CHECK
     )
+    related = related_terms or (term,)
+    labels = list(dict.fromkeys(REVIEW_FIELD_LABELS[item.field] for item in related))
+    label = "·".join(labels)
+    if signal == ReviewSignalType.MISSING:
+        suggestion_accept = f"현재 계약서에 {label} 조건이 없는 상태를 그대로 수용합니다."
+    else:
+        suggestion_accept = f"현재 계약 원문에 적힌 {label} 조건을 그대로 수용합니다."
     return ReviewItem(
         id=uuid4(),
         contract_id=contract_id,
@@ -650,17 +1026,19 @@ def _review_for_term(
         basis_type=ReviewBasisType.INTERNAL_RULE,
         basis_text="계약 원문과 사용자가 저장한 이해조건을 분리해 비교하는 내부 확인 규칙",
         basis_citation=None,
-        related_extracted_term_ids=[
-            related.id for related in (related_terms or (term,))
-        ],
+        related_extracted_term_ids=[related_term.id for related_term in related],
         source_document_id=term.document_id if has_evidence else None,
         source_page=term.source_page if has_evidence else None,
         source_text=term.source_text if has_evidence else None,
         source_confidence=term.confidence if has_evidence else None,
         verification_status=verification_status,
-        suggestion_accept="계약 원문 조건을 그대로 확인합니다.",
-        suggestion_compromise="서로 이해한 조건을 확인해 조정 가능한 문구를 협의합니다.",
-        suggestion_request="확인된 조건을 계약 문구에 명확히 적어 달라고 요청합니다.",
+        suggestion_accept=suggestion_accept,
+        suggestion_compromise=(
+            f"{label} 조건의 차이와 확인할 범위를 상대방과 협의해 조정합니다."
+        ),
+        suggestion_request=(
+            f"{label} 조건의 주체·기준·시점을 계약 문구에 명확히 적어 달라고 요청합니다."
+        ),
         user_choice=None,
         status=ReviewItemStatus.UNREVIEWED,
     )

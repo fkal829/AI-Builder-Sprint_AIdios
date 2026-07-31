@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     upstage_parse_timeout_seconds: float = Field(default=120, ge=1, le=300)
     upstage_extract_timeout_seconds: float = Field(default=180, ge=1, le=600)
     upstage_extract_model: str = "information-extract"
+    upstage_solar_timeout_seconds: float = Field(default=120, ge=1, le=300)
+    upstage_solar_model: str = "solar-pro3"
 
     modusign_mode: Literal["mock", "live"] = "mock"
     modusign_account_email: str = ""

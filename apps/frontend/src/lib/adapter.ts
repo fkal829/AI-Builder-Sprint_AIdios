@@ -76,6 +76,10 @@ type UnderstoodTermInput = {
 
 type ApiContract = { id: string };
 type ApiDocument = { id: string };
+type ApiAnalysisTask = {
+  status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+  error_code: string | null;
+};
 
 export class PublicApiError extends Error {
   constructor(
@@ -103,6 +107,7 @@ export interface DataAdapter {
   uploadContractDocument(contractId: string, file: File): Promise<{ id: string }>;
   saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput): Promise<void>;
   startContractAnalysis(contractId: string, documentId: string): Promise<void>;
+  getContractAnalysis(contractId: string): Promise<ApiAnalysisTask>;
   /** GET /api/v1/public/adjustment-requests/{token} */
   getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic | null>;
   /** POST /api/v1/public/adjustment-requests/{token}/open */
@@ -154,6 +159,12 @@ class MockAdapter implements DataAdapter {
     void contractId;
     void documentId;
     await delay(240);
+  }
+
+  async getContractAnalysis(_contractId: string): Promise<ApiAnalysisTask> {
+    void _contractId;
+    await delay(120);
+    return { status: "COMPLETED", error_code: null };
   }
 
   async getAdjustmentRequest(token: string) {
@@ -293,6 +304,13 @@ class ApiAdapter extends MockAdapter {
     });
   }
 
+  async getContractAnalysis(contractId: string): Promise<ApiAnalysisTask> {
+    return this.request<ApiAnalysisTask>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`,
+      { headers: this.ownerHeaders() },
+    );
+  }
+
   async getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic> {
     const data = await this.request<ApiPublicAdjustment>(
       `/api/v1/public/adjustment-requests/${encodeURIComponent(token)}`,
@@ -410,6 +428,7 @@ function dDayLabel(dDay: number): string {
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
 const demoBearerToken = process.env.NEXT_PUBLIC_DEMO_BEARER_TOKEN;
 const useMock = process.env.NEXT_PUBLIC_USE_MOCK !== "false" || !apiBaseUrl;
+export const isUsingMock = useMock;
 
 export const adapter: DataAdapter = useMock
   ? new MockAdapter()

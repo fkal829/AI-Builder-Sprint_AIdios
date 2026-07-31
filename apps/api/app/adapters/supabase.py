@@ -22,6 +22,8 @@ from app.core.enums import (
     ExtractedField,
     ExtractedSourceType,
     IdempotencyOperation,
+    InternalSignatureStatus,
+    ModusignStatus,
     ObligationStatus,
     PublicTokenScope,
     RenewalDecisionType,
@@ -55,10 +57,12 @@ from app.repositories.review_items import (
     ReviewItemSelectionOutcome,
     ReviewItemSelectionResult,
 )
+from app.repositories.signatures import SignatureRecord
 from app.schemas.agreements import Agreement
 from app.schemas.analysis import Analysis, ReviewItem
 from app.schemas.contracts import ContractCreate, RenewalDecision
 from app.schemas.documents import DocumentParseStatus, DocumentType
+from app.schemas.signatures import Signature
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
 
 
@@ -157,6 +161,7 @@ class SupabaseAdapter:
         ] = {}
         self._mock_final_clauses: dict[UUID, tuple[FinalClauseRecord, ...]] = {}
         self._mock_agreements: dict[UUID, AgreementRecord] = {}
+        self._mock_signatures: dict[UUID, SignatureRecord] = {}
         if mode == "live":
             self._client = create_client(url, service_role_key)
 
@@ -225,6 +230,10 @@ class SupabaseAdapter:
     @property
     def mock_agreements(self) -> dict[UUID, AgreementRecord]:
         return dict(self._mock_agreements)
+
+    @property
+    def mock_signatures(self) -> dict[UUID, SignatureRecord]:
+        return dict(self._mock_signatures)
 
     async def authenticate_owner(self, token: str) -> UUID | None:
         if self.mode == "mock":
@@ -2086,6 +2095,230 @@ class SupabaseAdapter:
         row = response.data[0] if isinstance(response.data, list) else response.data
         return _agreement_record_from_row(row)
 
+    async def prepare_embedded_signature_draft(
+        self,
+        *,
+        owner_id: UUID,
+        signature_id: UUID,
+        contract_id: UUID,
+        agreement_id: UUID,
+        agreement_version: int,
+        idempotency_key: UUID,
+        requested_at: datetime,
+    ) -> SignatureRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                agreement = self._mock_agreements.get(contract_id)
+                previous_failed = next(
+                    (
+                        record
+                        for record in self._mock_signatures.values()
+                        if record.signature.contract_id == contract_id
+                        and record.signature.status == InternalSignatureStatus.FAILED
+                        and record.idempotency_key == idempotency_key
+                    ),
+                    None,
+                )
+                if previous_failed is not None:
+                    return previous_failed
+                active_statuses = {
+                    InternalSignatureStatus.REQUEST_READY,
+                    InternalSignatureStatus.REQUESTING,
+                    InternalSignatureStatus.EDITING,
+                    InternalSignatureStatus.SIGNING,
+                }
+                if (
+                    contract is None
+                    or contract.owner_id != owner_id
+                    or contract.status != ContractStatus.READY_TO_SIGN
+                    or agreement is None
+                    or agreement.agreement.id != agreement_id
+                    or agreement.agreement.version != agreement_version
+                    or any(
+                        record.signature.contract_id == contract_id
+                        and record.signature.status in active_statuses
+                        for record in self._mock_signatures.values()
+                    )
+                ):
+                    return None
+                record = SignatureRecord(
+                    signature=Signature(
+                        id=signature_id,
+                        contract_id=contract_id,
+                        status=InternalSignatureStatus.REQUESTING,
+                        requested_at=requested_at,
+                    ),
+                    agreement_id=agreement_id,
+                    agreement_version=agreement_version,
+                    idempotency_key=idempotency_key,
+                )
+                self._mock_signatures[signature_id] = record
+                return record
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_signature_id": str(signature_id),
+            "p_contract_id": str(contract_id),
+            "p_agreement_id": str(agreement_id),
+            "p_agreement_version": agreement_version,
+            "p_idempotency_key": str(idempotency_key),
+            "p_requested_at": requested_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("prepare_embedded_signature_draft", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("Unable to prepare the signature request.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _signature_record_from_row(row)
+
+    async def complete_embedded_signature_draft(
+        self,
+        *,
+        owner_id: UUID,
+        signature_id: UUID,
+        modusign_draft_id: str,
+    ) -> SignatureRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                record = self._mock_signatures.get(signature_id)
+                if record is None or record.signature.status != InternalSignatureStatus.REQUESTING:
+                    return None
+                contract = self._mock_contracts.get(record.signature.contract_id)
+                if contract is None or contract.owner_id != owner_id:
+                    return None
+                self._mock_signatures[signature_id] = replace(
+                    record,
+                    signature=record.signature.model_copy(
+                        update={
+                            "status": InternalSignatureStatus.EDITING,
+                            "modusign_draft_id": modusign_draft_id,
+                            "modusign_status": ModusignStatus.DRAFT,
+                        }
+                    ),
+                )
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract.id,
+                        event_type="SIGNATURE_DRAFT_CREATED",
+                        actor_type="OWNER",
+                        summary="Embedded signature draft was created.",
+                        created_at=self._clock(),
+                    )
+                )
+                return self._mock_signatures[signature_id]
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_signature_id": str(signature_id),
+            "p_modusign_draft_id": modusign_draft_id,
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("complete_embedded_signature_draft", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("Unable to save the signature request.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _signature_record_from_row(row)
+
+    async def fail_embedded_signature_draft(
+        self,
+        *,
+        owner_id: UUID,
+        signature_id: UUID,
+        completed_at: datetime,
+    ) -> SignatureRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                record = self._mock_signatures.get(signature_id)
+                if record is None or record.signature.status != InternalSignatureStatus.REQUESTING:
+                    return None
+                contract = self._mock_contracts.get(record.signature.contract_id)
+                if contract is None or contract.owner_id != owner_id:
+                    return None
+                failed = replace(
+                    record,
+                    signature=record.signature.model_copy(
+                        update={
+                            "status": InternalSignatureStatus.FAILED,
+                            "completed_at": completed_at,
+                        }
+                    ),
+                )
+                self._mock_signatures[signature_id] = failed
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract.id,
+                        event_type="SIGNATURE_FAILED",
+                        actor_type="SYSTEM",
+                        summary="Signature request creation failed.",
+                        created_at=completed_at,
+                    )
+                )
+                return failed
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_signature_id": str(signature_id),
+            "p_completed_at": completed_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("fail_embedded_signature_draft", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure(
+                "Unable to record the signature request failure."
+            ) from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _signature_record_from_row(row)
+
+    async def get_latest_owned_signature(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> SignatureRecord | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                if (owner_id, contract_id) not in self._mock_owned_contracts:
+                    return None
+                records = [
+                    record
+                    for record in self._mock_signatures.values()
+                    if record.signature.contract_id == contract_id
+                ]
+                if not records:
+                    return None
+                return max(records, key=lambda record: record.signature.requested_at)
+
+        client = self._require_live_client()
+        params = {"p_owner_id": str(owner_id), "p_contract_id": str(contract_id)}
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("get_latest_owned_signature", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("Unable to retrieve the signature status.") from error
+        if not response.data:
+            return None
+        row = response.data[0] if isinstance(response.data, list) else response.data
+        return _signature_record_from_row(row)
+
     async def send_adjustment_with_audit(
         self,
         *,
@@ -2628,4 +2861,13 @@ def _agreement_record_from_row(row: dict) -> AgreementRecord:
         agreement=Agreement.model_validate(row["agreement"]),
         adjustment_request_id=UUID(str(row["adjustment_request_id"])),
         created_at=_parse_datetime(row["created_at"]),
+    )
+
+
+def _signature_record_from_row(row: dict) -> SignatureRecord:
+    return SignatureRecord(
+        signature=Signature.model_validate(row["signature"]),
+        agreement_id=UUID(str(row["agreement_id"])),
+        agreement_version=int(row["agreement_version"]),
+        idempotency_key=UUID(str(row["idempotency_key"])),
     )

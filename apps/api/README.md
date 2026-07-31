@@ -118,6 +118,18 @@ PDF는 문서 항목 하나로 보내고 Universal Extraction의 location 좌표
 `NEEDS_CHECK`로 처리합니다. 이 값은 확률 보정값으로 해석하지 않습니다. 원문 위치를
 검증하지 못한 값은 `MISSING_EVIDENCE`로 저장합니다.
 
+## Modusign embedded-draft mode (C-7 API change)
+
+The default `MODUSIGN_MODE=mock` never calls Modusign and is used by automated tests.
+To enable a real no-template embedded draft, set `MODUSIGN_MODE=live` together with
+`MODUSIGN_ACCOUNT_EMAIL` and `MODUSIGN_API_KEY` in the server-only `.env` file.
+Set `MODUSIGN_EMBEDDED_REDIRECT_URL` to an HTTPS frontend URL only when users should return
+there after final sending. The API creates an in-memory agreement PDF and calls
+`POST /embedded-drafts`; it returns a short-lived editor URL but never sends a signing request.
+The user must place signature fields and press send in the Modusign editor. Set
+`AGREEMENT_PDF_FONT_PATH` to a Korean TTF font in non-Windows deployments. Do not commit the
+`.env` file or log signer contact values, agreement contents, or the embedded editor URL.
+
 ## Supabase live 준비
 
 `SUPABASE_MODE=live`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`는 실행 중인 API의

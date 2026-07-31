@@ -21,7 +21,8 @@
   },
   "internal_signature": {
     "REQUEST_READY": ["REQUESTING"],
-    "REQUESTING": ["SIGNING", "COMPLETED", "ABORTED", "FAILED"],
+    "REQUESTING": ["EDITING", "FAILED"],
+    "EDITING": ["SIGNING", "ABORTED", "FAILED"],
     "SIGNING": ["COMPLETED", "ABORTED", "FAILED"],
     "COMPLETED": [],
     "ABORTED": [],

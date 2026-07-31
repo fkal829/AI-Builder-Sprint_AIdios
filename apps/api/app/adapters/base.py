@@ -44,9 +44,10 @@ class DocumentAnalysisAdapter(Protocol):
 
 
 class SignatureAdapter(Protocol):
-    async def create_signature_request(
+    async def create_embedded_draft(
         self,
         *,
-        contract_id: str,
-        template_data: dict[str, str],
+        agreement_pdf: bytes,
+        title: str,
+        redirect_url: str,
     ) -> str: ...

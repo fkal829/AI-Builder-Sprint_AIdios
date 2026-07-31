@@ -26,6 +26,7 @@ from app.api.dependencies import (
     get_document_upload_service,
     get_idempotency_service,
     get_review_item_service,
+    get_signature_service,
     get_understood_term_service,
 )
 from app.core.enums import IdempotencyOperation
@@ -49,6 +50,11 @@ from app.schemas.contracts import (
     RenewalDecisionRequest,
 )
 from app.schemas.documents import Document, DocumentAccess, DocumentType
+from app.schemas.signatures import (
+    EmbeddedSignatureDraft,
+    EmbeddedSignatureDraftCreate,
+    Signature,
+)
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
 from app.services.adjustments import AdjustmentService
 from app.services.agreements import AgreementService
@@ -61,6 +67,7 @@ from app.services.documents import (
 )
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
 from app.services.review_items import ReviewItemService
+from app.services.signatures import SignatureService
 from app.services.understood_terms import UnderstoodTermService
 
 router = APIRouter()
@@ -114,6 +121,41 @@ async def get_agreement(
 ) -> ApiResponse[Agreement]:
     agreement = await service.get(owner_id=owner_id, contract_id=contract_id)
     return ApiResponse(data=agreement, error=None, request_id=request_id(request))
+
+
+@router.post(
+    "/{contract_id}/signature-embedded-drafts",
+    response_model=ApiResponse[EmbeddedSignatureDraft],
+    status_code=201,
+)
+async def create_signature_embedded_draft(
+    request: Request,
+    response: Response,
+    contract_id: UUID,
+    payload: EmbeddedSignatureDraftCreate,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[SignatureService, Depends(get_signature_service)],
+) -> ApiResponse[EmbeddedSignatureDraft]:
+    draft = await service.create_embedded_draft(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return ApiResponse(data=draft, error=None, request_id=request_id(request))
+
+
+@router.get("/{contract_id}/signature", response_model=ApiResponse[Signature])
+async def get_signature(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[SignatureService, Depends(get_signature_service)],
+) -> ApiResponse[Signature]:
+    signature = await service.get(owner_id=owner_id, contract_id=contract_id)
+    return ApiResponse(data=signature, error=None, request_id=request_id(request))
 
 
 @router.post(

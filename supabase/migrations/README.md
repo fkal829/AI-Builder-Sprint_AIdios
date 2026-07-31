@@ -38,6 +38,10 @@ D-30·D-14·D-7 검토 구간을 다시 확인하고, 실제 선택 변경과
 `OBLIGATION_EVIDENCE` 공개 토큰 hash와 `EVIDENCE_LINK_CREATED` 감사 이벤트를
 소유권·`PENDING` 상태 확인과 함께 하나의 트랜잭션으로 저장한다.
 
+`20260730310000_submit_obligation_evidence.sql`은 7.4의 공개 토큰 hash·scope·대상·
+만료를 다시 검증하고 증빙 URL, `PENDING → SUBMITTED` 상태와
+`EVIDENCE_SUBMITTED` 감사 이벤트를 하나의 트랜잭션으로 저장한다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

@@ -24,6 +24,10 @@ CANONICAL_OPERATION_IDS = {
         "/contracts/{contract_id}/performance-reports",
     ): "createPerformanceReport",
     (
+        "POST",
+        "/contracts/{contract_id}/performance-reports/{report_id}/extract",
+    ): "extractPerformanceReport",
+    (
         "GET",
         "/contracts/{contract_id}/documents/{document_id}/access",
     ): "getDocumentAccess",

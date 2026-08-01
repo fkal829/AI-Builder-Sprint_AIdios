@@ -148,12 +148,22 @@ HTTP client를 생성하지 않는다. `live`는 Solar Chat에 strict structured
 지표 개수, 지연 시간, 스키마 검증 여부만 남긴다. 리포트 원문,
 요청·응답 payload, API key는 로그에 남기지 않고 model도 외부 응답이 아닌
 서버에 설정된 값만 기록한다. `apps/api/app/services/performance_ai.py`는 점유된
-private 원본을 다운로드하고 Upstage Parse 후 이 mapper를 호출하는 내부
-조합만 제공한다. 이 조합과 mapper는 아직 공개 추출 endpoint나 dependency에
-연결하지 않았다.
+private 원본을 다운로드하고 Upstage Parse 후 이 mapper를 호출한다.
+이 조합은 `get_performance_report_extraction_service`를 통해 16.3 공개 추출
+endpoint에 연결됐다. 일반 자동 테스트는 mock parser·mapper나 고정 fake를
+사용하며 외부 네트워크를 호출하지 않는다.
 
-2026-08-01 기준 아래 live 절차는 **아직 실행하지 않았다**. 실제 호출과
-비용 발생을 명시적으로 확인한 뒤에만 가상 fixture로 재현한다.
+2026-08-01 사용자의 명시적 요청으로 비식별 합성 PDF를 사용한 live Adapter
+연결 검증을 1회 실행했다. Upstage Document Parse와 Solar Chat을 순서대로 실제
+호출했고 exit code 0으로 완료됐다. Parse 결과는 1페이지였으며 Solar 설정 모델은
+`solar-pro3`, prompt version은 `performance-report-metrics-v1`이었다. 8개 지표가
+모두 원문 근거를 가진 `VERIFIED`로 strict Pydantic 검증을 통과했고 합성 PDF의
+기대 정수값과 일치했다. API key·PDF 원문·`source_text`·외부 raw 응답은 결과에
+기록하지 않았고 Supabase DB·Storage에는 쓰지 않았다. 이 결과는 Adapter live
+연결 증거이며 배포된 FastAPI와 live Supabase를 함께 거치는 E2E 증거는 아니다.
+
+아래 명령은 이미 Parse된 고정 fixture로 Solar mapper만 다시 점검할 때 사용하는
+최소 재현 절차다. 유료 호출 전 명시적 확인을 다시 받아야 한다.
 `UPSTAGE_API_KEY`는 명령어나 shell history에 적지 말고 `apps/api/.env`
 또는 배포 환경의 서버 비밀 변수로 미리 주입한다.
 
@@ -219,8 +229,8 @@ print(json.dumps({
 PY
 ```
 
-명령의 exit code와 안전한 메타데이터 요약을 확인하고, 모델·prompt version·
-실행일을 결과 문서에 추가한 뒤에만 live 성공을 기록한다. 실패하면
+재검증 명령의 exit code와 안전한 메타데이터 요약을 확인하고, 모델·prompt version·
+실행일을 결과 문서에 추가한다. 실패하면
 성공으로 대체하지 않고 오류 유형·HTTP status만 민감한 본문 없이 남긴다.
 
 ## 비동기 작업 복구 경계

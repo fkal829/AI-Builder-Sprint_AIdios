@@ -6,6 +6,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.adapters.modusign import ModusignAdapter
+from app.adapters.performance_metrics import SolarPerformanceMetricMapper
 from app.adapters.solar import SolarReviewAdapter
 from app.adapters.supabase import SupabaseAdapter
 from app.adapters.upstage import UpstageAdapter
@@ -22,6 +23,8 @@ from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.obligations import ObligationService
 from app.services.performance import PerformanceAccessGuard
+from app.services.performance_ai import PerformanceReportAIExtractor
+from app.services.performance_extraction import PerformanceReportExtractionService
 from app.services.performance_upload import PerformanceReportUploadService
 from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
@@ -88,6 +91,22 @@ def _get_solar_review_adapter() -> SolarReviewAdapter:
 
 async def get_solar_review_adapter() -> SolarReviewAdapter:
     return _get_solar_review_adapter()
+
+
+@lru_cache
+def _get_performance_metric_mapper() -> SolarPerformanceMetricMapper:
+    settings = get_settings()
+    return SolarPerformanceMetricMapper(
+        mode=settings.upstage_mode,
+        api_key=settings.upstage_api_key,
+        base_url=settings.upstage_base_url,
+        timeout_seconds=settings.upstage_solar_timeout_seconds,
+        model=settings.upstage_solar_model,
+    )
+
+
+async def get_performance_metric_mapper() -> SolarPerformanceMetricMapper:
+    return _get_performance_metric_mapper()
 
 
 @lru_cache
@@ -212,6 +231,25 @@ async def get_performance_report_upload_service(
         idempotency=IdempotencyService(supabase),
         max_size_bytes=settings.document_max_size_bytes,
         max_pdf_pages=settings.document_max_pdf_pages,
+    )
+
+
+async def get_performance_report_extraction_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    upstage: Annotated[UpstageAdapter, Depends(get_upstage_adapter)],
+    metric_mapper: Annotated[
+        SolarPerformanceMetricMapper,
+        Depends(get_performance_metric_mapper),
+    ],
+) -> PerformanceReportExtractionService:
+    return PerformanceReportExtractionService(
+        repository=supabase,
+        idempotency=IdempotencyService(supabase),
+        extractor=PerformanceReportAIExtractor(
+            storage=supabase,
+            parser=upstage,
+            mapper=metric_mapper,
+        ),
     )
 
 

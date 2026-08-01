@@ -35,7 +35,7 @@ def _implemented_canonical_operations(canonical: dict):
             yield path, method, operation
 
 
-def test_canonical_openapi_marks_only_three_p2_operations_as_planned() -> None:
+def test_canonical_openapi_marks_only_two_p2_operations_as_planned() -> None:
     canonical = yaml.safe_load(
         (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
             encoding="utf-8"
@@ -58,15 +58,45 @@ def test_canonical_openapi_marks_only_three_p2_operations_as_planned() -> None:
     assert declared_statuses <= {None, "planned"}
     assert planned == {
         (
-            "POST",
-            "/contracts/{contract_id}/performance-reports/{report_id}/extract",
-        ): "extractPerformanceReport",
-        (
             "PATCH",
             "/contracts/{contract_id}/performance-reports/{report_id}",
         ): "confirmPerformanceReport",
         ("GET", "/contracts/{contract_id}/performance"): "getContractPerformance",
     }
+
+
+def test_performance_extraction_runtime_contract_matches_canonical() -> None:
+    canonical = yaml.safe_load(
+        (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    path = "/contracts/{contract_id}/performance-reports/{report_id}/extract"
+    canonical_operation = canonical["paths"][path]["post"]
+    runtime_operation = app.openapi()["paths"][f"/api/v1{path}"]["post"]
+
+    assert runtime_operation["operationId"] == canonical_operation["operationId"]
+    assert runtime_operation["summary"] == canonical_operation["summary"]
+    assert set(runtime_operation["responses"]) == set(canonical_operation["responses"])
+    assert "requestBody" not in runtime_operation
+
+    runtime_schemas = app.openapi()["components"]["schemas"]
+    assert runtime_operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/PerformanceReportExtractedResponse"
+    }
+    success_schema = runtime_schemas["PerformanceReportExtractedResponse"]
+    assert success_schema["properties"]["data"] == {
+        "$ref": "#/components/schemas/PerformanceReportExtracted"
+    }
+    assert success_schema["properties"]["error"]["type"] == "null"
+
+    for status in {"401", "404", "409", "422", "502", "503"}:
+        assert runtime_operation["responses"][status]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ErrorResponse"
+        }
+    error_schema = runtime_schemas["ErrorResponse"]
+    assert error_schema["properties"]["data"]["type"] == "null"
+    assert error_schema["properties"]["error"] == {"$ref": "#/components/schemas/ApiError"}
 
 
 def test_performance_upload_runtime_multipart_schema_matches_canonical_constraints() -> None:

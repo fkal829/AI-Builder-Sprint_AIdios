@@ -10,6 +10,16 @@ class ApiError(BaseModel):
     message: str
 
 
+class ErrorResponse(BaseModel):
+    """Public failure envelope with a non-null error payload."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    data: None
+    error: ApiError
+    request_id: str = Field(alias="requestId", pattern=r"^req_[a-f0-9]+$")
+
+
 class ApiResponse[DataT](BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

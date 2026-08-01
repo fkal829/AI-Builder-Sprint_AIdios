@@ -147,21 +147,25 @@ async def test_private_download_parse_and_mapping_run_in_order_without_logging_p
     assert "private-report-bytes-canary" not in logs
 
 
-@pytest.mark.parametrize(
-    ("storage_error", "parser_error"),
-    [
-        (ExternalStorageFailure("private storage failed"), None),
-        (None, UpstageDocumentParseError("parse failed")),
-    ],
-)
-async def test_private_load_and_parse_failures_are_classified_as_parse_failures(
-    storage_error: Exception | None,
-    parser_error: Exception | None,
-) -> None:
+async def test_private_storage_failure_remains_an_infrastructure_failure() -> None:
     mapper = StubMapper()
     extractor = PerformanceReportAIExtractor(
-        storage=StubStorage(error=storage_error),
-        parser=StubParser(error=parser_error),  # type: ignore[arg-type]
+        storage=StubStorage(error=ExternalStorageFailure("private storage failed")),
+        parser=StubParser(),  # type: ignore[arg-type]
+        mapper=mapper,
+    )
+
+    with pytest.raises(ExternalStorageFailure):
+        await extractor(source_document())
+
+    assert mapper.calls == []
+
+
+async def test_upstage_parse_failure_is_classified_as_a_parse_failure() -> None:
+    mapper = StubMapper()
+    extractor = PerformanceReportAIExtractor(
+        storage=StubStorage(),
+        parser=StubParser(error=UpstageDocumentParseError("parse failed")),  # type: ignore[arg-type]
         mapper=mapper,
     )
 

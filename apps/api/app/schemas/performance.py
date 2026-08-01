@@ -304,9 +304,7 @@ class PerformanceReportRevision(StrictPerformanceModel):
         draft_flag_ids = [draft.flag_id for draft in self.inquiry_drafts]
         if len(set(flag_ids)) != len(flag_ids):
             raise ValueError("revision의 flag ID는 중복될 수 없습니다.")
-        if len(set(draft_ids)) != len(draft_ids) or len(set(draft_flag_ids)) != len(
-            draft_flag_ids
-        ):
+        if len(set(draft_ids)) != len(draft_ids) or len(set(draft_flag_ids)) != len(draft_flag_ids):
             raise ValueError("revision의 문의 문안 또는 flag 연결은 중복될 수 없습니다.")
         if any(flag.report_revision_id != self.id for flag in self.flags):
             raise ValueError("flag는 자신이 포함된 report revision에 속해야 합니다.")
@@ -442,8 +440,7 @@ class ContractPerformance(StrictPerformanceModel):
         confirmed_reports = [
             report
             for report in self.reports
-            if report.status
-            in {PerformanceReportStatus.CONFIRMED, PerformanceReportStatus.FLAGGED}
+            if report.status in {PerformanceReportStatus.CONFIRMED, PerformanceReportStatus.FLAGGED}
         ]
         if [point.period for point in self.confirmed_series] != [
             report.period for report in confirmed_reports
@@ -489,6 +486,17 @@ class ContractPerformance(StrictPerformanceModel):
 
 PerformanceReportResponse = ApiResponse[PerformanceReport]
 PerformanceReportCreatedResponse = ApiResponse[PerformanceReportCreated]
-PerformanceReportExtractedResponse = ApiResponse[PerformanceReportExtracted]
+
+
+class PerformanceReportExtractedResponse(StrictPerformanceModel):
+    """Strict success envelope for the public 16.3 extraction operation."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    data: PerformanceReportExtracted
+    error: None
+    request_id: str = Field(alias="requestId", pattern=r"^req_[a-f0-9]+$")
+
+
 PerformanceReportConfirmedResponse = ApiResponse[PerformanceReportConfirmed]
 ContractPerformanceResponse = ApiResponse[ContractPerformance]

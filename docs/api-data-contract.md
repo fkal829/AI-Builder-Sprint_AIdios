@@ -10,8 +10,9 @@ HTTP endpoint와 요청·응답 스키마의
 `/api/v1`이다. 이 문서의 파일 경로 표기는 모두 저장소 루트 기준이다.
 
 1~13절은 현재 P0 구현 계약이고 14절은 기획안 6.14의 P2-0 확정 설계다. 14절 중
-16.1 공통 접근 계층, 업로드·추출 원자 RPC와 성과 지표 AI 경계, 16.2 리포트 업로드
-FastAPI endpoint는 구현됐다. 16.3~16.5 세 endpoint는 아직 `planned`이며, 현재 상태를
+16.1 공통 접근 계층, 업로드·추출 원자 RPC와 성과 지표 AI 경계, 16.2 리포트 업로드와
+16.3 지표 추출 FastAPI endpoint는 구현됐다. 16.4~16.5 두 endpoint는 아직
+`planned`이며, 현재 상태를
 전체 P2 완료로 해석하지 않는다.
 
 기획안의 제품 기능과 P0 범위는 유지하되, 구현 담당만 최신 팀 결정에 따라 D의 백엔드
@@ -666,9 +667,10 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 ## 14. 6.14 광고효과 P2-0 확정 데이터 계약
 
 이 절은 `docs/api-명세서.md` 16~17절의 확정값을 영속성·보안·상태 관점에서
-고정한다. 광고효과 기능은 P2이며 16.1 공통 접근 계층, 기반 migration과 16.2 업로드
-endpoint는 구현됐다. 16.3~16.5 세 업무 endpoint와 확정·집계 runtime은 아직
-미구현이다. 기존 P0 API, 전역 `/dashboard` 응답과 계약 상태 머신은 변경하지 않는다.
+고정한다. 광고효과 기능은 P2이며 16.1 공통 접근 계층, 기반 migration과 16.2 업로드,
+16.3 Upstage·Solar 지표 추출 endpoint는 구현됐다. 16.4~16.5 확정·집계
+endpoint와 영속 runtime은 아직 미구현이다. 기존 P0 API, 전역 `/dashboard` 응답과
+계약 상태 머신은 변경하지 않는다.
 
 ### 14.1 소유권·업무 범위
 
@@ -750,7 +752,9 @@ Document를 `FAILED`, report를 `UPLOADED`로 유지한다. Solar 매핑만 실�
 않으므로 명시적 재시도는 Document Parse부터 다시 실행한다.
 
 timeout·HTTP·Parse·AI 스키마 실패를 고정 샘플로 대체하지 않고
-`502 REPORT_EXTRACT_FAILED`를 반환한다. 추출 후보 각 필드는 `value`, `source_page`,
+`502 REPORT_EXTRACT_FAILED`를 반환한다. private Storage·DB·멱등 저장 기반을
+사용할 수 없으면 `503 EXTERNAL_SERVICE_UNAVAILABLE`을 반환하고 raw 예외를
+노출하지 않는다. 추출 후보 각 필드는 `value`, `source_page`,
 `source_text`, `confidence`, `verification_status`를 가진다. 원문에서 찾지 못한
 `published_content_count`나 다른 지표를 행·URL 수로 추정하지 않고 `NOT_FOUND`로 둔다.
 
@@ -881,8 +885,9 @@ GET은 상태·revision·flag·감사 이벤트를 변경하지 않고 AI나 문
 
 이 절은 P2-0 공개·영속 계약을 확정한다. 현재 16.1의 owner-scoped repository·접근
 guard·멱등 fingerprint·`no-store`, `performance_reports` 기반, 업로드·추출 원자
-RPC와 비공개 AI 조합기, 16.2 FastAPI 업로드 endpoint까지 구현됐다.
-16.3~16.5 FastAPI endpoint와 확정·집계 영속 runtime은 아직 구현되지 않았다. 다음을
+RPC와 비공개 AI 조합기, 16.2 업로드와 16.3 지표 추출 FastAPI endpoint까지
+구현됐다. 16.4~16.5 FastAPI endpoint와 확정·집계 영속 runtime은 아직 구현되지
+않았다. 다음을
 모두 검증하기 전 전체 P2 완료로
 표시하지 않는다.
 

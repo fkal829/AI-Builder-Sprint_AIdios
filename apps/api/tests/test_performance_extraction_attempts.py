@@ -12,6 +12,9 @@ from app.adapters.supabase import SupabaseAdapter
 from app.core.enums import ContractStatus, IdempotencyOperation, PerformanceReportStatus
 from app.core.errors import ErrorCode
 from app.core.exceptions import (
+    ExternalServiceUnavailable,
+    ExternalStorageFailure,
+    IdempotencyConflict,
     PerformanceReportExtractFailed,
     PerformanceReportExtractionInProgress,
     ResourceNotFound,
@@ -155,9 +158,7 @@ def make_adapter(
         source_document_id=DOCUMENT_ID,
         status=report_status,
         extracted_payload=(
-            extracted_payload()
-            if report_status is PerformanceReportStatus.EXTRACTED
-            else None
+            extracted_payload() if report_status is PerformanceReportStatus.EXTRACTED else None
         ),
         created_at=INITIAL_TIME,
         updated_at=INITIAL_TIME,
@@ -287,6 +288,34 @@ async def test_concurrent_same_key_calls_execute_the_extractor_once() -> None:
     assert replay.response == first.response
 
 
+async def test_concurrent_different_keys_execute_the_extractor_once() -> None:
+    clock = MutableClock()
+    adapter = make_adapter(clock)
+    extractor = BlockingExtractor(result=extracted_payload())
+    service = PerformanceReportExtractionService(
+        adapter,
+        IdempotencyService(
+            adapter,
+            now=clock,
+            pending_replay_delay_seconds=0.001,
+        ),
+        extractor,
+        now=clock,
+    )
+
+    first_task = asyncio.create_task(extract_with_key(service, uuid4()))
+    await extractor.started.wait()
+    try:
+        with pytest.raises(PerformanceReportExtractionInProgress):
+            await extract_with_key(service, uuid4())
+    finally:
+        extractor.release.set()
+    first = await first_task
+
+    assert first.status_code == 200
+    assert len(extractor.calls) == 1
+
+
 async def test_repeated_claim_for_same_attempt_is_response_loss_safe() -> None:
     clock = MutableClock()
     adapter = make_adapter(clock)
@@ -316,6 +345,32 @@ async def test_repeated_claim_for_same_attempt_is_response_loss_safe() -> None:
     assert replay.report == first.report
     assert replay.source_document == first.source_document
     assert adapter.mock_audit_events == ()
+
+
+async def test_claim_commit_with_lost_response_continues_the_same_attempt(monkeypatch) -> None:
+    clock = MutableClock()
+    adapter = make_adapter(clock)
+    extractor = StubExtractor(result=extracted_payload())
+    service = make_service(adapter, extractor, clock)
+    key = uuid4()
+    claim = adapter.claim_performance_report_extraction
+
+    async def commit_then_lose_response(**kwargs):
+        await claim(**kwargs)
+        raise ExternalStorageFailure("claim response lost")
+
+    monkeypatch.setattr(
+        adapter,
+        "claim_performance_report_extraction",
+        commit_then_lose_response,
+    )
+
+    result = await extract_with_key(service, key)
+
+    assert result.status_code == 200
+    assert len(extractor.calls) == 1
+    assert adapter.mock_performance_reports[REPORT_ID].status is PerformanceReportStatus.EXTRACTED
+    assert adapter.mock_documents[DOCUMENT_ID].parse_status is DocumentParseStatus.COMPLETED
 
 
 async def test_different_key_before_fifteen_minutes_returns_in_progress() -> None:
@@ -357,9 +412,7 @@ async def test_exact_fifteen_minutes_recovers_and_old_attempt_becomes_noop() -> 
         operation=IdempotencyOperation.PERFORMANCE_REPORT_EXTRACT,
         resource_id=REPORT_ID,
         key=old_attempt,
-        request_hash=request_fingerprint(
-            {"contract_id": CONTRACT_ID, "report_id": REPORT_ID}
-        ),
+        request_hash=request_fingerprint({"contract_id": CONTRACT_ID, "report_id": REPORT_ID}),
         created_at=clock(),
     )
     assert old_idempotency.outcome == "NEW"
@@ -465,8 +518,7 @@ async def test_parse_failure_is_stored_as_502_and_replayed() -> None:
     assert report.extraction_attempt_id == key
     assert adapter.mock_documents[DOCUMENT_ID].parse_status is DocumentParseStatus.FAILED
     assert not any(
-        event.event_type == "PERFORMANCE_REPORT_EXTRACTED"
-        for event in adapter.mock_audit_events
+        event.event_type == "PERFORMANCE_REPORT_EXTRACTED" for event in adapter.mock_audit_events
     )
     records = adapter.mock_idempotency_records
     assert len(records) == 1
@@ -474,6 +526,7 @@ async def test_parse_failure_is_stored_as_502_and_replayed() -> None:
     assert records[0].response_payload == {
         "outcome": "FAILED",
         "error_code": ErrorCode.REPORT_EXTRACT_FAILED.value,
+        "request_id": f"req_{key.hex}",
     }
 
 
@@ -519,7 +572,9 @@ async def test_unclassified_extractor_error_is_failed_once_and_replayed() -> Non
     assert adapter.mock_idempotency_records[0].response_status == 502
 
 
-async def test_completion_persistence_error_does_not_run_ai_twice(monkeypatch) -> None:
+async def test_completion_persistence_error_preserves_pending_without_ai_failure(
+    monkeypatch,
+) -> None:
     clock = MutableClock()
     adapter = make_adapter(clock)
     extractor = StubExtractor(result=extracted_payload())
@@ -535,14 +590,105 @@ async def test_completion_persistence_error_does_not_run_ai_twice(monkeypatch) -
         fail_completion,
     )
 
+    with pytest.raises(ExternalServiceUnavailable):
+        await extract_with_key(service, key)
+    with pytest.raises(IdempotencyConflict):
+        await extract_with_key(service, key)
+
+    assert len(extractor.calls) == 1
+    assert adapter.mock_performance_reports[REPORT_ID].status is PerformanceReportStatus.UPLOADED
+    assert adapter.mock_documents[DOCUMENT_ID].parse_status is DocumentParseStatus.PROCESSING
+    assert adapter.mock_idempotency_records[0].response_status is None
+
+
+async def test_committed_completion_with_lost_response_recovers_success(monkeypatch) -> None:
+    clock = MutableClock()
+    adapter = make_adapter(clock)
+    extractor = StubExtractor(result=extracted_payload())
+    service = make_service(adapter, extractor, clock)
+    key = uuid4()
+    complete = adapter.complete_performance_report_extraction
+
+    async def commit_then_lose_response(**kwargs):
+        await complete(**kwargs)
+        raise ExternalStorageFailure("completion response lost")
+
+    monkeypatch.setattr(
+        adapter,
+        "complete_performance_report_extraction",
+        commit_then_lose_response,
+    )
+
+    first = await extract_with_key(service, key)
+    replay = await extract_with_key(service, key)
+
+    assert first.status_code == replay.status_code == 200
+    assert replay.replayed is True
+    assert replay.response == first.response
+    assert len(extractor.calls) == 1
+    assert adapter.mock_performance_reports[REPORT_ID].status is PerformanceReportStatus.EXTRACTED
+    assert adapter.mock_documents[DOCUMENT_ID].parse_status is DocumentParseStatus.COMPLETED
+    assert [event.event_type for event in adapter.mock_audit_events].count(
+        "PERFORMANCE_REPORT_EXTRACTED"
+    ) == 1
+
+
+async def test_committed_failure_with_lost_response_recovers_502(monkeypatch) -> None:
+    clock = MutableClock()
+    adapter = make_adapter(clock)
+    extractor = StubExtractor(error=PerformanceDocumentParseError("parse failed"))
+    service = make_service(adapter, extractor, clock)
+    key = uuid4()
+    fail = adapter.fail_performance_report_extraction
+
+    async def commit_then_lose_response(**kwargs):
+        await fail(**kwargs)
+        raise ExternalStorageFailure("failure response lost")
+
+    monkeypatch.setattr(
+        adapter,
+        "fail_performance_report_extraction",
+        commit_then_lose_response,
+    )
+
     for _ in range(2):
         with pytest.raises(PerformanceReportExtractFailed):
             await extract_with_key(service, key)
 
     assert len(extractor.calls) == 1
     assert adapter.mock_performance_reports[REPORT_ID].status is PerformanceReportStatus.UPLOADED
-    assert adapter.mock_documents[DOCUMENT_ID].parse_status is DocumentParseStatus.PROCESSING
+    assert adapter.mock_documents[DOCUMENT_ID].parse_status is DocumentParseStatus.FAILED
     assert adapter.mock_idempotency_records[0].response_status == 502
+
+
+async def test_idempotency_completion_failure_recovers_without_rerunning_ai(
+    monkeypatch,
+) -> None:
+    clock = MutableClock()
+    adapter = make_adapter(clock)
+    extractor = StubExtractor(result=extracted_payload())
+    service = make_service(adapter, extractor, clock)
+    key = uuid4()
+    complete = adapter.complete_idempotency
+    attempts = 0
+
+    async def fail_first_completion_round(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 3:
+            raise ExternalStorageFailure("idempotency completion unavailable")
+        return await complete(**kwargs)
+
+    monkeypatch.setattr(adapter, "complete_idempotency", fail_first_completion_round)
+
+    with pytest.raises(ExternalServiceUnavailable):
+        await extract_with_key(service, key)
+    recovered = await extract_with_key(service, key)
+
+    assert recovered.status_code == 200
+    assert recovered.replayed is True
+    assert len(extractor.calls) == 1
+    assert adapter.mock_idempotency_records[0].response_status == 200
 
 
 @pytest.mark.parametrize("failure_kind", ["mapping", "schema"])

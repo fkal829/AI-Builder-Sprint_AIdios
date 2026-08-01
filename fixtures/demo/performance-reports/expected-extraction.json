@@ -1,0 +1,87 @@
+{
+  "fixture_name": "브릿지웨이브 2026년 7월 소셜 미디어 월간 리포트",
+  "fictional": true,
+  "upload": {
+    "period": "2026-07",
+    "filename": "브릿지웨이브_7월_광고리포트.pdf",
+    "content_type": "application/pdf"
+  },
+  "expected_extraction": {
+    "impressions": {
+      "value": 8300,
+      "source_page": 2,
+      "source_text": "노출 수: 8,300회",
+      "verification_status": "VERIFIED"
+    },
+    "likes": {
+      "value": 180,
+      "source_page": 2,
+      "source_text": "좋아요: 180회",
+      "verification_status": "VERIFIED"
+    },
+    "comments": {
+      "value": 20,
+      "source_page": 2,
+      "source_text": "댓글: 20건",
+      "verification_status": "VERIFIED"
+    },
+    "reach": {
+      "value": 6740,
+      "source_page": 2,
+      "source_text": "도달: 6,740명",
+      "verification_status": "VERIFIED"
+    },
+    "saves": {
+      "value": 40,
+      "source_page": 2,
+      "source_text": "저장: 40회",
+      "verification_status": "VERIFIED"
+    },
+    "shares": {
+      "value": 0,
+      "source_page": 2,
+      "source_text": "공유: 0회",
+      "verification_status": "VERIFIED"
+    },
+    "follower_net_change": {
+      "value": 27,
+      "source_page": 2,
+      "source_text": "팔로워 순증: +27명",
+      "verification_status": "VERIFIED"
+    },
+    "published_content_count": {
+      "value": 2,
+      "source_page": 2,
+      "source_text": "게시물 수: 2건",
+      "verification_status": "VERIFIED"
+    }
+  },
+  "expected_confirmation_payload": {
+    "impressions": 8300,
+    "likes": 180,
+    "comments": 20,
+    "reach": 6740,
+    "saves": 40,
+    "shares": 0,
+    "follower_net_change": 27,
+    "published_content_count": 2,
+    "inquiries": null,
+    "reservations": null,
+    "purchases": null
+  },
+  "expected_server_derived": {
+    "reaction_count": 240,
+    "engagement_rate": "0.028916"
+  },
+  "conditional_contract_comparison": {
+    "requires_verified_monthly_expected_count": 4,
+    "actual_content_count": 2,
+    "expected_flag": "DELIVERABLE_COUNT_SHORTFALL",
+    "note": "계약에서 월 4건 약정이 VERIFIED 근거로 추출된 경우에만 생성해야 한다."
+  },
+  "notes": [
+    "confidence는 live 모델 결과에 따라 달라질 수 있어 고정 기대값에서 제외한다.",
+    "문의·예약·구매 수는 AI 추출 대상이 아니며 소유자가 확인 후 입력한다.",
+    "반응률은 서버가 확인된 원본 정수로 계산하며 요청값이나 AI 추출값으로 받지 않는다."
+  ]
+}

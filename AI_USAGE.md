@@ -315,6 +315,17 @@ cutoff·정렬·limit·소유자 전달과 동시 claim·timeout 전이 안전�
 live 결과는 같은 계약 원문을 실제 Adapter로 실행한 뒤 모델·프롬프트 버전·실행일과
 함께 별도로 공개한다.
 
+## 2026-08-01 백엔드 자동 테스트 검증 산출물
+
+제출용 AI 활용 증빙을 위해 외부 Adapter를 명시적으로 mock으로 고정한 백엔드 전체
+자동 검증을 실행했다. Python 3.12.3 환경에서 Ruff 진단 0건, 전체 `pytest` 719건 통과,
+고정 계약 10건 오프라인 평가의 선언 목표 전체 통과를 확인했다.
+
+JUnit XML, Ruff JSON, 오프라인 평가 JSON, 실행 환경·명령·제약을 포함한 검증 묶음은
+[`docs/ai-evidence/backend-tests/2026-08-01`](docs/ai-evidence/backend-tests/2026-08-01/SUMMARY.md)에
+보관한다. 이 결과는 `AUTOMATED_OFFLINE`이며 실제 외부 API 재호출 결과가 아니다. 기존
+Upstage·Solar·Supabase live 결과는 같은 폴더의 live 증빙 안내에서 별도로 연결한다.
+
 ## 2026-07-31 Solar 검토 문구 live 확인
 
 고정 평가의 가상 계약 중 총액 불일치, 모호한 산출물 수량, 촬영 안전 책임 3건으로

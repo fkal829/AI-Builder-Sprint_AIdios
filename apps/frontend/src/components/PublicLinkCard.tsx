@@ -18,13 +18,18 @@ export function PublicLinkCard({
   title: string;
   note: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const url = absolutePublicUrl(link.publicUrl);
 
-  const copy = () => {
-    navigator.clipboard?.writeText(url);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard || !url) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(url);
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+    window.setTimeout(() => setCopyState("idle"), 1500);
   };
 
   return (
@@ -33,7 +38,7 @@ export function PublicLinkCard({
       <p className="mt-1 text-[11px] leading-relaxed text-neutral700">{note}</p>
       <div className="mt-3 flex items-stretch gap-2">
         <a
-          href={url}
+          href={url || undefined}
           target="_blank"
           rel="noreferrer"
           className="min-w-0 flex-1 break-all rounded-lg bg-white p-3 text-xs text-brand700 underline"
@@ -43,22 +48,27 @@ export function PublicLinkCard({
         {/* 링크 바로 옆 복사 아이콘 — 긴 URL을 드래그하지 않고 바로 복사 */}
         <button
           type="button"
-          onClick={copy}
+          onClick={() => void copy()}
           aria-label="링크 복사"
           className="flex w-11 flex-none items-center justify-center rounded-lg bg-white text-neutral500 transition hover:text-ink"
         >
-          {copied ? <CheckIcon /> : <CopyIcon />}
+          {copyState === "copied" ? <CheckIcon /> : <CopyIcon />}
         </button>
       </div>
       {/* 눌렀는지 확실히 보이도록 복사 후 잠시 검정 → 회색으로 바뀐다 */}
       <button
         type="button"
-        onClick={copy}
+        onClick={() => void copy()}
+        disabled={!url}
         className={`mt-2 h-10 w-full rounded-lg text-[13px] font-bold text-white transition ${
-          copied ? "bg-neutral500" : "bg-ink hover:bg-ink/90"
+          copyState === "copied" ? "bg-neutral500" : "bg-ink hover:bg-ink/90"
         }`}
       >
-        {copied ? "✓ 복사됐어요" : "링크 복사하기"}
+        {copyState === "copied"
+          ? "✓ 복사됐어요"
+          : copyState === "error"
+            ? "복사하지 못했어요"
+            : "링크 복사하기"}
       </button>
       <p className="mt-2 text-[10px] text-neutral500">
         {link.expiresAt.slice(0, 16).replace("T", " ")}까지 유효

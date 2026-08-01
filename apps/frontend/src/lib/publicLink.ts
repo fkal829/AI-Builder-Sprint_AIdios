@@ -26,9 +26,15 @@ export function loadPublicLink(contractId: string): PublicLink | null {
     const raw = window.localStorage.getItem(storageKey(contractId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<PublicLink>;
-    return parsed.publicUrl && parsed.expiresAt
-      ? { publicUrl: parsed.publicUrl, expiresAt: parsed.expiresAt }
-      : null;
+    if (typeof parsed.publicUrl !== "string" || typeof parsed.expiresAt !== "string") {
+      return null;
+    }
+    const expiresAt = Date.parse(parsed.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      window.localStorage.removeItem(storageKey(contractId));
+      return null;
+    }
+    return { publicUrl: parsed.publicUrl, expiresAt: parsed.expiresAt };
   } catch {
     return null;
   }
@@ -37,10 +43,16 @@ export function loadPublicLink(contractId: string): PublicLink | null {
 /** 목업 어댑터는 "/r/..." 상대 경로를 돌려준다. 그대로 복사하면 받는 쪽에서 열 수
     없으므로 복사·표시 전에 절대 URL로 맞춘다(라이브는 이미 절대 URL이라 그대로). */
 export function absolutePublicUrl(url: string): string {
-  if (typeof window === "undefined") return url;
   try {
-    return new URL(url, window.location.origin).href;
+    if (typeof window === "undefined" && url.startsWith("/") && !url.startsWith("//")) {
+      return url;
+    }
+    const parsed = new URL(
+      url,
+      typeof window === "undefined" ? undefined : window.location.origin,
+    );
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
   } catch {
-    return url;
+    return "";
   }
 }

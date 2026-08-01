@@ -27,6 +27,14 @@ PerformanceExtractionApplyOutcome = Literal[
     "INVALID_STATUS",
     "NOT_FOUND",
 ]
+PerformanceReportUploadOutcome = Literal[
+    "CREATED",
+    "REPLAYED",
+    "PERIOD_ALREADY_EXISTS",
+    "INVALID_STATUS",
+    "NOT_FOUND",
+    "CONFLICT",
+]
 
 
 @dataclass(frozen=True)
@@ -106,6 +114,15 @@ class PerformanceExtractionApplyResult:
     source_document: DocumentRecord | None = None
 
 
+@dataclass(frozen=True)
+class PerformanceReportUploadResult:
+    """Result of the atomic private Document + report + audit append."""
+
+    outcome: PerformanceReportUploadOutcome
+    report: PerformanceReportAccess | None = None
+    source_document: DocumentRecord | None = None
+
+
 class PerformanceAccessRepository(Protocol):
     """Read-only access boundary shared by all four performance APIs.
 
@@ -145,6 +162,26 @@ class PerformanceAccessRepository(Protocol):
         contract_id: UUID,
         period: str,
     ) -> bool: ...
+
+
+class PerformanceReportUploadRepository(Protocol):
+    """Atomic upload metadata boundary for the planned 16.2 endpoint.
+
+    Storage bytes are uploaded outside this boundary. The implementation must
+    append the private source Document, the UPLOADED report, and exactly one
+    non-sensitive PERFORMANCE_REPORT_UPLOADED audit event in one transaction.
+    Reusing the pre-generated IDs with identical immutable metadata recovers an
+    ambiguous committed response without appending another row or event.
+    """
+
+    async def create_performance_report_upload_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        report_id: UUID,
+        period: str,
+        source_document: DocumentRecord,
+    ) -> PerformanceReportUploadResult: ...
 
 
 class PerformanceExtractionRepository(Protocol):

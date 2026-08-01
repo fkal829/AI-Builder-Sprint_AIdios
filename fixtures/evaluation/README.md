@@ -38,6 +38,10 @@ cd apps/api
 `RESULTS.md`는 실행기가 생성하는 Markdown과 정확히 일치해야 하며 테스트가 이를
 검증한다.
 
+`performance-metrics/`는 P2 성과 리포트 매핑의 별도 가상 fixture다. 원문에
+`게시물 수`가 없을 때의 `NOT_FOUND`/`null`과 명시적인 `0`을 서로 다른
+경계로 고정한다. 이 fixture는 기존 계약 10건 평가 분모에 포함하지 않는다.
+
 Solar 검토 문구 live 검증은 외부 호출과 비용이 발생하므로 일반 평가와 분리한다.
 `apps/api/.env`에 `UPSTAGE_API_KEY`를 설정하고 명시적으로 실행한다.
 실행기는 production과 같은 `SolarReviewAdapter` 기본 1건 chunk 전략으로 세 입력을

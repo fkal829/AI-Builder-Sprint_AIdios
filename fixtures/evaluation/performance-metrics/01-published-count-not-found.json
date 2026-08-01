@@ -1,0 +1,67 @@
+{
+  "case_id": "published-count-not-found",
+  "pages": [
+    {
+      "page": 1,
+      "text": "2026년 7월 광고 성과 리포트\n노출수: 1,200회\n좋아요: 80회\n댓글: 10건\n도달: 1,000명\n저장: 5회\n공유: null\n팔로워 순증: -2명"
+    }
+  ],
+  "expected_payload": {
+    "impressions": {
+      "value": 1200,
+      "source_page": 1,
+      "source_text": "노출수: 1,200회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "likes": {
+      "value": 80,
+      "source_page": 1,
+      "source_text": "좋아요: 80회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "comments": {
+      "value": 10,
+      "source_page": 1,
+      "source_text": "댓글: 10건",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "reach": {
+      "value": 1000,
+      "source_page": 1,
+      "source_text": "도달: 1,000명",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "saves": {
+      "value": 5,
+      "source_page": 1,
+      "source_text": "저장: 5회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "shares": {
+      "value": null,
+      "source_page": null,
+      "source_text": null,
+      "confidence": 0.0,
+      "verification_status": "NOT_FOUND"
+    },
+    "follower_net_change": {
+      "value": -2,
+      "source_page": 1,
+      "source_text": "팔로워 순증: -2명",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "published_content_count": {
+      "value": null,
+      "source_page": null,
+      "source_text": null,
+      "confidence": 0.0,
+      "verification_status": "NOT_FOUND"
+    }
+  }
+}

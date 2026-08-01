@@ -7,7 +7,7 @@
 > 상세 기계 판독 명세: `packages/contracts/openapi/openapi.yaml`<br>
 > 적용 범위: 1~14절은 현재 P0 구현 계약, 15~19절은 6.14 P2-0 확정 설계<br>
 > P2 구현 상태: canonical OpenAPI 4/4 `planned` 등록, runtime endpoint 0/4,
-> 16.1 공통 기반 구현
+> 16.1·17.2·17.5 내부 기반 구현
 
 이 문서는 백엔드 API와 개발 순서를 사람이 읽을 수 있도록 정리한다. 1~14절의 P0 제품
 범위와 사용자 흐름은 `docs/기획안.md`, 15~19절의 6.14 P2 변경분은
@@ -19,8 +19,9 @@
 
 15~19절은 `docs/단디계약최종기획안.md` 6.14의 P2-0 확정 설계 구역이다. 현재
 canonical OpenAPI에는 신규 4개 operation을 `planned`로 등록했지만 FastAPI runtime과
-각 operation의 업무 RPC는 아직 구현하지 않았다. 16.1의 공통 접근 계층과 기반
-migration은 구현됐고, 17.4의 확정값은 기획안, OpenAPI,
+네 endpoint는 아직 등록하지 않았다. 16.1 공통 접근 기반, 업로드
+Document·report·감사 원자 RPC, 추출 attempt·완료·복구 RPC와 비공개 AI
+Adapter 조합기는 구현됐다. 17.4의 확정값은 기획안, OpenAPI,
 `docs/api-data-contract.md`, 공통 enum·오류에 같은 값으로 유지하고 구조 검증을
 통과시킨 뒤 runtime을 추가한다.
 
@@ -1399,8 +1400,9 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 16.1 공통 기반은 구현됐다. Bearer 인증은 기존 공통 인증을 재사용하며, owner-scoped
 Contract·report·source Document 조회, 쓰기 허용 상태 guard, 월 중복 preflight와 DB
 고유 제약, multipart 멱등 fingerprint 구성요소, 성과 경로 `no-store`, private Document
-경계를 공통 service·repository·migration에서 제공한다. 16.2~16.5의 네 endpoint와
-업무 RPC는 계속 `planned`이며 runtime operation 수는 0/4다.
+경계를 공통 service·repository·migration에서 제공한다. 업로드 원자 RPC와
+추출 attempt RPC·service·AI 경계는 내부 기반으로 구현됐지만, 16.2~16.5의 네
+endpoint는 계속 `planned`이며 runtime operation 수는 0/4다.
 
 `period`는 API에서 `YYYY-MM`으로 받고 `(contract_id, period)`를 DB 고유 제약으로
 보호한다. 같은 `Idempotency-Key`와 같은 요청은 최초 응답을 재생하고, 다른 요청으로
@@ -1735,7 +1737,9 @@ report revision은 flag에서 유도한다. 조회 시 다시 만들거나 외�
   `PERFORMANCE_REPORT_CONFIRMED`, `PERFORMANCE_REPORT_FLAGGED`,
   `PERFORMANCE_REPORT_CORRECTED`, `PERFORMANCE_REPORT_EXTRACTION_RECOVERED`
 - 16.1 기반 migration에서 DB CHECK를 확장하고 위 값을 기존 `AuditEventType`에
-  병합했다. 실제 이벤트 생성은 각 16.2~16.4 원자 쓰기 RPC가 구현된 뒤에만 수행한다.
+  병합했다. `PERFORMANCE_REPORT_UPLOADED`, `PERFORMANCE_REPORT_EXTRACTED`,
+  `PERFORMANCE_REPORT_EXTRACTION_RECOVERED`는 각 원자 RPC에서 생성한다. 확정·flag·
+  정정 이벤트는 16.4 원자 RPC가 구현될 때까지 생성하지 않는다.
 - 업로드는 `Document` 메타데이터·report·감사 이벤트, 추출은
   `extracted_payload`·상태·감사 이벤트, 확정·정정은 revision·flag·문의 문안
   snapshot·현재 projection·감사 이벤트를 각각 원자 저장한다.
@@ -1744,8 +1748,10 @@ report revision은 flag에서 유도한다. 조회 시 다시 만들거나 외�
 - 원본 리포트·전체 OCR 텍스트·AI 입출력·문의 문안·소상공인 입력을 로그에
   남기지 않는다.
 - Upstage·Solar는 지표 추출에만 사용하고 기존 Adapter 규칙에 따라 `mock`/`live`를
-  분리한다. 문의 문안은 결정적 템플릿으로 만들며, 일반 `pytest`는 외부 네트워크를
-  호출하지 않는다.
+  분리한다. private 원본 다운로드 → Upstage Parse →
+  `performance-report-metrics-v1` Solar strict-schema 매핑을 내부 조합기로
+  제공한다. 문의 문안은 결정적 템플릿으로 만들며, 일반 `pytest`는 외부
+  네트워크를 호출하지 않는다.
 - 반응률·월 정렬·수량 비교·상태 전이는 AI가 아닌 결정적 코드와 DB 제약으로
   수행한다.
 - GET에서는 AI·문안 생성·상태 변경·감사 이벤트 생성을 수행하지 않는다.

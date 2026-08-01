@@ -67,6 +67,8 @@ from app.repositories.obligations import (
 )
 from app.repositories.performance import (
     PerformanceContractAccess,
+    PerformanceExtractionApplyResult,
+    PerformanceExtractionClaim,
     PerformanceReportAccess,
 )
 from app.repositories.public_tokens import PublicTokenRecord
@@ -81,6 +83,7 @@ from app.schemas.agreements import Agreement
 from app.schemas.analysis import Analysis, ReviewItem
 from app.schemas.contracts import ContractCreate, RenewalDecision
 from app.schemas.documents import DocumentParseStatus, DocumentType
+from app.schemas.performance import PerformanceExtractedPayload
 from app.schemas.revised_contracts import RevisedContractReview, RevisedContractReviewStatus
 from app.schemas.signatures import Signature
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
@@ -589,6 +592,8 @@ class SupabaseAdapter:
                     client.table("performance_reports")
                     .select(
                         "id,contract_id,period,source_document_id,status,"
+                        "extracted_payload,current_revision_id,revision_count,"
+                        "extraction_attempt_id,extraction_started_at,created_at,updated_at,"
                         "contracts!inner(owner_id)"
                     )
                     .eq("id", str(report_id))
@@ -662,6 +667,379 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("광고효과 리포트 월 중복 조회에 실패했습니다.") from error
         return bool(response.data)
+
+    async def claim_performance_report_extraction(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+        attempt_id: UUID,
+        idempotency_key: UUID,
+        started_at: datetime,
+        stale_before: datetime,
+    ) -> PerformanceExtractionClaim:
+        if started_at.tzinfo is None or stale_before.tzinfo is None:
+            raise ValueError("추출 attempt 시각은 시간대 정보를 포함해야 합니다.")
+        if stale_before > started_at:
+            raise ValueError("stale 기준 시각은 attempt 시작 시각보다 늦을 수 없습니다.")
+        if attempt_id != idempotency_key:
+            raise ValueError("추출 attempt ID는 현재 멱등 키와 같아야 합니다.")
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                report = self._mock_performance_reports.get(report_id)
+                if (
+                    (owner_id, contract_id) not in self._mock_owned_contracts
+                    or contract is None
+                    or contract.owner_id != owner_id
+                    or report is None
+                    or report.contract_id != contract_id
+                ):
+                    return PerformanceExtractionClaim(outcome="NOT_FOUND")
+                document = self._mock_documents.get(report.source_document_id)
+                if (
+                    document is None
+                    or document.contract_id != contract_id
+                    or document.type is not DocumentType.PERFORMANCE_REPORT
+                ):
+                    return PerformanceExtractionClaim(outcome="NOT_FOUND")
+                if contract.status not in {
+                    ContractStatus.SIGNED,
+                    ContractStatus.IN_PROGRESS,
+                    ContractStatus.RENEWAL_DUE,
+                    ContractStatus.COMPLETED,
+                } or report.status is not PerformanceReportStatus.UPLOADED:
+                    return PerformanceExtractionClaim(outcome="INVALID_STATUS")
+
+                recovered = False
+                if document.parse_status is DocumentParseStatus.PROCESSING:
+                    if report.extraction_attempt_id == attempt_id:
+                        return PerformanceExtractionClaim(
+                            outcome="CLAIMED",
+                            report=report,
+                            source_document=document,
+                        )
+                    if (
+                        report.extraction_attempt_id is None
+                        or report.extraction_started_at is None
+                        or report.extraction_started_at > stale_before
+                    ):
+                        return PerformanceExtractionClaim(
+                            outcome="IN_PROGRESS",
+                            report=report,
+                            source_document=document,
+                        )
+                    recovered = True
+
+                created_at = report.created_at or document.created_at
+                if started_at < created_at or (
+                    report.updated_at is not None and started_at < report.updated_at
+                ):
+                    raise ValueError(
+                        "추출 attempt는 리포트의 마지막 수정 전에 시작할 수 없습니다."
+                    )
+                if recovered:
+                    stale_keys = [
+                        record_key
+                        for record_key, record in self._mock_idempotency.items()
+                        if record.owner_id == owner_id
+                        and record.operation
+                        is IdempotencyOperation.PERFORMANCE_REPORT_EXTRACT
+                        and record.resource_id == report_id
+                        and record.key != idempotency_key
+                        and record.response_status is None
+                    ]
+                    for record_key in stale_keys:
+                        self._mock_idempotency.pop(record_key, None)
+                    self._mock_audit_events.append(
+                        MockAuditEvent(
+                            id=uuid4(),
+                            contract_id=contract_id,
+                            event_type="PERFORMANCE_REPORT_EXTRACTION_RECOVERED",
+                            actor_type="OWNER",
+                            summary=(
+                                "15분 이상 지연된 광고효과 리포트 추출을 "
+                                "명시적으로 재시도했습니다."
+                            ),
+                            created_at=started_at,
+                        )
+                    )
+
+                claimed_report = replace(
+                    report,
+                    extraction_attempt_id=attempt_id,
+                    extraction_started_at=started_at,
+                    created_at=created_at,
+                    updated_at=started_at,
+                )
+                claimed_document = replace(
+                    document,
+                    parse_status=DocumentParseStatus.PROCESSING,
+                )
+                self._mock_performance_reports[report_id] = claimed_report
+                self._mock_documents[document.id] = claimed_document
+                return PerformanceExtractionClaim(
+                    outcome="RECOVERED" if recovered else "CLAIMED",
+                    report=claimed_report,
+                    source_document=claimed_document,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_report_id": str(report_id),
+            "p_attempt_id": str(attempt_id),
+            "p_idempotency_key": str(idempotency_key),
+            "p_started_at": started_at.isoformat(),
+            "p_stale_before": stale_before.isoformat(),
+        }
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                response = await asyncio.to_thread(
+                    lambda: client.rpc(
+                        "claim_performance_report_extraction",
+                        params,
+                    ).execute()
+                )
+                payload = _rpc_json_payload(response.data)
+                return _performance_extraction_claim_from_payload(payload)
+            except ExternalStorageFailure:
+                raise
+            except Exception as error:
+                last_error = error
+        assert last_error is not None
+        raise ExternalStorageFailure("광고효과 추출 작업 점유에 실패했습니다.") from last_error
+
+    async def complete_performance_report_extraction(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+        attempt_id: UUID,
+        extracted_payload: PerformanceExtractedPayload,
+        completed_at: datetime,
+    ) -> PerformanceExtractionApplyResult:
+        if completed_at.tzinfo is None:
+            raise ValueError("추출 완료 시각은 시간대 정보를 포함해야 합니다.")
+        if self.mode == "mock":
+            async with self._mock_lock:
+                owned = self._mock_performance_extraction_rows(
+                    owner_id=owner_id,
+                    contract_id=contract_id,
+                    report_id=report_id,
+                )
+                if owned is None:
+                    return PerformanceExtractionApplyResult(outcome="NOT_FOUND")
+                contract, report, document = owned
+                if report.extraction_attempt_id != attempt_id:
+                    return PerformanceExtractionApplyResult(outcome="STALE")
+                if (
+                    report.status is PerformanceReportStatus.EXTRACTED
+                    and report.extracted_payload == extracted_payload
+                    and document.parse_status is DocumentParseStatus.COMPLETED
+                ):
+                    return PerformanceExtractionApplyResult(
+                        outcome="APPLIED",
+                        report=report,
+                        source_document=document,
+                    )
+                if contract.status not in {
+                    ContractStatus.SIGNED,
+                    ContractStatus.IN_PROGRESS,
+                    ContractStatus.RENEWAL_DUE,
+                    ContractStatus.COMPLETED,
+                } or report.status is not PerformanceReportStatus.UPLOADED:
+                    return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
+                if document.parse_status is not DocumentParseStatus.PROCESSING:
+                    return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
+                if (
+                    report.extraction_started_at is None
+                    or completed_at < report.extraction_started_at
+                ):
+                    raise ValueError("추출 완료 시각은 attempt 시작 전일 수 없습니다.")
+
+                completed_report = replace(
+                    report,
+                    status=PerformanceReportStatus.EXTRACTED,
+                    extracted_payload=extracted_payload,
+                    updated_at=completed_at,
+                )
+                completed_document = replace(
+                    document,
+                    parse_status=DocumentParseStatus.COMPLETED,
+                )
+                self._mock_performance_reports[report_id] = completed_report
+                self._mock_documents[document.id] = completed_document
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type="PERFORMANCE_REPORT_EXTRACTED",
+                        actor_type="SYSTEM",
+                        summary="광고효과 리포트의 지표 후보와 근거를 추출했습니다.",
+                        created_at=completed_at,
+                    )
+                )
+                return PerformanceExtractionApplyResult(
+                    outcome="APPLIED",
+                    report=completed_report,
+                    source_document=completed_document,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_report_id": str(report_id),
+            "p_attempt_id": str(attempt_id),
+            "p_extracted_payload": extracted_payload.model_dump(mode="json"),
+            "p_completed_at": completed_at.isoformat(),
+        }
+        last_error = None
+        for _ in range(2):
+            try:
+                response = await asyncio.to_thread(
+                    lambda: client.rpc(
+                        "complete_performance_report_extraction",
+                        params,
+                    ).execute()
+                )
+                payload = _rpc_json_payload(response.data)
+                return _performance_extraction_apply_result_from_payload(payload)
+            except ExternalStorageFailure:
+                raise
+            except Exception as error:
+                last_error = error
+        assert last_error is not None
+        raise ExternalStorageFailure("광고효과 추출 결과 저장에 실패했습니다.") from last_error
+
+    async def fail_performance_report_extraction(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+        attempt_id: UUID,
+        document_parse_status: DocumentParseStatus,
+        failed_at: datetime,
+    ) -> PerformanceExtractionApplyResult:
+        if document_parse_status not in {
+            DocumentParseStatus.FAILED,
+            DocumentParseStatus.COMPLETED,
+        }:
+            raise ValueError("추출 실패 상태는 FAILED 또는 COMPLETED여야 합니다.")
+        if failed_at.tzinfo is None:
+            raise ValueError("추출 실패 시각은 시간대 정보를 포함해야 합니다.")
+
+        if self.mode == "mock":
+            async with self._mock_lock:
+                owned = self._mock_performance_extraction_rows(
+                    owner_id=owner_id,
+                    contract_id=contract_id,
+                    report_id=report_id,
+                )
+                if owned is None:
+                    return PerformanceExtractionApplyResult(outcome="NOT_FOUND")
+                contract, report, document = owned
+                if report.extraction_attempt_id != attempt_id:
+                    return PerformanceExtractionApplyResult(outcome="STALE")
+                if contract.status not in {
+                    ContractStatus.SIGNED,
+                    ContractStatus.IN_PROGRESS,
+                    ContractStatus.RENEWAL_DUE,
+                    ContractStatus.COMPLETED,
+                } or report.status is not PerformanceReportStatus.UPLOADED:
+                    return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
+                if (
+                    report.extracted_payload is None
+                    and report.current_revision_id is None
+                    and report.revision_count == 0
+                    and document.parse_status is document_parse_status
+                ):
+                    return PerformanceExtractionApplyResult(
+                        outcome="APPLIED",
+                        report=report,
+                        source_document=document,
+                    )
+                if document.parse_status is not DocumentParseStatus.PROCESSING:
+                    return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
+                if (
+                    report.extraction_started_at is None
+                    or failed_at < report.extraction_started_at
+                ):
+                    raise ValueError("추출 실패 시각은 attempt 시작 전일 수 없습니다.")
+
+                failed_report = replace(report, updated_at=failed_at)
+                failed_document = replace(
+                    document,
+                    parse_status=document_parse_status,
+                )
+                self._mock_performance_reports[report_id] = failed_report
+                self._mock_documents[document.id] = failed_document
+                return PerformanceExtractionApplyResult(
+                    outcome="APPLIED",
+                    report=failed_report,
+                    source_document=failed_document,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_report_id": str(report_id),
+            "p_attempt_id": str(attempt_id),
+            "p_document_parse_status": document_parse_status.value,
+            "p_failed_at": failed_at.isoformat(),
+        }
+        last_error = None
+        for _ in range(2):
+            try:
+                response = await asyncio.to_thread(
+                    lambda: client.rpc(
+                        "fail_performance_report_extraction",
+                        params,
+                    ).execute()
+                )
+                payload = _rpc_json_payload(response.data)
+                return _performance_extraction_apply_result_from_payload(payload)
+            except ExternalStorageFailure:
+                raise
+            except Exception as error:
+                last_error = error
+        assert last_error is not None
+        raise ExternalStorageFailure(
+            "광고효과 추출 실패 상태 저장에 실패했습니다."
+        ) from last_error
+
+    def _mock_performance_extraction_rows(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+    ) -> tuple[ContractRecord, PerformanceReportAccess, DocumentRecord] | None:
+        contract = self._mock_contracts.get(contract_id)
+        report = self._mock_performance_reports.get(report_id)
+        if (
+            (owner_id, contract_id) not in self._mock_owned_contracts
+            or contract is None
+            or contract.owner_id != owner_id
+            or report is None
+            or report.contract_id != contract_id
+        ):
+            return None
+        document = self._mock_documents.get(report.source_document_id)
+        if (
+            document is None
+            or document.contract_id != contract_id
+            or document.type is not DocumentType.PERFORMANCE_REPORT
+        ):
+            return None
+        return contract, report, document
 
     async def create_signed_access_url(
         self,
@@ -839,15 +1217,15 @@ class SupabaseAdapter:
     @staticmethod
     def _document_record_from_row(row) -> DocumentRecord:
         return DocumentRecord(
-            id=UUID(row["id"]),
-            contract_id=UUID(row["contract_id"]),
+            id=UUID(str(row["id"])),
+            contract_id=UUID(str(row["contract_id"])),
             type=DocumentType(row["type"]),
             parse_status=DocumentParseStatus(row["parse_status"]),
             storage_path=row["storage_path"],
             content_type=row["content_type"],
             size_bytes=row["size_bytes"],
             page_count=row["page_count"],
-            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")),
+            created_at=_parse_datetime(row["created_at"]),
         )
 
     async def create(
@@ -4065,13 +4443,118 @@ def _idempotency_record_from_row(row: dict) -> IdempotencyRecord:
 
 
 def _performance_report_access_from_row(row: dict) -> PerformanceReportAccess:
+    extracted_payload = row.get("extracted_payload")
     return PerformanceReportAccess(
         id=UUID(str(row["id"])),
         contract_id=UUID(str(row["contract_id"])),
         period=str(row["period"]),
         source_document_id=UUID(str(row["source_document_id"])),
         status=PerformanceReportStatus(row["status"]),
+        extracted_payload=(
+            PerformanceExtractedPayload.model_validate(extracted_payload)
+            if extracted_payload is not None
+            else None
+        ),
+        current_revision_id=(
+            UUID(str(row["current_revision_id"]))
+            if row.get("current_revision_id") is not None
+            else None
+        ),
+        revision_count=int(row.get("revision_count", 0)),
+        extraction_attempt_id=(
+            UUID(str(row["extraction_attempt_id"]))
+            if row.get("extraction_attempt_id") is not None
+            else None
+        ),
+        extraction_started_at=(
+            _parse_datetime(row["extraction_started_at"])
+            if row.get("extraction_started_at") is not None
+            else None
+        ),
+        created_at=(
+            _parse_datetime(row["created_at"])
+            if row.get("created_at") is not None
+            else None
+        ),
+        updated_at=(
+            _parse_datetime(row["updated_at"])
+            if row.get("updated_at") is not None
+            else None
+        ),
     )
+
+
+def _rpc_json_payload(data: object) -> dict:
+    payload = data[0] if isinstance(data, list) and data else data
+    if not isinstance(payload, dict):
+        raise ExternalStorageFailure("DB RPC 결과가 올바르지 않습니다.")
+    return payload
+
+
+def _performance_extraction_claim_from_payload(
+    payload: dict,
+) -> PerformanceExtractionClaim:
+    outcome = payload.get("outcome")
+    if outcome not in {
+        "CLAIMED",
+        "RECOVERED",
+        "IN_PROGRESS",
+        "INVALID_STATUS",
+        "NOT_FOUND",
+    }:
+        raise ExternalStorageFailure("광고효과 추출 점유 결과가 올바르지 않습니다.")
+    report_row = payload.get("report")
+    document_row = payload.get("source_document")
+    if (report_row is None) != (document_row is None):
+        raise ExternalStorageFailure("광고효과 추출 점유 결과가 완전하지 않습니다.")
+    try:
+        return PerformanceExtractionClaim(
+            outcome=outcome,
+            report=(
+                _performance_report_access_from_row(report_row)
+                if isinstance(report_row, dict)
+                else None
+            ),
+            source_document=(
+                SupabaseAdapter._document_record_from_row(document_row)
+                if isinstance(document_row, dict)
+                else None
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ExternalStorageFailure(
+            "광고효과 추출 점유 결과가 올바르지 않습니다."
+        ) from error
+
+
+def _performance_extraction_apply_result_from_payload(
+    payload: dict,
+) -> PerformanceExtractionApplyResult:
+    outcome = payload.get("outcome")
+    if outcome not in {"APPLIED", "STALE", "INVALID_STATUS", "NOT_FOUND"}:
+        raise ExternalStorageFailure("광고효과 추출 저장 결과가 올바르지 않습니다.")
+    report_row = payload.get("report")
+    document_row = payload.get("source_document")
+    if (report_row is None) != (document_row is None):
+        raise ExternalStorageFailure("광고효과 추출 저장 결과가 완전하지 않습니다.")
+    try:
+        return PerformanceExtractionApplyResult(
+            outcome=outcome,
+            report=(
+                _performance_report_access_from_row(report_row)
+                if isinstance(report_row, dict)
+                else None
+            ),
+            source_document=(
+                SupabaseAdapter._document_record_from_row(document_row)
+                if isinstance(document_row, dict)
+                else None
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ExternalStorageFailure(
+            "광고효과 추출 저장 결과가 올바르지 않습니다."
+        ) from error
 
 
 def _analysis_task_record_from_row(row: dict) -> AnalysisTaskRecord:

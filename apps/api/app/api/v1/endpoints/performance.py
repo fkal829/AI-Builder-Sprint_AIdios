@@ -9,13 +9,19 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.api.dependencies import (
     get_current_owner_id,
+    get_performance_confirmation_service,
     get_performance_report_upload_service,
 )
 from app.core.exceptions import InvalidDocument
 from app.core.http import request_id
 from app.schemas.common import ApiError, ApiResponse
-from app.schemas.performance import PerformanceReportCreated
+from app.schemas.performance import (
+    PerformanceReportConfirmation,
+    PerformanceReportConfirmed,
+    PerformanceReportCreated,
+)
 from app.services.documents import read_upload_content
+from app.services.performance_confirmation import PerformanceConfirmationService
 from app.services.performance_upload import PerformanceReportUploadService
 
 router = APIRouter()
@@ -157,4 +163,60 @@ async def create_performance_report(
         data=result.report,
         error=None,
         request_id=result.request_id,
+    )
+
+
+@router.patch(
+    "/{contract_id}/performance-reports/{report_id}",
+    response_model=ApiResponse[PerformanceReportConfirmed],
+    responses={
+        200: {
+            "description": "최초 확정 또는 정정된 광고효과 리포트",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        401: {
+            "model": ApiResponse[None],
+            "description": "인증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        404: {
+            "model": ApiResponse[None],
+            "description": "계약 또는 리포트를 찾을 수 없음",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        409: {
+            "model": ApiResponse[None],
+            "description": "revision 충돌, 정정 의존성 또는 상태 충돌",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        422: {
+            "model": ApiResponse[None],
+            "description": "요청 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+    },
+)
+async def confirm_performance_report(
+    request: Request,
+    contract_id: UUID,
+    report_id: UUID,
+    payload: PerformanceReportConfirmation,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[
+        PerformanceConfirmationService,
+        Depends(get_performance_confirmation_service),
+    ],
+) -> ApiResponse[PerformanceReportConfirmed]:
+    confirmed = await service.confirm(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        report_id=report_id,
+        idempotency_key=idempotency_key,
+        payload=payload,
+    )
+    return ApiResponse(
+        data=confirmed,
+        error=None,
+        request_id=request_id(request),
     )

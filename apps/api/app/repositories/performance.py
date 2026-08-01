@@ -35,6 +35,13 @@ PerformanceReportUploadOutcome = Literal[
     "NOT_FOUND",
     "CONFLICT",
 ]
+PerformanceReportConfirmOutcome = Literal[
+    "CONFIRMED",
+    "REVISION_CONFLICT",
+    "CORRECTION_DEPENDENCY_EXISTS",
+    "INVALID_STATUS",
+    "NOT_FOUND",
+]
 
 
 @dataclass(frozen=True)
@@ -163,6 +170,17 @@ class PerformanceAccessRepository(Protocol):
         period: str,
     ) -> bool: ...
 
+    async def get_owned_performance_report_for_period(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        period: str,
+    ) -> PerformanceReportAccess | None:
+        """Look up one contract's report by calendar month, used to find the
+        immediately preceding month for the engagement-rate-drop comparison."""
+        ...
+
 
 class PerformanceReportUploadRepository(Protocol):
     """Atomic upload metadata boundary for the planned 16.2 endpoint.
@@ -222,17 +240,34 @@ class PerformanceExtractionRepository(Protocol):
     ) -> PerformanceExtractionApplyResult: ...
 
 
+@dataclass(frozen=True)
+class PerformanceReportConfirmResult:
+    """Result of the atomic revision + flags + inquiry drafts + projection append."""
+
+    outcome: PerformanceReportConfirmOutcome
+    report: PerformanceReport | None = None
+
+
 class PerformanceReportRepository(Protocol):
-    """Append-only revision boundary owned by P2-C."""
+    """Append-only revision boundary owned by P2-C.
+
+    ``confirm_performance_report_with_audit`` takes an already fully-built,
+    self-validating ``PerformanceReportRevision`` (flags and inquiry drafts
+    embedded, per app/schemas/performance.py) — the caller has already run the
+    P2-C-2 decision rules and rendered the P2-C-5 inquiry text. This boundary
+    only owns the atomic persistence and the optimistic-lock/dependency guard:
+    ``expected_revision`` must equal the report's current ``revision_count``,
+    and no later month may already be CONFIRMED/FLAGGED.
+    """
 
     async def get_report(self, *, report_id: UUID) -> PerformanceReport | None: ...
 
-    async def append_revision(
+    async def confirm_performance_report_with_audit(
         self,
         *,
+        owner_id: UUID,
+        contract_id: UUID,
         report_id: UUID,
+        expected_revision: int,
         revision: PerformanceReportRevision,
-    ) -> PerformanceReport:
-        """Append a validated revision and make it current without changing history."""
-
-        ...
+    ) -> PerformanceReportConfirmResult: ...

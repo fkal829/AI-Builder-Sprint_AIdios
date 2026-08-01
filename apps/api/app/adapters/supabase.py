@@ -71,6 +71,7 @@ from app.repositories.performance import (
     PerformanceExtractionApplyResult,
     PerformanceExtractionClaim,
     PerformanceReportAccess,
+    PerformanceReportConfirmResult,
     PerformanceReportUploadResult,
 )
 from app.repositories.public_tokens import PublicTokenRecord
@@ -85,7 +86,13 @@ from app.schemas.agreements import Agreement
 from app.schemas.analysis import Analysis, ReviewItem
 from app.schemas.contracts import ContractCreate, RenewalDecision
 from app.schemas.documents import DocumentParseStatus, DocumentType
-from app.schemas.performance import PerformanceExtractedPayload
+from app.schemas.performance import (
+    PerformanceExtractedPayload,
+    PerformanceFlag,
+    PerformanceInquiryDraft,
+    PerformanceReport,
+    PerformanceReportRevision,
+)
 from app.schemas.revised_contracts import RevisedContractReview, RevisedContractReviewStatus
 from app.schemas.signatures import Signature
 from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermInput
@@ -182,6 +189,7 @@ class SupabaseAdapter:
         self._mock_object_content_types: dict[str, str] = {}
         self._mock_documents: dict[UUID, DocumentRecord] = {}
         self._mock_performance_reports: dict[UUID, PerformanceReportAccess] = {}
+        self._mock_performance_report_revisions: dict[UUID, list[PerformanceReportRevision]] = {}
         self._mock_understood_terms: dict[UUID, UnderstoodTerm] = {}
         self._mock_renewal_decisions: dict[UUID, RenewalDecision] = {}
         self._mock_audit_events: list[MockAuditEvent] = []
@@ -215,6 +223,10 @@ class SupabaseAdapter:
     @property
     def mock_performance_reports(self) -> dict[UUID, PerformanceReportAccess]:
         return dict(self._mock_performance_reports)
+
+    @property
+    def mock_performance_report_revisions(self) -> dict[UUID, list[PerformanceReportRevision]]:
+        return {key: list(value) for key, value in self._mock_performance_report_revisions.items()}
 
     @property
     def mock_understood_terms(self) -> dict[UUID, UnderstoodTerm]:
@@ -670,6 +682,60 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("광고효과 리포트 월 중복 조회에 실패했습니다.") from error
         return bool(response.data)
+
+    async def get_owned_performance_report_for_period(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        period: str,
+    ) -> PerformanceReportAccess | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if (
+                    (owner_id, contract_id) not in self._mock_owned_contracts
+                    or contract is None
+                    or contract.owner_id != owner_id
+                ):
+                    return None
+                return next(
+                    (
+                        report
+                        for report in self._mock_performance_reports.values()
+                        if report.contract_id == contract_id and report.period == period
+                    ),
+                    None,
+                )
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("performance_reports")
+                    .select(
+                        "id,contract_id,period,source_document_id,status,"
+                        "extracted_payload,current_revision_id,revision_count,"
+                        "extraction_attempt_id,extraction_started_at,created_at,updated_at,"
+                        "contracts!inner(owner_id)"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .eq("period", period)
+                    .eq("contracts.owner_id", str(owner_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("광고효과 리포트 월별 조회에 실패했습니다.") from error
+        if not response.data:
+            return None
+        try:
+            return _performance_report_access_from_row(response.data[0])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "광고효과 리포트 월별 조회 결과가 올바르지 않습니다."
+            ) from error
 
     async def create_performance_report_upload_with_audit(
         self,
@@ -1189,6 +1255,236 @@ class SupabaseAdapter:
         ):
             return None
         return contract, report, document
+
+    async def get_report(self, *, report_id: UUID) -> PerformanceReport | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                access = self._mock_performance_reports.get(report_id)
+                if access is None:
+                    return None
+                revisions = self._mock_performance_report_revisions.get(report_id, [])
+                return _performance_report_from_access(access, revisions)
+
+        client = self._require_live_client()
+        try:
+            report_response = await asyncio.to_thread(
+                lambda: (
+                    client.table("performance_reports")
+                    .select(
+                        "id,contract_id,period,source_document_id,status,"
+                        "extracted_payload,current_revision_id,revision_count,"
+                        "created_at,updated_at"
+                    )
+                    .eq("id", str(report_id))
+                    .limit(1)
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("광고효과 리포트 조회에 실패했습니다.") from error
+        if not report_response.data:
+            return None
+        report_row = report_response.data[0]
+
+        try:
+            revision_rows, flags_by_revision, basis_by_flag, drafts_by_flag = (
+                await self._live_performance_revision_rows(client, report_id=report_id)
+            )
+            return _performance_report_from_rows(
+                report_row=report_row,
+                revision_rows=revision_rows,
+                flags_by_revision=flags_by_revision,
+                basis_by_flag=basis_by_flag,
+                drafts_by_flag=drafts_by_flag,
+            )
+        except ExternalStorageFailure:
+            raise
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "광고효과 리포트 조회 결과가 올바르지 않습니다."
+            ) from error
+
+    async def _live_performance_revision_rows(
+        self,
+        client: Client,
+        *,
+        report_id: UUID,
+    ) -> tuple[list[dict], dict[str, list[dict]], dict[str, list[dict]], dict[str, dict]]:
+        try:
+            revisions_response = await asyncio.to_thread(
+                lambda: (
+                    client.table("performance_report_revisions")
+                    .select(
+                        "id,report_id,version,status,confirmed_payload,engagement_rate,"
+                        "corrected_from_revision_id,correction_reason,confirmed_at"
+                    )
+                    .eq("report_id", str(report_id))
+                    .order("version")
+                    .execute()
+                )
+            )
+            revision_rows: list[dict] = revisions_response.data or []
+            revision_ids = [row["id"] for row in revision_rows]
+            flags_by_revision: dict[str, list[dict]] = {}
+            basis_by_flag: dict[str, list[dict]] = {}
+            drafts_by_flag: dict[str, dict] = {}
+            if not revision_ids:
+                return revision_rows, flags_by_revision, basis_by_flag, drafts_by_flag
+
+            flags_response = await asyncio.to_thread(
+                lambda: (
+                    client.table("performance_flags")
+                    .select("*")
+                    .in_("report_revision_id", revision_ids)
+                    .execute()
+                )
+            )
+            flag_rows: list[dict] = flags_response.data or []
+            for row in flag_rows:
+                flags_by_revision.setdefault(row["report_revision_id"], []).append(row)
+            flag_ids = [row["id"] for row in flag_rows]
+            if flag_ids:
+                basis_response = await asyncio.to_thread(
+                    lambda: (
+                        client.table("performance_flag_basis_terms")
+                        .select("*")
+                        .in_("flag_id", flag_ids)
+                        .execute()
+                    )
+                )
+                for row in basis_response.data or []:
+                    basis_by_flag.setdefault(row["flag_id"], []).append(row)
+                drafts_response = await asyncio.to_thread(
+                    lambda: (
+                        client.table("performance_inquiry_drafts")
+                        .select("*")
+                        .in_("flag_id", flag_ids)
+                        .execute()
+                    )
+                )
+                for row in drafts_response.data or []:
+                    drafts_by_flag[row["flag_id"]] = row
+            return revision_rows, flags_by_revision, basis_by_flag, drafts_by_flag
+        except Exception as error:
+            raise ExternalStorageFailure(
+                "광고효과 리포트 확정 이력 조회에 실패했습니다."
+            ) from error
+
+    async def confirm_performance_report_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+        expected_revision: int,
+        revision: PerformanceReportRevision,
+    ) -> PerformanceReportConfirmResult:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                report = self._mock_performance_reports.get(report_id)
+                if (
+                    (owner_id, contract_id) not in self._mock_owned_contracts
+                    or contract is None
+                    or contract.owner_id != owner_id
+                    or report is None
+                    or report.contract_id != contract_id
+                ):
+                    return PerformanceReportConfirmResult(outcome="NOT_FOUND")
+                if report.status is PerformanceReportStatus.UPLOADED:
+                    return PerformanceReportConfirmResult(outcome="INVALID_STATUS")
+                if report.revision_count != expected_revision:
+                    return PerformanceReportConfirmResult(outcome="REVISION_CONFLICT")
+                if expected_revision > 0:
+                    later_exists = any(
+                        other.contract_id == contract_id
+                        and other.status
+                        in {PerformanceReportStatus.CONFIRMED, PerformanceReportStatus.FLAGGED}
+                        and other.period > report.period
+                        for other in self._mock_performance_reports.values()
+                    )
+                    if later_exists:
+                        return PerformanceReportConfirmResult(
+                            outcome="CORRECTION_DEPENDENCY_EXISTS"
+                        )
+
+                history = [*self._mock_performance_report_revisions.get(report_id, []), revision]
+                self._mock_performance_report_revisions[report_id] = history
+                updated_report = replace(
+                    report,
+                    status=revision.status,
+                    current_revision_id=revision.id,
+                    revision_count=len(history),
+                    updated_at=revision.confirmed_at,
+                )
+                self._mock_performance_reports[report_id] = updated_report
+                self._mock_audit_events.append(
+                    MockAuditEvent(
+                        id=uuid4(),
+                        contract_id=contract_id,
+                        event_type=(
+                            f"PERFORMANCE_REPORT_{revision.status.value}"
+                            if revision.version == 1
+                            else "PERFORMANCE_REPORT_CORRECTED"
+                        ),
+                        actor_type="OWNER",
+                        summary=(
+                            "광고효과 리포트를 확정했습니다."
+                            if revision.version == 1
+                            else "광고효과 리포트를 정정했습니다."
+                        ),
+                        created_at=revision.confirmed_at,
+                    )
+                )
+                return PerformanceReportConfirmResult(
+                    outcome="CONFIRMED",
+                    report=_performance_report_from_access(updated_report, history),
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_report_id": str(report_id),
+            "p_expected_revision": expected_revision,
+            "p_revision_id": str(revision.id),
+            "p_status": revision.status.value,
+            "p_confirmed_payload": revision.confirmed_payload.model_dump(mode="json"),
+            "p_engagement_rate": (
+                str(revision.engagement_rate) if revision.engagement_rate is not None else None
+            ),
+            "p_corrected_from_revision_id": (
+                str(revision.corrected_from_revision_id)
+                if revision.corrected_from_revision_id is not None
+                else None
+            ),
+            "p_correction_reason": revision.correction_reason,
+            "p_confirmed_at": revision.confirmed_at.isoformat(),
+            "p_flags": [_performance_flag_to_payload(flag) for flag in revision.flags],
+            "p_inquiry_drafts": [
+                {
+                    "id": str(draft.id),
+                    "flag_id": str(draft.flag_id),
+                    "text": draft.text,
+                    "template_version": draft.template_version,
+                }
+                for draft in revision.inquiry_drafts
+            ],
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("confirm_performance_report_with_audit", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("광고효과 리포트 확정 저장에 실패했습니다.") from error
+        payload = _rpc_json_payload(response.data)
+        outcome = payload.get("outcome")
+        if outcome != "CONFIRMED":
+            return PerformanceReportConfirmResult(outcome=outcome)
+        report = await self.get_report(report_id=report_id)
+        if report is None:
+            raise ExternalStorageFailure("확정된 광고효과 리포트를 다시 조회하지 못했습니다.")
+        return PerformanceReportConfirmResult(outcome="CONFIRMED", report=report)
 
     async def create_signed_access_url(
         self,
@@ -4631,6 +4927,177 @@ def _performance_report_access_from_row(row: dict) -> PerformanceReportAccess:
             else None
         ),
     )
+
+
+def _performance_report_from_access(
+    access: PerformanceReportAccess,
+    revisions: list[PerformanceReportRevision],
+) -> PerformanceReport:
+    ordered = sorted(revisions, key=lambda revision: revision.version)
+    return PerformanceReport(
+        id=access.id,
+        contract_id=access.contract_id,
+        period=access.period,
+        source_document_id=access.source_document_id,
+        status=access.status,
+        extracted_payload=access.extracted_payload,
+        current_revision=ordered[-1] if ordered else None,
+        revision_count=len(ordered),
+        revisions=ordered,
+        created_at=access.created_at,
+        updated_at=access.updated_at,
+    )
+
+
+def _performance_flag_basis_snapshot_from_row(row: dict) -> dict:
+    return {
+        "extracted_term_id": row["extracted_term_id"],
+        "document_id": row["document_id"],
+        "field": row["field"],
+        "source_type": row["source_type"],
+        "source_page": row["source_page"],
+        "source_text": row["source_text"],
+        "confidence": row["confidence"],
+        "verification_status": row["verification_status"],
+    }
+
+
+def _performance_flag_from_row(
+    row: dict,
+    *,
+    basis_rows: list[dict],
+    draft_row: dict | None,
+) -> PerformanceFlag:
+    return PerformanceFlag(
+        id=UUID(str(row["id"])),
+        report_revision_id=UUID(str(row["report_revision_id"])),
+        flag_type=row["flag_type"],
+        basis_extracted_term_ids=[basis["extracted_term_id"] for basis in basis_rows],
+        basis_snapshots=[_performance_flag_basis_snapshot_from_row(basis) for basis in basis_rows],
+        comparison_report_revision_id=row.get("comparison_report_revision_id"),
+        expected_content_count=row.get("expected_content_count"),
+        expected_period_unit=row.get("expected_period_unit"),
+        actual_content_count=row.get("actual_content_count"),
+        previous_engagement_rate=row.get("previous_engagement_rate"),
+        current_engagement_rate=row.get("current_engagement_rate"),
+        issue_note=row.get("issue_note"),
+        created_at=_parse_datetime(row["created_at"]),
+    )
+
+
+def _performance_revision_from_row(
+    row: dict,
+    *,
+    flag_rows: list[dict],
+    basis_by_flag: dict[str, list[dict]],
+    drafts_by_flag: dict[str, dict],
+) -> PerformanceReportRevision:
+    flags = [
+        _performance_flag_from_row(
+            flag_row,
+            basis_rows=basis_by_flag.get(flag_row["id"], []),
+            draft_row=drafts_by_flag.get(flag_row["id"]),
+        )
+        for flag_row in flag_rows
+    ]
+    inquiry_drafts = [
+        PerformanceInquiryDraft(
+            id=UUID(str(drafts_by_flag[flag_row["id"]]["id"])),
+            flag_id=UUID(str(flag_row["id"])),
+            text=drafts_by_flag[flag_row["id"]]["text"],
+            template_version=drafts_by_flag[flag_row["id"]]["template_version"],
+            created_at=_parse_datetime(drafts_by_flag[flag_row["id"]]["created_at"]),
+        )
+        for flag_row in flag_rows
+        if flag_row["id"] in drafts_by_flag
+    ]
+    return PerformanceReportRevision(
+        id=UUID(str(row["id"])),
+        report_id=UUID(str(row["report_id"])),
+        version=int(row["version"]),
+        status=row["status"],
+        confirmed_payload=row["confirmed_payload"],
+        engagement_rate=row.get("engagement_rate"),
+        corrected_from_revision_id=row.get("corrected_from_revision_id"),
+        correction_reason=row.get("correction_reason"),
+        confirmed_at=_parse_datetime(row["confirmed_at"]),
+        flags=flags,
+        inquiry_drafts=inquiry_drafts,
+    )
+
+
+def _performance_report_from_rows(
+    *,
+    report_row: dict,
+    revision_rows: list[dict],
+    flags_by_revision: dict[str, list[dict]],
+    basis_by_flag: dict[str, list[dict]],
+    drafts_by_flag: dict[str, dict],
+) -> PerformanceReport:
+    revisions = [
+        _performance_revision_from_row(
+            revision_row,
+            flag_rows=flags_by_revision.get(revision_row["id"], []),
+            basis_by_flag=basis_by_flag,
+            drafts_by_flag=drafts_by_flag,
+        )
+        for revision_row in revision_rows
+    ]
+    extracted_payload = report_row.get("extracted_payload")
+    return PerformanceReport(
+        id=UUID(str(report_row["id"])),
+        contract_id=UUID(str(report_row["contract_id"])),
+        period=str(report_row["period"]),
+        source_document_id=UUID(str(report_row["source_document_id"])),
+        status=report_row["status"],
+        extracted_payload=(
+            PerformanceExtractedPayload.model_validate(extracted_payload)
+            if extracted_payload is not None
+            else None
+        ),
+        current_revision=revisions[-1] if revisions else None,
+        revision_count=len(revisions),
+        revisions=revisions,
+        created_at=_parse_datetime(report_row["created_at"]),
+        updated_at=_parse_datetime(report_row["updated_at"]),
+    )
+
+
+def _performance_flag_to_payload(flag: PerformanceFlag) -> dict:
+    return {
+        "id": str(flag.id),
+        "flag_type": flag.flag_type.value,
+        "comparison_report_revision_id": (
+            str(flag.comparison_report_revision_id)
+            if flag.comparison_report_revision_id is not None
+            else None
+        ),
+        "expected_content_count": flag.expected_content_count,
+        "expected_period_unit": flag.expected_period_unit,
+        "actual_content_count": flag.actual_content_count,
+        "previous_engagement_rate": (
+            str(flag.previous_engagement_rate)
+            if flag.previous_engagement_rate is not None
+            else None
+        ),
+        "current_engagement_rate": (
+            str(flag.current_engagement_rate) if flag.current_engagement_rate is not None else None
+        ),
+        "issue_note": flag.issue_note,
+        "basis_snapshots": [
+            {
+                "extracted_term_id": str(basis.extracted_term_id),
+                "document_id": str(basis.document_id),
+                "field": basis.field.value,
+                "source_type": basis.source_type.value,
+                "source_page": basis.source_page,
+                "source_text": basis.source_text,
+                "confidence": basis.confidence,
+                "verification_status": basis.verification_status.value,
+            }
+            for basis in flag.basis_snapshots
+        ],
+    }
 
 
 def _performance_upload_is_replay(

@@ -1,0 +1,16 @@
+verification_type=AUTOMATED_OFFLINE
+executed_at=2026-08-01T18:20:17+09:00
+git_branch=backend
+git_commit=5007bf1b80d5c1a529b8fd1965c2b34d471b30fa
+python_version=3.12.3
+pytest_version=8.4.2
+ruff_version=0.16.0
+app_env=local
+supabase_mode=mock
+upstage_mode=mock
+modusign_mode=mock
+external_network_expected=false
+local_dotenv_loaded=false
+fixture_data=fictitious_only
+secrets_recorded=false
+source_worktree_before_generation=clean

@@ -75,3 +75,9 @@ uvicorn app.main:app --reload
 - 데모 데이터에는 실제 개인정보를 넣지 않습니다.
 
 대회 공통 안내는 [docs/hackathon-guide.md](docs/hackathon-guide.md)에 보관했습니다.
+
+## AI 활용
+
+사용 모델·API 위치·프롬프트/설정·테스트 검증 산출물은
+[docs/AI_활용_증빙.md](docs/AI_활용_증빙.md)에 요약했고, 기술 상세는
+[AI_USAGE.md](AI_USAGE.md)에 있습니다.

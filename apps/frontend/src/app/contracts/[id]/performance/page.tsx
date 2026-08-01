@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { AppScreen, CTAButton } from "@/components/AppScreen";
+import { AppScreen } from "@/components/AppScreen";
 import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
 import { StatTile } from "@/components/StatTile";
 import { LayerBlock } from "@/components/LayerBlock";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { useAsync } from "@/lib/hooks";
 import { adapter, type LiveObligation } from "@/lib/adapter";
+import {
+  clearSavedReport,
+  useSavedReport,
+  writeSavedReport,
+} from "@/lib/reportDemo";
 
 /* ⑩⑪ 이행·광고효과 관리 — 체결 후 사장님이 들어오는 관리 단계 단일 화면.
    대행사에게 받은 리포트를 사장님이 올리면 → 지표를 뽑아 대시보드로 모으고 →
@@ -21,6 +27,9 @@ const MONTHS = [
   { label: "6월", impressions: 15200, reactions: 612, posts: 4, rate: 4.0 },
   { label: "7월", impressions: 8300, reactions: 240, posts: 2, rate: 2.9 },
 ];
+
+/** 이번에 올린 리포트가 담은 달 — 저장하면 이 값이 모아보기에 더해진다 */
+const JULY = { period: "2026년 7월", impressions: 8300, reactions: 240, posts: 2 };
 
 const TOTAL = { impressions: 35900, reactions: 1338, rate: 3.7, posts: 10 };
 
@@ -67,15 +76,39 @@ const FINDINGS = [
 const INQUIRY =
   "안녕하세요, 7월 광고 리포트 잘 받았습니다. 계약서 제3조에 월 4건 게시로 되어 있는데 이번 달 리포트에는 2건으로 확인되어 문의드립니다. 남은 2건의 진행 일정을 알려주시면 감사하겠습니다.";
 
-type Stage = "idle" | "parsing" | "done";
+/* idle 업로드 전 · parsing 추출 중 · review 읽은 값 확인 대기 · saved 확인 완료
+   review와 saved를 나눠야 "확인한 값만 대시보드에 쌓여요"가 실제 동작과 맞는다. */
+type Stage = "idle" | "parsing" | "review" | "saved";
 
 export default function PerformancePage() {
   const { id } = useParams<{ id: string }>();
-  const [stage, setStage] = useState<Stage>("idle");
+  const [localStage, setLocalStage] = useState<Stage>("idle");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // 저장은 세션에 남으므로, 모아보기에서 돌아와도 저장 상태를 잃지 않는다
+  const saved = useSavedReport();
+  const stage: Stage = saved?.contractId === id ? "saved" : localStage;
 
   const runDemo = () => {
-    setStage("parsing");
-    window.setTimeout(() => setStage("done"), 900);
+    setLocalStage("parsing");
+    window.setTimeout(() => setLocalStage("review"), 900);
+  };
+
+  const save = () =>
+    writeSavedReport({
+      contractId: id,
+      period: JULY.period,
+      impressions: JULY.impressions,
+      reactions: JULY.reactions,
+      posts: JULY.posts,
+      savedAt: "2026-07-31",
+    });
+
+  /* 저장 후 삭제는 이 계약과 전체 모아보기 합계에서 값을 빼는 동작이라
+     확인을 받는다. 실제 구현에서는 저장된 지표를 백엔드에서 지운다. */
+  const reset = () => {
+    clearSavedReport();
+    setLocalStage("idle");
+    setConfirmingDelete(false);
   };
 
   return (
@@ -87,11 +120,6 @@ export default function PerformancePage() {
         <span className="rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
           화면 목업 · 개발 예정
         </span>
-      }
-      footer={
-        <CTAButton href={`/contracts/${id}/renewal`} variant="secondary">
-          만료·재계약 검토로
-        </CTAButton>
       }
     >
       <div className="flex flex-col gap-5">
@@ -108,21 +136,15 @@ export default function PerformancePage() {
             대조합니다.
           </p>
           <p className="mt-1.5 text-[11px] leading-relaxed text-neutral500">
-            이 계약에는 성과 보고 조항이 따로 없어요. 조정 요청에 &lsquo;월 1회 성과
-            보고&rsquo;를 넣어두면, 다음부터는 받을 지표와 주기가 계약으로 정해져요.
+            이 계약에는 성과 보고 조항이 따로 없어요. 다음 재계약 때 &lsquo;월 1회 성과
+            보고&rsquo;를 넣어두면, 받을 지표와 주기가 계약으로 정해져요.
           </p>
-          <div className="mt-2.5 flex flex-wrap gap-2">
+          <div className="mt-2.5">
             <a
               href={`/contracts/${id}`}
               className="rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-ink hover:bg-subtle"
             >
               계약서에서 보기 →
-            </a>
-            <a
-              href={`/contracts/${id}#req`}
-              className="rounded-lg border border-brand400 bg-brand50 px-3 py-1.5 text-[12px] font-bold text-brand700 hover:bg-brand100"
-            >
-              성과 보고 조항 추가 요청 →
             </a>
           </div>
         </Card>
@@ -164,12 +186,21 @@ export default function PerformancePage() {
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => setStage("idle")}
-                  className="flex-none rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-neutral700 hover:bg-subtle"
-                >
-                  다시 올리기
-                </button>
+                {stage === "saved" ? (
+                  <button
+                    onClick={() => setConfirmingDelete(true)}
+                    className="flex-none rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-neutral700 hover:bg-subtle"
+                  >
+                    리포트 삭제
+                  </button>
+                ) : (
+                  <button
+                    onClick={reset}
+                    className="flex-none rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-neutral700 hover:bg-subtle"
+                  >
+                    다시 올리기
+                  </button>
+                )}
               </div>
             )}
           </Card>
@@ -181,44 +212,74 @@ export default function PerformancePage() {
           </p>
         )}
 
-        {stage === "done" && (
-          <>
-            {/* ② 읽은 내용 확인 */}
-            <section className="flex flex-col gap-2">
-              <SectionTitle>② 이렇게 읽었어요 — 맞는지 확인해주세요</SectionTitle>
-              <Card>
-                <LayerBlock layer="ai" label="리포트에서 읽어낸 값 · 추정">
-                  <div className="flex flex-col gap-1.5">
-                    {EXTRACTED.map((f) => (
-                      <div
-                        key={f.label}
-                        className="flex items-center justify-between gap-3 text-[13px]"
-                      >
-                        <span className="text-neutral700">{f.label}</span>
-                        <span className="flex items-center gap-2">
-                          <b className="text-ink">{f.value}</b>
-                          <span className="text-[10px] font-bold text-brand700">
-                            확신도 {f.confidence}%
-                          </span>
+        {(stage === "review" || stage === "saved") && (
+          /* ② 읽은 내용 확인 — 저장 전에는 여기서 멈춘다 */
+          <section className="flex flex-col gap-2">
+            <SectionTitle>② 이렇게 읽었어요 — 맞는지 확인해주세요</SectionTitle>
+            <Card>
+              <LayerBlock layer="ai" label="리포트에서 읽어낸 값 · 추정">
+                <div className="flex flex-col gap-1.5">
+                  {EXTRACTED.map((f) => (
+                    <div
+                      key={f.label}
+                      className="flex items-center justify-between gap-3 text-[13px]"
+                    >
+                      <span className="text-neutral700">{f.label}</span>
+                      <span className="flex items-center gap-2">
+                        <b className="text-ink">{f.value}</b>
+                        <span className="text-[10px] font-bold text-brand700">
+                          확신도 {f.confidence}%
                         </span>
-                      </div>
-                    ))}
-                  </div>
-                </LayerBlock>
-                <div className="mt-3 flex gap-2">
-                  <button className="h-10 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white">
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </LayerBlock>
+              {stage === "review" ? (
+                <>
+                  <button
+                    onClick={save}
+                    className="mt-3 h-11 w-full rounded-lg bg-ink text-[13px] font-bold text-white hover:bg-ink/90"
+                  >
                     맞아요, 저장할게요
                   </button>
-                  <button className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral700">
-                    숫자를 고칠게요
-                  </button>
-                </div>
-                <p className="mt-2 text-[11px] text-neutral500">
-                  잘못 읽은 숫자가 있으면 직접 고칠 수 있어요. 확인한 값만
-                  대시보드에 쌓여요.
+                  <p className="mt-2 text-[11px] text-neutral500">
+                    저장해야 아래 대시보드와 전체 광고효과 모아보기에 쌓여요.{" "}
+                    <button className="font-bold text-brand700 underline underline-offset-2">
+                      숫자를 고칠게요
+                    </button>
+                  </p>
+                </>
+              ) : (
+                <p className="mt-3 text-[12px] font-bold text-brand700">
+                  ✓ 사장님이 확인한 값으로 저장했어요
                 </p>
-              </Card>
-            </section>
+              )}
+            </Card>
+          </section>
+        )}
+
+        {stage === "saved" && (
+          <>
+            {/* 저장이 어디에 반영됐는지 곧바로 보여준다 */}
+            <div className="flex flex-col gap-2 rounded-xl border border-brand400 bg-brand50 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-[13px] font-bold text-brand800">
+                  ✓ {JULY.period} 리포트가 저장됐어요
+                </div>
+                <p className="mt-0.5 text-[12px] leading-relaxed text-neutral700">
+                  노출 {JULY.impressions.toLocaleString()} · 반응{" "}
+                  {JULY.reactions.toLocaleString()} · 게시물 {JULY.posts}건이 이
+                  계약과 전체 광고효과 모아보기에 함께 더해졌어요.
+                </p>
+              </div>
+              <a
+                href="/performance"
+                className="flex-none rounded-lg border border-brand400 bg-white px-3 py-2 text-center text-[12px] font-bold text-brand700 hover:bg-brand100"
+              >
+                모아보기에서 확인 →
+              </a>
+            </div>
 
             {/* ③ 대시보드 */}
             <section className="flex flex-col gap-2">
@@ -308,12 +369,35 @@ export default function PerformancePage() {
           기능은 준비 중이며, 확인한 숫자만 기록으로 남습니다. 문의 문안은
           사장님이 직접 대행사에 보내는 참고 문구예요.
         </Disclaimer>
+
+        <ConfirmModal
+          open={confirmingDelete}
+          eyebrow="삭제 전 확인"
+          title={`${JULY.period} 리포트를 삭제할까요?`}
+          body={
+            <>
+              <p>
+                노출 {JULY.impressions.toLocaleString()} · 반응{" "}
+                {JULY.reactions.toLocaleString()} · 게시물 {JULY.posts}건이 이
+                계약과 전체 광고효과 모아보기 합계에서 빠져요.
+              </p>
+              <p className="mt-2 text-neutral500">
+                ⑤에서 확인한 증빙 기록은 그대로 남아요. 리포트를 다시 올리면
+                숫자는 새로 쌓입니다.
+              </p>
+            </>
+          }
+          confirmLabel="삭제할게요"
+          cancelLabel="그대로 둘게요"
+          onConfirm={reset}
+          onCancel={() => setConfirmingDelete(false)}
+        />
       </div>
     </AppScreen>
   );
 }
 
-/** 상단 4단계 흐름 표시 */
+/** 상단 5단계 흐름 표시 — 저장 전에는 ②에서 멈춰 있다는 걸 보여준다 */
 function StepFlow({ stage }: { stage: Stage }) {
   const steps = [
     "리포트 올리기",
@@ -322,7 +406,8 @@ function StepFlow({ stage }: { stage: Stage }) {
     "계약과 대조",
     "증빙 확인",
   ];
-  const reached = stage === "done" ? 5 : stage === "parsing" ? 1 : 0;
+  const reached =
+    stage === "saved" ? 5 : stage === "review" ? 2 : stage === "parsing" ? 1 : 0;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {steps.map((s, i) => (
@@ -361,7 +446,14 @@ function MonthlyChart() {
                 style={{ height: `${(m.impressions / max) * 100}%` }}
               />
             </div>
-            <span className="text-[11px] font-medium text-neutral700">{m.label}</span>
+            <span className="text-[11px] font-medium text-neutral700">
+              {m.label}
+              {last && (
+                <span className="ml-1 rounded bg-brand200 px-1 py-0.5 text-[9px] font-bold text-brand800">
+                  방금 추가
+                </span>
+              )}
+            </span>
             <span className="text-[10px] text-neutral500">
               게시 {m.posts}건 · 반응률 {m.rate.toFixed(1)}%
             </span>
@@ -454,14 +546,14 @@ function ObligationPanel({ contractId }: { contractId: string }) {
       )}
 
       {obligation.status === "APPROVED" && (
-        <div className="mt-3 rounded-lg border-2 border-brand700 bg-brand50 px-4 py-3 text-center text-sm font-black text-brand700">
-          지급 조건 충족으로 표시됨
-        </div>
+        <p className="mt-3 text-[13px] font-bold text-brand700">
+          ✓ 지급 조건 충족으로 표시했어요
+        </p>
       )}
       {obligation.status === "DISPUTED" && (
-        <div className="mt-3 rounded-lg border border-neutral500 bg-neutral100 px-4 py-3 text-center text-sm font-bold text-neutral700">
-          이의 있음으로 기록됐어요
-        </div>
+        <p className="mt-3 text-[13px] font-bold text-neutral700">
+          ! 이의 있음으로 기록했어요
+        </p>
       )}
 
       {error && <p className="mt-2 text-xs font-bold text-red-700">{error}</p>}
@@ -503,19 +595,15 @@ function InquiryPanel() {
         </LayerBlock>
       </div>
 
-      <div className="mt-2.5 flex gap-2">
-        <button
-          onClick={copy}
-          className="h-10 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white hover:bg-ink/90"
-        >
-          {copied ? "복사됐어요" : "문안 복사하기"}
-        </button>
-        <button className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral700">
-          이상 있음으로 기록
-        </button>
-      </div>
-      <p className="mt-2 text-[11px] text-neutral500">
-        기록해두면 날짜와 함께 남아, 나중에 재계약을 검토할 때 근거로 볼 수 있어요.
+      <button
+        onClick={copy}
+        className="mt-2.5 h-11 w-full rounded-lg bg-ink text-[13px] font-bold text-white hover:bg-ink/90"
+      >
+        {copied ? "복사됐어요" : "문안 복사하기"}
+      </button>
+      <p className="mt-2 text-[11px] leading-relaxed text-neutral500">
+        복사해서 기존 이메일이나 메신저로 보내주세요. 이상이 있다면 아래 ⑤에서
+        &lsquo;이의 있어요&rsquo;로 기록해두면 재계약을 검토할 때 근거가 돼요.
       </p>
     </Card>
   );

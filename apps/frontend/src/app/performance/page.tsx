@@ -4,12 +4,16 @@ import Link from "next/link";
 import { AppScreen } from "@/components/AppScreen";
 import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
 import { StatTile } from "@/components/StatTile";
+import { useSavedReport } from "@/lib/reportDemo";
 
 /* 전체 계약 광고효과 모아보기 — 화면 목업(기능 미구현).
    계약마다 받은 리포트에서 확인한 숫자를 한데 모아, 지금까지 집행한 광고가
    계약에서 약속한 조건대로 진행되는지 보여준다.
    실제 집계는 백엔드(리포트 추출) 연동 후 붙는다.
-   데모 전용 데이터라 mock.ts(실 API 응답 모델)와 분리해 이 파일에 둔다. */
+   데모 전용 데이터라 mock.ts(실 API 응답 모델)와 분리해 이 파일에 둔다.
+
+   7월 리포트는 사장님이 계약별 관리 화면에서 확인·저장해야 여기에 더해진다.
+   목업 단계라 그 저장 여부를 reportDemo(sessionStorage)로 공유한다. */
 
 type ContractPerformance = {
   id: string;
@@ -23,17 +27,20 @@ type ContractPerformance = {
   reportedAt: string | null;
 };
 
+/** 파도담 카페 계약 — 7월 저장 전 기준(6월까지 확인된 값) */
+const CAFE_BEFORE_JULY: ContractPerformance = {
+  id: "cxn_gwanganli_cafe",
+  title: "광고·마케팅 계약 · 파도담 카페",
+  counterparty: "주식회사 브릿지웨이브",
+  channel: "인스타그램 · 네이버 블로그",
+  impressions: 27_600,
+  reactions: 1_098,
+  posts: 8,
+  reportedAt: "2026-06-30",
+};
+
 const CONTRACTS: ContractPerformance[] = [
-  {
-    id: "cxn_gwanganli_cafe",
-    title: "광고·마케팅 계약 · 파도담 카페",
-    counterparty: "주식회사 브릿지웨이브",
-    channel: "인스타그램 · 네이버 블로그",
-    impressions: 35_900,
-    reactions: 1_338,
-    posts: 10,
-    reportedAt: "2026-07-31",
-  },
+  CAFE_BEFORE_JULY,
   {
     id: "cxn_delivery",
     title: "배달앱 입점 계약",
@@ -56,11 +63,11 @@ const CONTRACTS: ContractPerformance[] = [
   },
 ];
 
-/** 전체 계약 합산 월별 노출 */
+/** 전체 계약 합산 월별 노출 — 7월은 파도담 카페 리포트를 저장하기 전 값 */
 const MONTHS = [
   { label: "5월", impressions: 16_200 },
   { label: "6월", impressions: 19_400 },
-  { label: "7월", impressions: 12_700 },
+  { label: "7월", impressions: 4_400 },
 ];
 
 const FINDINGS = [
@@ -78,12 +85,32 @@ const FINDINGS = [
   },
 ];
 
-const REPORTED = CONTRACTS.filter((c) => c.reportedAt !== null);
-const TOTAL_IMPRESSIONS = REPORTED.reduce((sum, c) => sum + c.impressions, 0);
-const TOTAL_REACTIONS = REPORTED.reduce((sum, c) => sum + c.reactions, 0);
-const AVG_RATE = (TOTAL_REACTIONS / TOTAL_IMPRESSIONS) * 100;
-
 export default function AllPerformancePage() {
+  const saved = useSavedReport();
+
+  /* 저장된 7월 리포트가 있으면 해당 계약 행과 합계·월별 추이에 더한다 */
+  const contracts = CONTRACTS.map((c) =>
+    saved && c.id === saved.contractId
+      ? {
+          ...c,
+          impressions: c.impressions + saved.impressions,
+          reactions: c.reactions + saved.reactions,
+          posts: c.posts + saved.posts,
+          reportedAt: saved.savedAt,
+        }
+      : c,
+  );
+  const months = MONTHS.map((m, i) =>
+    saved && i === MONTHS.length - 1
+      ? { ...m, impressions: m.impressions + saved.impressions }
+      : m,
+  );
+
+  const reported = contracts.filter((c) => c.reportedAt !== null);
+  const totalImpressions = reported.reduce((sum, c) => sum + c.impressions, 0);
+  const totalReactions = reported.reduce((sum, c) => sum + c.reactions, 0);
+  const avgRate = (totalReactions / totalImpressions) * 100;
+
   return (
     <AppScreen
       title="광고효과 모아보기"
@@ -101,22 +128,35 @@ export default function AllPerformancePage() {
           계약에서 약속한 조건대로 진행되고 있는지 한눈에 볼 수 있어요.
         </p>
 
+        {saved && (
+          <div className="rounded-xl border border-brand400 bg-brand50 px-4 py-3">
+            <div className="text-[13px] font-bold text-brand800">
+              ✓ {saved.period} 리포트가 반영됐어요
+            </div>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-neutral700">
+              노출 {saved.impressions.toLocaleString()} · 반응{" "}
+              {saved.reactions.toLocaleString()} · 게시물 {saved.posts}건이 아래
+              합계에 더해졌어요.
+            </p>
+          </div>
+        )}
+
         {/* 누적 지표 */}
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
           <StatTile
             size="lg"
-            value={TOTAL_IMPRESSIONS.toLocaleString()}
+            value={totalImpressions.toLocaleString()}
             label="총 노출"
           />
           <StatTile
             size="lg"
-            value={TOTAL_REACTIONS.toLocaleString()}
+            value={totalReactions.toLocaleString()}
             label="총 반응"
           />
-          <StatTile size="lg" value={`${AVG_RATE.toFixed(1)}%`} label="평균 반응률" />
+          <StatTile size="lg" value={`${avgRate.toFixed(1)}%`} label="평균 반응률" />
           <StatTile
             size="lg"
-            value={`${REPORTED.length}/${CONTRACTS.length}건`}
+            value={`${reported.length}/${contracts.length}건`}
             label="리포트 받은 계약"
           />
         </div>
@@ -124,41 +164,48 @@ export default function AllPerformancePage() {
         <section className="flex flex-col gap-2">
           <SectionTitle>월별 노출 추이 — 전체 계약 합계</SectionTitle>
           <Card>
-            <MonthlyChart />
+            <MonthlyChart months={months} />
           </Card>
         </section>
 
         <section className="flex flex-col gap-2">
           <SectionTitle>계약별 성과</SectionTitle>
           <div className="flex flex-col gap-2">
-            {CONTRACTS.map((contract) => (
-              <ContractRow key={contract.id} contract={contract} />
+            {contracts.map((contract) => (
+              <ContractRow
+                key={contract.id}
+                contract={contract}
+                justUpdated={contract.id === saved?.contractId}
+              />
             ))}
           </div>
         </section>
 
-        <section className="flex flex-col gap-2">
-          <SectionTitle>짚어볼 점</SectionTitle>
-          <div className="flex flex-col gap-2">
-            {FINDINGS.map((f) => (
-              <Link
-                key={f.title}
-                href={`/contracts/${f.contractId}/performance`}
-                className="rounded-lg border border-brand400 bg-brand50 px-3.5 py-2.5 transition hover:bg-brand100"
-              >
-                <div className="text-[10px] font-bold text-neutral500">
-                  {f.contractTitle}
-                </div>
-                <div className="mt-0.5 text-[13px] font-bold text-brand800">
-                  ! {f.title}
-                </div>
-                <p className="mt-1 text-[12px] leading-relaxed text-neutral700">
-                  {f.body}
-                </p>
-              </Link>
-            ))}
-          </div>
-        </section>
+        {/* 7월 리포트를 확인·저장해야 드러나는 문제들 */}
+        {saved && (
+          <section className="flex flex-col gap-2">
+            <SectionTitle>짚어볼 점</SectionTitle>
+            <div className="flex flex-col gap-2">
+              {FINDINGS.map((f) => (
+                <Link
+                  key={f.title}
+                  href={`/contracts/${f.contractId}/performance`}
+                  className="rounded-lg border border-brand400 bg-brand50 px-3.5 py-2.5 transition hover:bg-brand100"
+                >
+                  <div className="text-[10px] font-bold text-neutral500">
+                    {f.contractTitle}
+                  </div>
+                  <div className="mt-0.5 text-[13px] font-bold text-brand800">
+                    ! {f.title}
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed text-neutral700">
+                    {f.body}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
 
         <Disclaimer>
           지금은 화면 구성을 보여주는 목업이에요. 리포트에서 숫자를 읽어오는 기능은
@@ -170,7 +217,13 @@ export default function AllPerformancePage() {
 }
 
 /** 계약 한 건의 성과 요약 — 리포트를 못 받은 계약은 이동하지 않는다 */
-function ContractRow({ contract }: { contract: ContractPerformance }) {
+function ContractRow({
+  contract,
+  justUpdated,
+}: {
+  contract: ContractPerformance;
+  justUpdated: boolean;
+}) {
   if (contract.reportedAt === null) {
     return (
       <div className="rounded-xl border border-dashed border-neutral300 px-4 py-3.5">
@@ -190,8 +243,15 @@ function ContractRow({ contract }: { contract: ContractPerformance }) {
       className="flex flex-col gap-3 rounded-xl border border-neutral200 bg-white px-4 py-3.5 transition hover:border-brand400 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
     >
       <div className="min-w-0">
-        <div className="truncate text-[13px] font-bold text-ink">
-          {contract.title}
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-[13px] font-bold text-ink">
+            {contract.title}
+          </span>
+          {justUpdated && (
+            <span className="flex-none rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
+              방금 반영됨
+            </span>
+          )}
         </div>
         <div className="mt-0.5 text-[11px] text-neutral500">
           {contract.counterparty} · {contract.channel} · {contract.reportedAt} 기준
@@ -223,12 +283,12 @@ function ContractRow({ contract }: { contract: ContractPerformance }) {
 }
 
 /** 월별 노출 막대 — 라이브러리 없이 비율 막대로 표시 */
-function MonthlyChart() {
-  const max = Math.max(...MONTHS.map((m) => m.impressions));
+function MonthlyChart({ months }: { months: typeof MONTHS }) {
+  const max = Math.max(...months.map((m) => m.impressions));
   return (
     <div className="flex items-end gap-4">
-      {MONTHS.map((m, i) => {
-        const last = i === MONTHS.length - 1;
+      {months.map((m, i) => {
+        const last = i === months.length - 1;
         return (
           <div key={m.label} className="flex flex-1 flex-col items-center gap-1.5">
             <span className="text-[11px] font-bold text-ink">

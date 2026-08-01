@@ -66,6 +66,27 @@ class PerformanceReportPeriodAlreadyExists(ApiException):
         )
 
 
+class PerformanceReportExtractionInProgress(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=409,
+            code=ErrorCode.REPORT_EXTRACTION_IN_PROGRESS,
+            message="광고효과 리포트를 추출하고 있습니다. 완료 후 다시 확인해 주세요.",
+        )
+
+
+class PerformanceReportExtractFailed(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=502,
+            code=ErrorCode.REPORT_EXTRACT_FAILED,
+            message=(
+                "광고효과 리포트에서 지표를 추출하지 못했습니다. "
+                "새 요청으로 다시 시도해 주세요."
+            ),
+        )
+
+
 class AnalysisStartUnavailable(ApiException):
     def __init__(self) -> None:
         super().__init__(

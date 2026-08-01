@@ -97,6 +97,12 @@ DB 커밋 뒤 RPC 응답이 유실돼도 같은 키 재시도는 최초 token ID
 `AuditEventType` DB CHECK에 병합한다. 업로드·추출·확정 원자 RPC와 revision·flag는
 16.2~16.4 후속 migration에서 추가한다.
 
+`20260801020000_add_performance_report_extraction_workflow.sql`은 17.2 추출 attempt
+기반으로 `UPLOADED` 리포트와 원본 Document를 원자적으로 claim·완료·실패
+처리한다. 15분 미만의 활성 작업은 중복 실행하지 않고, 15분 이상 지난
+작업만 새 멱등 키로 재점유한다. 현재 attempt의 결과만 `EXTRACTED`와
+Document 기술 상태에 반영하며, 이전 작업의 늦은 응답은 저장하지 않는다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

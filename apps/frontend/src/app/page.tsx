@@ -46,7 +46,7 @@ export default function LandingPage() {
             ) : (
               <>
                 <Link href="/login" className="rounded-lg px-3 py-2 text-sm font-medium text-neutral500 hover:text-ink">로그인</Link>
-                <Link href="/login" className="flex h-10 items-center rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-ink/90">
+                <Link href="/signup" className="flex h-10 items-center rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-ink/90">
                   시작하기
                 </Link>
               </>
@@ -72,7 +72,7 @@ export default function LandingPage() {
                 </Link>
               ) : (
                 <>
-                  <Link href="/login" className="flex h-14 items-center justify-center rounded-xl bg-ink px-7 text-[17px] font-bold text-white hover:bg-ink/90">
+                  <Link href="/signup" className="flex h-14 items-center justify-center rounded-xl bg-ink px-7 text-[17px] font-bold text-white hover:bg-ink/90">
                     시작하기
                   </Link>
                   {isUsingMock && (
@@ -250,7 +250,7 @@ export default function LandingPage() {
               계약서 한 장이면 시작할 수 있습니다.
             </h2>
             <p className="mx-auto mt-3.5 max-w-lg text-[17px] text-neutral500">
-              가입된 이메일로 받은 일회용 링크를 열면 비밀번호 없이 시작할 수 있습니다.
+              이메일과 비밀번호로 가입하면 계약서를 안전하게 관리할 수 있습니다.
             </p>
             <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
               {session ? (
@@ -259,7 +259,7 @@ export default function LandingPage() {
                 </Link>
               ) : (
                 <>
-                  <Link href="/login" className="flex h-14 items-center justify-center rounded-xl bg-ink px-7 text-[17px] font-bold text-white hover:bg-ink/90">
+                  <Link href="/signup" className="flex h-14 items-center justify-center rounded-xl bg-ink px-7 text-[17px] font-bold text-white hover:bg-ink/90">
                     시작하기
                   </Link>
                   {isUsingMock && (

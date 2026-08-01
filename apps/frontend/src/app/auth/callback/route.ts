@@ -26,5 +26,11 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL("/login?error=callback", url.origin));
+  const flow = url.searchParams.get("flow");
+  const errorPath = flow === "signup"
+    ? "/signup?error=callback"
+    : flow === "recovery"
+      ? "/forgot-password?error=callback"
+      : "/login?error=callback";
+  return NextResponse.redirect(new URL(errorPath, url.origin));
 }

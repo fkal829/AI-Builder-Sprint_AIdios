@@ -19,18 +19,43 @@ test("owner requests resolve a current Supabase session token", async () => {
   assert.match(apiAdapter, /Authorization: `Bearer \$\{accessToken\}`/);
 });
 
-test("email login uses an explicit PKCE callback and does not create users", async () => {
-  const [login, callback] = await Promise.all([
+test("owners sign up and log in with Supabase email and password", async () => {
+  const [signup, login, callback, passwordPolicy] = await Promise.all([
+    source("src/app/signup/page.tsx"),
     source("src/app/login/page.tsx"),
+    source("src/app/auth/callback/route.ts"),
+    source("src/lib/authPassword.ts"),
+  ]);
+
+  assert.match(signup, /auth\.signUp/);
+  assert.match(signup, /email: email\.trim\(\)/);
+  assert.match(signup, /password,/);
+  assert.match(signup, /emailRedirectTo: callbackUrl\.toString\(\)/);
+  assert.match(signup, /callbackUrl\.searchParams\.set\("flow", "signup"\)/);
+  assert.match(login, /auth\.signInWithPassword/);
+  assert.match(login, /email: email\.trim\(\)/);
+  assert.match(login, /password,/);
+  assert.doesNotMatch(`${signup}\n${login}`, /signInWithOtp|shouldCreateUser|localStorage/);
+  assert.match(passwordPolicy, /PASSWORD_MIN_LENGTH = 8/);
+  assert.match(callback, /exchangeCodeForSession\(code\)/);
+  assert.match(callback, /value\.startsWith\("\/\/"\)/);
+  assert.match(callback, /"\/signup\?error=callback"/);
+  assert.doesNotMatch(callback, /console\./);
+});
+
+test("password recovery sends a scoped email link and updates only an authenticated user", async () => {
+  const [forgot, reset, callback] = await Promise.all([
+    source("src/app/forgot-password/page.tsx"),
+    source("src/app/reset-password/page.tsx"),
     source("src/app/auth/callback/route.ts"),
   ]);
 
-  assert.match(login, /auth\.signInWithOtp/);
-  assert.match(login, /emailRedirectTo: callbackUrl\.toString\(\)/);
-  assert.match(login, /shouldCreateUser: false/);
-  assert.match(callback, /exchangeCodeForSession\(code\)/);
-  assert.match(callback, /value\.startsWith\("\/\/"\)/);
-  assert.doesNotMatch(callback, /console\./);
+  assert.match(forgot, /auth\.resetPasswordForEmail/);
+  assert.match(forgot, /callbackUrl\.searchParams\.set\("flow", "recovery"\)/);
+  assert.match(forgot, /redirectTo: callbackUrl\.toString\(\)/);
+  assert.match(reset, /auth\.getSession\(\)/);
+  assert.match(reset, /auth\.updateUser\(\{ password \}\)/);
+  assert.match(callback, /"\/forgot-password\?error=callback"/);
 });
 
 test("logout only runs from the explicit header control", async () => {
@@ -52,18 +77,27 @@ test("dashboard authentication failures offer a login recovery path", async () =
   assert.match(dashboard, /로그인 다시 하기/);
 });
 
-test("owner route guard follows Supabase sessions and public signup stays closed", async () => {
-  const [guard, signup, demoAuth] = await Promise.all([
+test("owner route guard follows Supabase sessions without restoring mock password auth", async () => {
+  const [guard, demoAuth] = await Promise.all([
     source("src/components/RequireAuth.tsx"),
-    source("src/app/signup/page.tsx"),
     source("src/lib/auth.ts"),
   ]);
 
   assert.match(guard, /supabase\.auth\.getSession\(\)/);
   assert.match(guard, /supabase\.auth\.onAuthStateChange/);
   assert.match(guard, /isUsingMock \|\| isUsingDemoOwnerToken/);
-  assert.match(signup, /redirect\("\/login"\)/);
   assert.doesNotMatch(demoAuth, /password|dandi:users|signUp|signIn\(/i);
+});
+
+test("login and public landing expose the real signup path", async () => {
+  const [login, landing] = await Promise.all([
+    source("src/app/login/page.tsx"),
+    source("src/app/page.tsx"),
+  ]);
+
+  assert.match(login, /`\/signup\?next=\$\{encodeURIComponent\(nextPath\)\}`/);
+  assert.match(login, /href=\{signupHref\}/);
+  assert.match(landing, /href="\/signup"/);
 });
 
 test("frontend configuration never accepts a service-role secret", async () => {

@@ -28,8 +28,11 @@
 
 - 상태: 확정
 - 결정: 소유자 API는 Supabase Auth가 발급한 access token의 Bearer 인증이 필요하다.
-  프런트 로그인은 가입된 이메일의 OTP 매직 링크와 PKCE 콜백을 사용하며 신규 사용자를
-  자동 생성하지 않는다. 백엔드가 토큰과 객체 소유권을 최종 검증한다.
+  소상공인은 이메일과 비밀번호로 회원가입·로그인한다. 이메일 링크는 최초 이메일 확인과
+  비밀번호 재설정에만 사용하고 PKCE 콜백에서 세션으로 교환한다. 비밀번호는 Supabase Auth만
+  처리하며 단디계약 DB·브라우저 저장소·로그에 저장하지 않는다. 백엔드가 access token과
+  객체 소유권을 최종 검증한다. 대행사는 계정을 만들지 않고 scope·만료가 제한된 공개 링크로
+  조정 응답과 증빙 제출 화면에 접근한다.
 - 브라우저에는 Supabase publishable(legacy anon) 키만 공개한다. service-role/secret 키와
   운영용 정적 Bearer 토큰은 넣지 않는다. 고정 데모 토큰은 로컬 mock API 검증에만 쓴다.
 - 조정 응답 토큰과 산출물 증빙 토큰은 각각 `ADJUSTMENT_RESPONSE`,

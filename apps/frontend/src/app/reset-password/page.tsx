@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { AuthShell, Field } from "@/components/AuthShell";
 import { isUsingDemoOwnerToken, isUsingMock } from "@/lib/adapter";
 import { getPasswordValidationError, PASSWORD_MIN_LENGTH } from "@/lib/authPassword";
@@ -16,30 +16,37 @@ function safeNextPath(value: string | null): string {
   return value;
 }
 
-function SignupForm() {
+function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = safeNextPath(searchParams.get("next"));
-  const loginHref = searchParams.has("next")
-    ? `/login?next=${encodeURIComponent(nextPath)}`
-    : "/login";
-  const [email, setEmail] = useState("");
+  const configured = isSupabaseAuthConfigured();
+  const shouldCheckSession = !isUsingMock && !isUsingDemoOwnerToken && configured;
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [checkingSession, setCheckingSession] = useState(shouldCheckSession);
+  const [hasSession, setHasSession] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmationSent, setConfirmationSent] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(
-    searchParams.get("error")
-      ? "이메일 확인 링크를 처리하지 못했습니다. 다시 가입해 주세요."
-      : null,
-  );
-  const configured = isSupabaseAuthConfigured();
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!shouldCheckSession) return;
+
+    let alive = true;
+    void getSupabaseBrowserClient().auth.getSession().then(({ data }) => {
+      if (!alive) return;
+      setHasSession(Boolean(data.session));
+      setCheckingSession(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [shouldCheckSession]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!email.trim() || !configured) return;
 
     const nextPasswordError = getPasswordValidationError(password);
     const nextConfirmError = password === confirmPassword
@@ -48,72 +55,49 @@ function SignupForm() {
     setPasswordError(nextPasswordError);
     setConfirmError(nextConfirmError);
     setFormError(null);
-    if (nextPasswordError || nextConfirmError) return;
+    if (nextPasswordError || nextConfirmError || !hasSession) return;
 
     setSubmitting(true);
-    const callbackUrl = new URL("/auth/callback", window.location.origin);
-    callbackUrl.searchParams.set("flow", "signup");
-    callbackUrl.searchParams.set("next", nextPath);
-    const { data, error: authError } = await getSupabaseBrowserClient().auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: callbackUrl.toString(),
-      },
-    });
+    const { error: authError } = await getSupabaseBrowserClient().auth.updateUser({ password });
     setSubmitting(false);
-
     if (authError) {
-      setFormError("회원가입하지 못했습니다. 입력 내용을 확인하고 다시 시도해 주세요.");
+      setFormError("비밀번호를 변경하지 못했습니다. 재설정 링크를 다시 요청해 주세요.");
       return;
     }
-    if (data.session) {
-      router.replace(nextPath);
-      router.refresh();
-      return;
-    }
-    setConfirmationSent(true);
+    router.replace(nextPath);
+    router.refresh();
   }
 
   return (
     <AuthShell>
-      <h1 className="text-[28px] font-black tracking-tight text-ink">단디계약 시작하기</h1>
+      <h1 className="text-[28px] font-black tracking-tight text-ink">새 비밀번호 설정</h1>
       <p className="mt-2.5 text-[15px] leading-relaxed text-neutral500">
-        사장님이 사용할 이메일과 비밀번호로 계정을 만듭니다.
+        앞으로 로그인할 때 사용할 새 비밀번호를 입력해 주세요.
       </p>
 
       {isUsingMock || isUsingDemoOwnerToken ? (
         <div className="mt-8 rounded-xl bg-brand50 p-4 text-sm leading-relaxed text-brand900">
-          현재는 {isUsingMock ? "목업 모드" : "로컬 API 인증 모드"}입니다. 회원가입 없이
-          데모 화면을 확인할 수 있어요.
+          데모 모드에서는 비밀번호 재설정이 필요하지 않습니다.
           <Link href={nextPath} className="ml-1 font-bold underline">계속하기</Link>
         </div>
       ) : !configured ? (
         <div className="mt-8 rounded-xl bg-neutral100 p-4 text-sm leading-relaxed text-neutral700">
           운영 인증 설정이 없습니다. 배포 환경의 Supabase 공개 설정을 확인해 주세요.
         </div>
-      ) : confirmationSent ? (
-        <div
-          className="mt-8 rounded-xl bg-brand50 p-4 text-sm leading-relaxed text-brand900"
-          aria-live="polite"
-        >
-          확인 메일을 보냈습니다. 이메일 주소를 확인하면 가입이 완료됩니다.
+      ) : checkingSession ? (
+        <p className="mt-8 text-sm text-neutral500">재설정 링크를 확인하는 중…</p>
+      ) : !hasSession ? (
+        <div className="mt-8 rounded-xl bg-neutral100 p-4 text-sm leading-relaxed text-neutral700">
+          재설정 링크가 만료됐거나 올바르지 않습니다.
+          <Link href="/forgot-password" className="ml-1 font-bold text-brand700 underline">
+            새 링크 받기
+          </Link>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="mt-8 grid gap-5">
           <Field
-            id="email"
-            label="이메일"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            placeholder="사용할 이메일을 입력하세요"
-            autoComplete="email"
-            required
-          />
-          <Field
             id="password"
-            label="비밀번호"
+            label="새 비밀번호"
             type="password"
             value={password}
             onChange={setPassword}
@@ -126,7 +110,7 @@ function SignupForm() {
           />
           <Field
             id="confirm-password"
-            label="비밀번호 다시 입력"
+            label="새 비밀번호 다시 입력"
             type="password"
             value={confirmPassword}
             onChange={setConfirmPassword}
@@ -146,28 +130,18 @@ function SignupForm() {
             disabled={submitting}
             className="flex h-14 w-full items-center justify-center rounded-xl bg-brand800 text-[17px] font-bold text-white transition hover:bg-brand900 disabled:opacity-50"
           >
-            {submitting ? "가입하는 중" : "회원가입"}
+            {submitting ? "변경하는 중" : "비밀번호 변경"}
           </button>
         </form>
       )}
-
-      <p className="mt-7 text-center text-[15px] text-neutral500">
-        이미 계정이 있으신가요?{" "}
-        <Link href={loginHref} className="font-bold text-brand700 hover:underline">
-          로그인
-        </Link>
-      </p>
-      <p className="mt-4 text-center text-[13px] leading-relaxed text-neutral500">
-        회원가입은 계약 업로드나 요청 발송을 자동으로 실행하지 않습니다.
-      </p>
     </AuthShell>
   );
 }
 
-export default function SignupPage() {
+export default function ResetPasswordPage() {
   return (
     <Suspense fallback={null}>
-      <SignupForm />
+      <ResetPasswordForm />
     </Suspense>
   );
 }

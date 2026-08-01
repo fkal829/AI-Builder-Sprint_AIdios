@@ -25,8 +25,8 @@ export function AuthShell({ children }: { children: ReactNode }) {
           </p>
           <ul className="mt-10 grid gap-3.5">
             {[
-              "가입된 이메일로 일회용 로그인 링크를 보내드립니다.",
-              "비밀번호나 운영 비밀키를 브라우저에 저장하지 않습니다.",
+              "사장님 이메일과 비밀번호로 계정을 보호합니다.",
+              "비밀번호나 운영 비밀키를 단디계약 DB에 저장하지 않습니다.",
               "계약서를 올리기 전까지는 아무것도 저장되지 않습니다.",
             ].map((t, i) => (
               <li key={i} className="relative pl-6 text-sm leading-relaxed text-white/80">
@@ -71,6 +71,8 @@ export function Field({
   onChange,
   placeholder,
   autoComplete,
+  required = false,
+  minLength,
   help,
   error,
   right,
@@ -82,6 +84,8 @@ export function Field({
   onChange: (v: string) => void;
   placeholder?: string;
   autoComplete?: string;
+  required?: boolean;
+  minLength?: number;
   help?: string;
   error?: string;
   right?: ReactNode;
@@ -100,6 +104,8 @@ export function Field({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        required={required}
+        minLength={minLength}
         aria-invalid={invalid}
         aria-describedby={invalid ? `${id}-err` : help ? `${id}-help` : undefined}
         className={`w-full rounded-xl border px-4 text-base text-ink transition placeholder:text-neutral400 focus:outline-none ${

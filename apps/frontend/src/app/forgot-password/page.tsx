@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
 import { AuthShell, Field } from "@/components/AuthShell";
 import { isUsingDemoOwnerToken, isUsingMock } from "@/lib/adapter";
@@ -15,60 +15,69 @@ function safeNextPath(value: string | null): string {
   return value;
 }
 
-function LoginForm() {
-  const router = useRouter();
+function ForgotPasswordForm() {
   const searchParams = useSearchParams();
   const nextPath = safeNextPath(searchParams.get("next"));
-  const signupHref = searchParams.has("next")
-    ? `/signup?next=${encodeURIComponent(nextPath)}`
-    : "/signup";
-  const forgotPasswordHref = searchParams.has("next")
-    ? `/forgot-password?next=${encodeURIComponent(nextPath)}`
-    : "/forgot-password";
+  const loginHref = searchParams.has("next")
+    ? `/login?next=${encodeURIComponent(nextPath)}`
+    : "/login";
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(
-    searchParams.get("error") ? "인증을 처리하지 못했습니다. 다시 로그인해 주세요." : null,
+    searchParams.get("error")
+      ? "비밀번호 재설정 링크를 처리하지 못했습니다. 새 링크를 요청해 주세요."
+      : null,
   );
   const configured = isSupabaseAuthConfigured();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!email.trim() || !password || !configured) return;
+    if (!email.trim() || !configured) return;
 
     setSubmitting(true);
     setError(null);
-    const { error: authError } = await getSupabaseBrowserClient().auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    const resetUrl = new URL("/reset-password", window.location.origin);
+    resetUrl.searchParams.set("next", nextPath);
+    const callbackUrl = new URL("/auth/callback", window.location.origin);
+    callbackUrl.searchParams.set("flow", "recovery");
+    callbackUrl.searchParams.set("next", `${resetUrl.pathname}${resetUrl.search}`);
+    const { error: authError } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(
+      email.trim(),
+      { redirectTo: callbackUrl.toString() },
+    );
     setSubmitting(false);
 
     if (authError) {
-      setError("이메일 또는 비밀번호를 확인해 주세요.");
+      setError("재설정 링크를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
       return;
     }
-    router.replace(nextPath);
-    router.refresh();
+    setSent(true);
   }
 
   return (
     <AuthShell>
-      <h1 className="text-[28px] font-black tracking-tight text-ink">사장님 로그인</h1>
+      <h1 className="text-[28px] font-black tracking-tight text-ink">비밀번호 찾기</h1>
       <p className="mt-2.5 text-[15px] leading-relaxed text-neutral500">
-        가입할 때 등록한 이메일과 비밀번호를 입력해 주세요.
+        가입한 이메일로 비밀번호 재설정 링크를 보내드립니다.
       </p>
 
       {isUsingMock || isUsingDemoOwnerToken ? (
         <div className="mt-8 rounded-xl bg-brand50 p-4 text-sm leading-relaxed text-brand900">
-          현재는 {isUsingMock ? "목업 모드" : "로컬 API 인증 모드"}입니다. 로그인 없이
-          데모 화면을 확인할 수 있어요.
+          데모 모드에서는 비밀번호 재설정이 필요하지 않습니다.
           <Link href={nextPath} className="ml-1 font-bold underline">계속하기</Link>
         </div>
       ) : !configured ? (
         <div className="mt-8 rounded-xl bg-neutral100 p-4 text-sm leading-relaxed text-neutral700">
           운영 인증 설정이 없습니다. 배포 환경의 Supabase 공개 설정을 확인해 주세요.
+        </div>
+      ) : sent ? (
+        <div
+          className="mt-8 rounded-xl bg-brand50 p-4 text-sm leading-relaxed text-brand900"
+          aria-live="polite"
+        >
+          가입 여부와 관계없이 입력하신 주소로 전송을 요청했습니다. 메일이 오면 링크를 열어
+          새 비밀번호를 설정해 주세요.
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="mt-8 grid gap-5">
@@ -81,49 +90,32 @@ function LoginForm() {
             placeholder="가입한 이메일을 입력하세요"
             autoComplete="email"
             required
-          />
-          <Field
-            id="password"
-            label="비밀번호"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            placeholder="비밀번호를 입력하세요"
-            autoComplete="current-password"
-            required
             error={error ?? undefined}
-            right={(
-              <Link href={forgotPasswordHref} className="text-sm font-medium text-brand700 hover:underline">
-                비밀번호를 잊으셨나요?
-              </Link>
-            )}
           />
           <button
             type="submit"
             disabled={submitting}
             className="flex h-14 w-full items-center justify-center rounded-xl bg-brand800 text-[17px] font-bold text-white transition hover:bg-brand900 disabled:opacity-50"
           >
-            {submitting ? "로그인하는 중" : "로그인"}
+            {submitting ? "보내는 중" : "재설정 링크 받기"}
           </button>
         </form>
       )}
+
       <p className="mt-7 text-center text-[15px] text-neutral500">
-        아직 계정이 없으신가요?{" "}
-        <Link href={signupHref} className="font-bold text-brand700 hover:underline">
-          회원가입
+        비밀번호가 기억나셨나요?{" "}
+        <Link href={loginHref} className="font-bold text-brand700 hover:underline">
+          로그인
         </Link>
-      </p>
-      <p className="mt-7 text-center text-[13px] leading-relaxed text-neutral500">
-        로그인은 계약이나 요청을 자동으로 실행하지 않습니다.
       </p>
     </AuthShell>
   );
 }
 
-export default function LoginPage() {
+export default function ForgotPasswordPage() {
   return (
     <Suspense fallback={null}>
-      <LoginForm />
+      <ForgotPasswordForm />
     </Suspense>
   );
 }

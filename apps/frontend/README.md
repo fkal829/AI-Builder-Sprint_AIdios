@@ -16,7 +16,7 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 ```
 
 진입점: `/` (서비스 소개). 발표·개발용 데모 런처는 `/demo`, 실제 소상공인 진입점은
-Supabase 이메일 OTP 로그인 `/login`과 대시보드 `/dashboard`입니다.
+Supabase 이메일·비밀번호 회원가입 `/signup`, 로그인 `/login`과 대시보드 `/dashboard`입니다.
 
 ## 설계 원칙 (기능보다 우선)
 
@@ -60,7 +60,9 @@ Supabase 이메일 OTP 로그인 `/login`과 대시보드 `/dashboard`입니다.
 
 ### 기타
 - `/` 서비스 소개 · `/demo` 데모 런처 · `/states` 실패·빈 상태 갤러리
-- `/signup`은 공개 가입을 만들지 않고 `/login`으로 이동합니다.
+- `/signup`은 이메일·비밀번호 계정을 만들고, `/login`은 같은 자격 증명으로 로그인합니다.
+- `/forgot-password`는 재설정 링크를 보내고 `/reset-password`에서 새 비밀번호를 저장합니다.
+  가입 확인과 재설정 링크는 `/auth/callback`에서 PKCE 세션을 생성합니다.
 
 ## 구조
 
@@ -104,10 +106,14 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
-운영 소유자는 `/login`에서 가입된 이메일로 일회용 링크를 요청합니다. `/auth/callback`이
-PKCE 코드를 세션으로 교환하고, `ApiAdapter`는 매 요청마다 현재 access token을 읽어
-FastAPI Bearer 헤더로 전달합니다. Supabase Auth의 URL Configuration에는 배포 origin의
-`/auth/callback`을 Redirect URL로 등록해야 합니다.
+운영 소유자는 `/signup`에서 이메일·비밀번호 계정을 만들고 `/login`에서 로그인합니다.
+Supabase의 이메일 확인이 켜져 있으면 최초 가입 때만 확인 링크를 열어야 합니다. 비밀번호를
+잊으면 `/forgot-password`에서 받은 링크를 열고 `/reset-password`에서 변경합니다.
+`/auth/callback`은 가입 확인·재설정용 PKCE 코드를 세션으로 교환하고, `ApiAdapter`는 매 요청마다
+현재 access token을 읽어 FastAPI Bearer 헤더로 전달합니다. Supabase Auth의 URL Configuration에는
+배포 origin의 `/auth/callback`을 Redirect URL로 등록해야 합니다.
+운영 프로젝트에서는 Supabase Auth의 이메일 provider와 신규 사용자 가입 허용을 켜고,
+운영 SMTP의 발신자·전송 제한도 별도로 설정해야 실제 인증 메일이 전달됩니다.
 
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`에는 공개 publishable 키(legacy 프로젝트는 anon 키)만
 넣습니다. service-role/secret 키와 운영용 정적 토큰은 브라우저에 넣지 않습니다.
@@ -118,6 +124,7 @@ FastAPI Bearer 헤더로 전달합니다. Supabase Auth의 URL Configuration에�
 
 - mock 모드와 `/`, `/states` 데모 화면의 데이터는 모두 가상입니다.
 - 광고효과 화면은 API가 제공하지 않는 게시물별 상세나 성과 기여도를 임의로 표시하지 않습니다.
-- 운영 소유자 인증은 Supabase Auth 이메일 OTP(매직 링크) 세션을 사용합니다.
+- 운영 소유자 회원가입·로그인은 Supabase Auth 이메일·비밀번호 세션을 사용합니다.
+- 비밀번호는 Supabase Auth만 처리하며 단디계약 DB·브라우저 저장소·로그에 저장하지 않습니다.
 - 디자인 토큰(amber/paper/ink/gray, 경고색 없음)은 `app/globals.css`의 `@theme`.
 - Gaegu 폰트는 판단 메모/개발 주석 전용 — 서비스 실제 화면에는 쓰지 않습니다.

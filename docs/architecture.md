@@ -4,9 +4,10 @@
 
 ```text
 사용자 브라우저
+    ├─ 이메일·비밀번호 인증 → Supabase Auth
     ↓
 apps/frontend (Next.js)
-    ↓ HTTP / JSON
+    ↓ Bearer HTTP / JSON
 apps/api (FastAPI)
     ├─ Upstage Adapter
     ├─ Solar Review Service
@@ -14,7 +15,10 @@ apps/api (FastAPI)
     └─ Supabase Repository / Storage
 ```
 
-웹은 화면 상태와 사용자 확인을 담당하고, 계약 상태 전환·계산·외부 API 호출은 API가 담당합니다.
+웹은 화면 상태와 사용자 확인을 담당하고, Supabase Auth의 공개 클라이언트로 소상공인
+이메일·비밀번호 회원가입·로그인, 최초 이메일 확인, 비밀번호 재설정과 PKCE 세션 교환만
+수행합니다. 대행사 공개 화면은 계정 대신 scope·만료가 제한된 URL 토큰을 FastAPI에
+전달합니다. 계약 상태 전환·계산·그 밖의 외부 API 호출은 API가 담당합니다.
 
 ## 웹
 

@@ -12,7 +12,7 @@
    로그인 없이 화면을 렌더한다. 실제 백엔드 연결(NEXT_PUBLIC_USE_MOCK=false)
    시 자동으로 꺼지므로 실데이터가 노출되지 않는다.
    =========================================================================== */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useSession } from "@/lib/useSession";
@@ -27,7 +27,12 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading } = useSession();
   const router = useRouter();
   const pathname = usePathname() ?? "/dashboard";
-  const preview = isPreviewBypass();
+  // 서버 렌더에서는 항상 false로 시작(hydration 불일치 방지), 마운트 후 URL을 읽는다
+  const [preview, setPreview] = useState(false);
+
+  useEffect(() => {
+    setPreview(isPreviewBypass());
+  }, []);
 
   useEffect(() => {
     if (!preview && !loading && !session) {

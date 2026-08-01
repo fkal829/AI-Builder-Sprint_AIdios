@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "./Logo";
+import { AuthControl } from "./AuthControl";
 import { DEMO_CONTRACT_ID } from "@/lib/mock";
 
 const NAV = [
@@ -56,6 +57,7 @@ export function SiteHeader() {
               </Link>
             );
           })}
+          <AuthControl />
         </nav>
       </div>
     </header>

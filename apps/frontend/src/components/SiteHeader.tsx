@@ -13,13 +13,14 @@ const NAV = [
     label: "이행 관리",
     href: `/contracts/${DEMO_CONTRACT_ID}/performance`,
   },
+  // 광고효과는 계약 하나에 묶이지 않으므로 전역 경로를 쓴다.
+  // 성격이 이어지는 '이행 관리' 바로 옆에 둔다.
+  { key: "performance", label: "광고효과", href: "/performance" },
   {
     key: "renewal",
     label: "재계약 검토",
     href: `/contracts/${DEMO_CONTRACT_ID}/renewal`,
   },
-  // 광고효과는 계약 하나에 묶이지 않으므로 전역 경로를 쓴다
-  { key: "performance", label: "광고효과", href: "/performance" },
 ];
 
 function activeKey(pathname: string): string {

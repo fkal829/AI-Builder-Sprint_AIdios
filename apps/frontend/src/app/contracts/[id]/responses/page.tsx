@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { EmptyState } from "@/components/EmptyState";
+import { SavedPublicLink } from "@/components/PublicLinkCard";
 import { useAsync } from "@/lib/hooks";
 import {
   adapter,
@@ -121,6 +122,15 @@ function MockResponsesPage({ id }: { id: string }) {
           )}
         </>
       )}
+
+      {/* 응답이 없거나 다시 보내야 할 때를 위해 전달 링크를 여기서도 확인할 수 있게 둔다 */}
+      <div className="mt-4">
+        <SavedPublicLink
+          contractId={id}
+          title="대행사 전달 링크 다시 보기"
+          note="답변이 없다면 이 링크를 다시 보내보세요. 같은 요청서를 여는 링크예요."
+        />
+      </div>
     </AppScreen>
   );
 }
@@ -204,6 +214,15 @@ function LiveResponsesPage({ id }: { id: string }) {
         />
       )}
       {confirmError && <p className="mt-3 text-xs font-bold text-red-700">{confirmError}</p>}
+
+      {/* 응답이 없거나 다시 보내야 할 때를 위해 전달 링크를 여기서도 확인할 수 있게 둔다 */}
+      <div className="mt-4">
+        <SavedPublicLink
+          contractId={id}
+          title="대행사 전달 링크 다시 보기"
+          note="답변이 없다면 이 링크를 다시 보내보세요. 같은 요청서를 여는 링크예요."
+        />
+      </div>
     </AppScreen>
   );
 }

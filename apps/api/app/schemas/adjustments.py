@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.enums import (
     AdjustmentRequestStatus,
@@ -10,6 +10,36 @@ from app.core.enums import (
     SuggestionChoice,
 )
 from app.core.text_safety import contains_unsafe_legal_conclusion
+
+
+class AdjustmentCopyPolishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=1200)
+
+    @field_validator("text")
+    @classmethod
+    def text_is_not_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("조정 요청 문구는 비어 있을 수 없습니다.")
+        return normalized
+
+
+class AdjustmentCopyPolishResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    polished_text: str = Field(min_length=1, max_length=1200)
+
+    @field_validator("polished_text")
+    @classmethod
+    def polished_text_is_safe(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("다듬은 조정 요청 문구는 비어 있을 수 없습니다.")
+        if contains_unsafe_legal_conclusion((normalized,)):
+            raise ValueError("다듬은 문구에 허용되지 않은 단정 표현이 있습니다.")
+        return normalized
 
 
 class ManualAdjustmentItemCreate(BaseModel):

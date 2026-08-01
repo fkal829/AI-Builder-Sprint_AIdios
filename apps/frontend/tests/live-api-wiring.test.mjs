@@ -10,6 +10,7 @@ test("ApiAdapter implements every remaining P0 owner workflow", async () => {
   const apiAdapter = adapter.slice(adapter.indexOf("class ApiAdapter"));
 
   for (const method of [
+    "polishAdjustmentCopy",
     "getAdjustmentPreview",
     "getAdjustmentDetail",
     "getSignatureView",
@@ -21,6 +22,26 @@ test("ApiAdapter implements every remaining P0 owner workflow", async () => {
   ]) {
     assert.match(apiAdapter, new RegExp(`async ${method}\\(`), `${method} must use the API adapter`);
   }
+});
+
+test("tone polishing uses the owner API and requires explicit preview approval", async () => {
+  const [adapter, viewer, requestPage] = await Promise.all([
+    source("src/lib/adapter.ts"),
+    source("src/app/contracts/[id]/page.tsx"),
+    source("src/app/contracts/[id]/request/page.tsx"),
+  ]);
+  const apiAdapter = adapter.slice(adapter.indexOf("class ApiAdapter"));
+
+  assert.match(apiAdapter, /async polishAdjustmentCopy\(contractId: string, text: string\)/);
+  assert.match(apiAdapter, /\/adjustment-copy\/polish`/);
+  assert.match(apiAdapter, /body: JSON\.stringify\(\{ text \}\)/);
+  assert.match(viewer, /adapter\.polishAdjustmentCopy\(contractId, source\)/);
+  assert.match(viewer, /AI가 다듬는 중…/);
+  assert.match(viewer, /이 문구로 적용/);
+  assert.match(viewer, /숫자와 핵심 조건이 그대로인지/);
+  assert.doesNotMatch(viewer, /setPolished\(politen\(/);
+  assert.doesNotMatch(requestPage, /function ToneBuffer/);
+  assert.doesNotMatch(requestPage, /AI가 정중하게 바꿔드려요/);
 });
 
 test("adjustment link creation remains a manual delivery boundary", async () => {

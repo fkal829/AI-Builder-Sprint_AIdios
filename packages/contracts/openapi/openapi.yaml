@@ -317,6 +317,39 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/InvalidTransition"}
         "422": {$ref: "#/components/responses/ValidationError"}
+  /contracts/{contract_id}/adjustment-copy/polish:
+    parameters:
+      - $ref: "#/components/parameters/ContractId"
+    post:
+      summary: 조정 요청 문구를 정중하게 다듬기
+      operationId: polishAdjustmentCopy
+      tags: [adjustments]
+      description: |
+        계약 소유권을 확인한 뒤 사용자가 작성한 조정 요청 문구를 Solar로 정중하게
+        다듬는다. 숫자·날짜·금액·비율의 숫자 토큰 개수는 입력과 정확히 같아야 하며,
+        입력에 없는 사실이나 법적 결론을 추가한 결과는 거부한다. 원문과 결과는 저장하지
+        않고 로그에도 남기지 않는다. 결과는 자동 적용·저장·발송되지 않으며 사용자가
+        미리보기에서 명시적으로 적용해야 한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdjustmentCopyPolishRequest"
+      responses:
+        "200":
+          description: 사용자가 확인할 정중한 조정 요청 문구
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdjustmentCopyPolishResponse"
+        "401": {$ref: "#/components/responses/NoStoreUnauthorized"}
+        "404": {$ref: "#/components/responses/NoStoreNotFound"}
+        "422": {$ref: "#/components/responses/NoStoreValidationError"}
+        "502": {$ref: "#/components/responses/NoStoreTonePolishFailed"}
   /contracts/{contract_id}/adjustment-requests:
     parameters:
       - $ref: "#/components/parameters/ContractId"
@@ -1189,6 +1222,14 @@ components:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
     CounterproposalComparisonFailed:
       description: Solar 역제안 비교 요청 또는 출력 검증 실패
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    NoStoreTonePolishFailed:
+      description: Solar 문구 다듬기 요청 또는 의미 보존 출력 검증 실패
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
       content:
         application/json:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -2164,6 +2205,32 @@ components:
           maximum: 168
           description: DRAFT에는 TTL만 저장하며 절대 expires_at은 /send 성공 시 sent_at 기준으로 계산한다.
       description: review_item_ids와 manual_items를 합해 중복 없이 1~4개를 전송한다.
+    AdjustmentCopyPolishRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1200
+          description: 사용자가 직접 작성했으며 자동 저장·발송하지 않는 조정 요청 원문
+    AdjustmentCopyPolishResult:
+      type: object
+      additionalProperties: false
+      required: [polished_text]
+      properties:
+        polished_text:
+          type: string
+          minLength: 1
+          maxLength: 1200
+          description: 숫자 토큰과 요청 의도를 보존한 정중한 문구 후보
+    AdjustmentCopyPolishResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/AdjustmentCopyPolishResult"}
     ManualAdjustmentItemCreate:
       type: object
       additionalProperties: false

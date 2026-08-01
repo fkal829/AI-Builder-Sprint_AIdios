@@ -14,8 +14,7 @@ import {
 } from "@/lib/requestDraft";
 import { loadPublicLink, savePublicLink, type PublicLink } from "@/lib/publicLink";
 
-/* ⑥ 조정 요청서 미리보기 (주경로) — 선택한 문구 확인·발송 전 최종확인.
-   톤완충 자유입력(P1)은 접힌 부가 경로로 분리. */
+/* ⑥ 조정 요청서 미리보기 (주경로) — 선택한 문구 확인·발송 전 최종확인. */
 export default function RequestPreviewPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -168,9 +167,6 @@ export default function RequestPreviewPage() {
             ))}
           </div>
 
-          {/* 톤 완충기 — P1 부가 경로 (접힘) */}
-          {isUsingMock && <ToneBuffer />}
-
           <p className="text-[11px] leading-relaxed text-neutral500">
             링크 생성 전 미리보기예요. 링크를 만든 뒤 기존 이메일이나 메신저로 직접
             전달해주세요. 대행사는 회원가입 없이 요청서를 열람합니다.
@@ -201,68 +197,5 @@ export default function RequestPreviewPage() {
         onConfirm={sendRequest}
       />
     </AppScreen>
-  );
-}
-
-/* 톤 완충기 (P1) — 자유 입력은 허용하되 그대로 발송하지 않고 변환문 승인. */
-function ToneBuffer() {
-  const [raw, setRaw] = useState("");
-  const [converted, setConverted] = useState<string | null>(null);
-
-  const convert = () => {
-    if (!raw.trim()) return;
-    // 데모: 실제로는 Solar가 정중한 요청문으로 변환. 여기선 템플릿 예시.
-    setConverted(
-      `${raw.replace(/[ㅠㅜ!.]+$/g, "").trim()} — 조정을 정중히 제안드립니다.`,
-    );
-  };
-
-  return (
-    <details className="rounded-lg border border-neutral200 bg-white">
-      <summary className="flex cursor-pointer items-center justify-between px-3.5 py-3 text-xs text-neutral500">
-        <span>
-          직접 문장을 써서 요청하고 싶다면
-          <span className="ml-1.5 rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
-            P1
-          </span>
-        </span>
-        <span>펼치기</span>
-      </summary>
-      <div className="flex flex-col gap-2.5 border-t border-neutral200 px-3.5 py-3">
-        <div className="rounded-md bg-neutral100 px-2.5 py-2 text-[12px] text-neutral700">
-          직접 써주셔도 좋아요 (선택). 그대로 보내지 않고 정중하게 바꿔드려요.
-        </div>
-        <textarea
-          value={raw}
-          onChange={(e) => setRaw(e.target.value)}
-          placeholder="예) 5년은 너무 길어요 ㅠㅠ"
-          className="min-h-16 rounded-lg border-2 border-ink px-3 py-2 text-[13px] outline-none"
-        />
-        <button
-          onClick={convert}
-          className="h-10 rounded-lg border-2 border-ink bg-white text-[13px] font-bold text-ink"
-        >
-          ↓ AI가 정중하게 바꿔드려요
-        </button>
-        {converted && (
-          <>
-            <div className="rounded-lg border-2 border-brand700 bg-brand50 px-3 py-2.5 text-[13px] leading-relaxed text-ink">
-              “{converted}”
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setConverted(null)}
-                className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[12px] font-bold text-neutral700"
-              >
-                다시 쓸게요
-              </button>
-              <button className="h-10 flex-1 rounded-lg bg-ink text-[12px] font-bold text-white">
-                이대로 승인
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </details>
   );
 }

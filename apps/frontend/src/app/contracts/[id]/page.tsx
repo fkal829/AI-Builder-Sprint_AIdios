@@ -25,7 +25,6 @@ import {
   type ClauseDraft,
   type RequestDraft,
 } from "@/lib/requestDraft";
-import { politen } from "@/lib/tone";
 import type {
   ClauseCard as ClauseData,
   ClauseRisk,
@@ -475,6 +474,7 @@ function ViewerBody({
               {data.clauses.filter((clause) => drafts[clause.id]).map((clause) => (
                 <RequestCard
                   key={clause.id}
+                  contractId={contractId}
                   clause={clause}
                   choice={drafts[clause.id].choice}
                   text={drafts[clause.id].text}
@@ -493,6 +493,7 @@ function ViewerBody({
                 .map(([clauseId, draft]) => (
                   <ManualRequestCard
                     key={clauseId}
+                    contractId={contractId}
                     draftId={clauseId}
                     draft={draft}
                     sourceBody={doc.clauses.find((clause) => clause.id === draft.docClauseId)?.body ?? ""}
@@ -918,6 +919,86 @@ const CHOICE_HINT: Record<SuggestionChoice, string> = {
   REQUEST: "요청서에 담겨요 · 빼려면 원안 수용을 선택하세요",
 };
 
+function TonePolishControl({
+  contractId,
+  text,
+  onApply,
+}: {
+  contractId: string;
+  text: string;
+  onApply: (text: string) => void;
+}) {
+  const [result, setResult] = useState<{ source: string; polished: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<{ source: string; message: string } | null>(null);
+  const currentResult = result?.source === text ? result.polished : null;
+  const currentError = error?.source === text ? error.message : null;
+
+  const polish = async () => {
+    if (!text.trim() || loading) return;
+    const source = text;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const polished = await adapter.polishAdjustmentCopy(contractId, source);
+      setResult({ source, polished });
+    } catch (cause) {
+      setError({
+        source,
+        message: cause instanceof Error ? cause.message : "문구를 다듬지 못했습니다.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void polish()}
+        disabled={!text.trim() || loading}
+        className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[0.6875em] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
+      >
+        {loading ? "AI가 다듬는 중…" : "✨ AI로 정중하게 다듬기"}
+      </button>
+
+      {currentError && (
+        <p className="mt-1.5 text-[0.6875em] font-bold text-red-700" role="alert">
+          ⚠ {currentError}
+        </p>
+      )}
+
+      {currentResult !== null && (
+        <div className="mt-2 rounded-lg border border-brand600 bg-brand50 px-3 py-2.5">
+          <div className="mb-1 text-[0.625em] font-bold text-brand800">이렇게 바꿔봤어요</div>
+          <p className="text-[0.75em] leading-relaxed text-ink">“{currentResult}”</p>
+          <p className="mt-1 text-[0.625em] leading-relaxed text-neutral500">
+            숫자와 핵심 조건이 그대로인지 적용 전에 확인해 주세요.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => onApply(currentResult)}
+              className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[0.6875em] font-bold text-white"
+            >
+              이 문구로 적용
+            </button>
+            <button
+              type="button"
+              onClick={() => setResult(null)}
+              className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[0.6875em] font-bold text-neutral700"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function UnlinkedClauseSourceCard({
   clause,
   confirmed,
@@ -950,6 +1031,7 @@ function UnlinkedClauseSourceCard({
 }
 
 function RequestCard({
+  contractId,
   clause,
   choice,
   text,
@@ -959,6 +1041,7 @@ function RequestCard({
   onViewOriginal,
   onDelete,
 }: {
+  contractId: string;
   clause: ClauseData;
   choice: SuggestionChoice;
   text: string;
@@ -968,11 +1051,8 @@ function RequestCard({
   onViewOriginal?: () => void;
   onDelete: () => void;
 }) {
-  // 톤 완충: 다듬은 변환문 미리보기(적용 전). null이면 미표시.
-  const [polished, setPolished] = useState<string | null>(null);
   const changeText = (v: string) => {
     onText(v);
-    setPolished(null); // 편집하면 이전 변환 미리보기는 무효화
   };
   // 확인 필요 조항 삭제 — 되돌아가면 원문에서 다시 확인해야 하므로 한 번 더 확인받는다
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1052,43 +1132,7 @@ function RequestCard({
             className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[0.75em] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
           />
 
-          {/* 톤 완충 — 지금 문구를 정중하게 다듬기 */}
-          <button
-            type="button"
-            onClick={() => setPolished(politen(text))}
-            disabled={!text.trim()}
-            className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[0.6875em] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
-          >
-            ✨ 정중하게 다듬기
-          </button>
-
-          {polished !== null && (
-            <div className="mt-2 rounded-lg border border-brand600 bg-brand50 px-3 py-2.5">
-              <div className="mb-1 text-[0.625em] font-bold text-brand800">
-                이렇게 바꿔봤어요
-              </div>
-              <p className="text-[0.75em] leading-relaxed text-ink">“{polished}”</p>
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onText(polished);
-                    setPolished(null);
-                  }}
-                  className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[0.6875em] font-bold text-white"
-                >
-                  이 문구로 적용
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPolished(null)}
-                  className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[0.6875em] font-bold text-neutral700"
-                >
-                  취소
-                </button>
-              </div>
-            </div>
-          )}
+          <TonePolishControl contractId={contractId} text={text} onApply={onText} />
         </div>
       )}
 
@@ -1111,6 +1155,7 @@ function RequestCard({
 
 /** 사용자가 직접 담은 조항 카드 — AI 제안 3종이 없어 자유입력 문구만 받는다 */
 function ManualRequestCard({
+  contractId,
   draftId,
   draft,
   sourceBody,
@@ -1118,6 +1163,7 @@ function ManualRequestCard({
   onRemove,
   onViewOriginal,
 }: {
+  contractId: string;
   draftId: string;
   draft: ClauseDraft;
   sourceBody: string;
@@ -1125,10 +1171,8 @@ function ManualRequestCard({
   onRemove: () => void;
   onViewOriginal?: () => void;
 }) {
-  const [polished, setPolished] = useState<string | null>(null);
   const changeText = (v: string) => {
     onText(v);
-    setPolished(null);
   };
 
   return (
@@ -1180,40 +1224,7 @@ function ManualRequestCard({
           className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[0.75em] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
         />
 
-        <button
-          type="button"
-          onClick={() => setPolished(politen(draft.text))}
-          disabled={!draft.text.trim()}
-          className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[0.6875em] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
-        >
-          ✨ 정중하게 다듬기
-        </button>
-
-        {polished !== null && (
-          <div className="mt-2 rounded-lg border border-brand600 bg-brand50 px-3 py-2.5">
-            <div className="mb-1 text-[0.625em] font-bold text-brand800">이렇게 바꿔봤어요</div>
-            <p className="text-[0.75em] leading-relaxed text-ink">“{polished}”</p>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onText(polished);
-                  setPolished(null);
-                }}
-                className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[0.6875em] font-bold text-white"
-              >
-                이 문구로 적용
-              </button>
-              <button
-                type="button"
-                onClick={() => setPolished(null)}
-                className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[0.6875em] font-bold text-neutral700"
-              >
-                취소
-              </button>
-            </div>
-          </div>
-        )}
+        <TonePolishControl contractId={contractId} text={draft.text} onApply={onText} />
       </div>
     </div>
   );

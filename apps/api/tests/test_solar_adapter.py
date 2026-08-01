@@ -8,9 +8,11 @@ from app.adapters.solar import (
     COUNTERPROPOSAL_PROMPT_VERSION,
     SOLAR_CHAT_PATH,
     SOLAR_PROMPT_VERSION,
+    TONE_POLISH_PROMPT_VERSION,
     SolarCounterproposalError,
     SolarReviewAdapter,
     SolarReviewError,
+    SolarTonePolishError,
 )
 from app.core.enums import (
     ReviewSeverity,
@@ -132,6 +134,25 @@ def response_with_items(items: list[dict], *, status_code: int = 200) -> httpx.R
     )
 
 
+def response_with_polished_text(payload: dict) -> httpx.Response:
+    request = httpx.Request("POST", f"https://api.upstage.ai{SOLAR_CHAT_PATH}")
+    return httpx.Response(
+        200,
+        request=request,
+        json={
+            "model": "solar-pro3",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(payload, ensure_ascii=False),
+                    }
+                }
+            ],
+        },
+    )
+
+
 def test_safe_legal_disclaimer_is_allowed() -> None:
     payload = {
         **make_output(),
@@ -196,6 +217,85 @@ async def test_mock_compares_actual_counterproposal_without_network(monkeypatch)
     assert "계약기간을 2년" in outputs[1].changed_summary
     assert outputs[0].changed_summary != outputs[1].changed_summary
     assert "mock 모드" in outputs[0].final_confirmation
+
+
+async def test_mock_polishes_actual_copy_without_network(monkeypatch) -> None:
+    def fail_if_called(**_kwargs):
+        raise AssertionError("mock 모드는 네트워크를 호출하면 안 됩니다.")
+
+    monkeypatch.setattr(httpx, "AsyncClient", fail_if_called)
+    adapter = SolarReviewAdapter(
+        mode="mock",
+        api_key="",
+        base_url="https://api.upstage.ai",
+    )
+
+    result = await adapter.polish_adjustment_copy(text="계약 기간 5년은 너무 길어요 ㅠㅠ")
+
+    assert "5년" in result.polished_text
+    assert "정중히 요청드립니다" in result.polished_text
+    assert "ㅠ" not in result.polished_text
+
+
+async def test_live_tone_polish_uses_strict_output_without_logging_copy(
+    monkeypatch,
+    caplog,
+) -> None:
+    caplog.set_level("INFO", logger="app.adapters.solar")
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.responses = [
+        response_with_polished_text(
+            {"polished_text": "계약 기간 5년은 부담스러우므로 조정을 요청드립니다."}
+        )
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    adapter = SolarReviewAdapter(
+        mode="live",
+        api_key="test-key",
+        base_url="https://api.upstage.ai",
+    )
+    raw = "계약 기간 5년은 너무 길어요"
+
+    result = await adapter.polish_adjustment_copy(text=raw)
+
+    path, body = FakeAsyncClient.calls[0]
+    assert path == SOLAR_CHAT_PATH
+    assert body["response_format"]["json_schema"]["name"] == "adjustment_copy_polish"
+    assert body["response_format"]["json_schema"]["strict"] is True
+    assert body["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
+    assert TONE_POLISH_PROMPT_VERSION in body["messages"][1]["content"]
+    assert result.polished_text.endswith("요청드립니다.")
+    assert "solar_tone_polish_run" in caplog.text
+    assert raw not in caplog.text
+    assert result.polished_text not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"polished_text": "계약 기간 3년은 부담스러워 조정을 요청드립니다."},
+        {"polished_text": "계약 기간은 부담스러워 조정을 요청드립니다."},
+        {"polished_text": "계약 기간 5년 5년은 부담스러워 조정을 요청드립니다."},
+        {"polished_text": "5년 조건이 있는 불법 계약입니다."},
+        {"polished_text": "계약 기간 5년 조정을 요청드립니다.", "extra": True},
+    ],
+)
+async def test_live_tone_polish_rejects_changed_numbers_unsafe_or_extra_fields(
+    monkeypatch,
+    payload: dict,
+) -> None:
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.responses = [response_with_polished_text(payload)]
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    adapter = SolarReviewAdapter(
+        mode="live",
+        api_key="test-key",
+        base_url="https://api.upstage.ai",
+        retry_delay_seconds=0,
+    )
+
+    with pytest.raises(SolarTonePolishError):
+        await adapter.polish_adjustment_copy(text="계약 기간 5년은 너무 길어요")
 
 
 async def test_live_uses_current_chat_endpoint_and_strict_structured_output(

@@ -1,7 +1,7 @@
 /* ===========================================================================
    톤 완충 — 거칠거나 감정적인 문장을 정중한 조정 요청문으로 다듬는다.
-   지금은 데모용 규칙 기반. 이후 Solar LLM 변환으로 이 함수만 교체한다
-   (입력=사용자 원문, 출력=정중한 요청문 형태 유지).
+   MockAdapter 전용 규칙 기반 예시. live 모드는 FastAPI의 Solar 다듬기
+   endpoint를 호출하며, 이 함수를 AI 성공으로 간주하지 않는다.
    =========================================================================== */
 export function politen(raw: string): string {
   const core = raw
@@ -14,6 +14,5 @@ export function politen(raw: string): string {
   if (/(드립니다|바랍니다)$/.test(core)) {
     return core.endsWith(".") ? core : `${core}.`;
   }
-  // 데모: 문장 재구성은 하지 않고(→ Solar 담당) 격식 요청문으로 마무리만 붙인다
-  return `${core} — 정중히 조정을 요청드립니다.`;
+  return `${core} 조건의 조정을 정중히 요청드립니다.`;
 }

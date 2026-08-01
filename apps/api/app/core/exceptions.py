@@ -144,6 +144,15 @@ class CounterproposalComparisonUnavailable(ApiException):
         )
 
 
+class TonePolishUnavailable(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=502,
+            code=ErrorCode.ANALYSIS_SCHEMA_INVALID,
+            message="문구를 안전하게 다듬지 못했습니다. 원문을 확인한 뒤 다시 시도해 주세요.",
+        )
+
+
 class ModusignRequestFailed(ApiException):
     def __init__(self) -> None:
         super().__init__(

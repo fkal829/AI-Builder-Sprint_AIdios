@@ -32,6 +32,7 @@ from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
 from app.services.revised_contracts import RevisedContractService
 from app.services.signatures import SignatureService
+from app.services.tone_polish import TonePolishService
 from app.services.understood_terms import UnderstoodTermService
 from app.services.webhooks import ModusignWebhookService
 
@@ -279,6 +280,13 @@ async def get_counterproposal_comparator(
     solar: Annotated[SolarReviewAdapter, Depends(get_solar_review_adapter)],
 ) -> CounterproposalComparator:
     return CounterproposalComparator(solar)
+
+
+async def get_tone_polish_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    solar: Annotated[SolarReviewAdapter, Depends(get_solar_review_adapter)],
+) -> TonePolishService:
+    return TonePolishService(repository=supabase, polisher=solar)
 
 
 async def get_adjustment_service(

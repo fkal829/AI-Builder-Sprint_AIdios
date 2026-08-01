@@ -40,6 +40,10 @@ CANONICAL_OPERATION_IDS = {
     ("POST", "/contracts/{contract_id}/analysis"): "startAnalysis",
     ("GET", "/contracts/{contract_id}/analysis"): "getAnalysis",
     ("PATCH", "/contracts/{contract_id}/review-items/{item_id}"): "updateReviewItem",
+    (
+        "POST",
+        "/contracts/{contract_id}/adjustment-copy/polish",
+    ): "polishAdjustmentCopy",
     ("POST", "/contracts/{contract_id}/adjustment-requests"): "createAdjustmentRequest",
     (
         "GET",
@@ -175,6 +179,7 @@ def install_http_contract(app: FastAPI) -> None:
             or "/performance" in request.url.path
             or request.url.path.endswith("/send")
             or request.url.path.endswith("/evidence-link")
+            or request.url.path.endswith("/adjustment-copy/polish")
         ):
             set_no_store(response)
         return response

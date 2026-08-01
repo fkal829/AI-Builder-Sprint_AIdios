@@ -12,7 +12,7 @@ prior read — a stale read here is exactly the race the lock exists to catch.
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from app.core.enums import (
     ExtractedField,
@@ -21,8 +21,11 @@ from app.core.enums import (
     PerformanceReportStatus,
 )
 from app.core.exceptions import (
+    ExternalServiceUnavailable,
+    ExternalStorageFailure,
     IdempotencyConflict,
     PerformanceReportCorrectionDependencyExists,
+    PerformanceReportPeriodOrderConflict,
     PerformanceReportRevisionConflict,
     ResourceNotFound,
 )
@@ -48,6 +51,11 @@ from app.services.performance import PerformanceAccessGuard
 from app.services.state_machine import InvalidStatusTransition
 
 _SHORTFALL_BASIS_FIELDS = (ExtractedField.CONTENT_QUANTITY, ExtractedField.POSTING_FREQUENCY)
+_CONFIRMATION_ID_NAMESPACE = UUID("e673494a-33dc-4d54-9499-8beadcc1f8da")
+
+
+class _PerformanceConfirmationRecoveryRequired(ExternalStorageFailure):
+    """The atomic confirmation RPC may have committed before its response was lost."""
 
 
 @dataclass(frozen=True)
@@ -93,7 +101,21 @@ class PerformanceConfirmationService:
         payload: PerformanceReportConfirmation,
         request_id: str | None = None,
     ) -> PerformanceConfirmationExecution:
-        current_request_id = request_id or f"req_{idempotency_key.hex}"
+        # A pending idempotency row does not persist the request ID until completion.
+        # Derive the logical response ID from the scoped key so a later request can
+        # reconstruct the first response after an ambiguous business commit.
+        current_request_id = _confirmation_request_id(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            report_id=report_id,
+            idempotency_key=idempotency_key,
+        )
+        revision_id = _confirmation_revision_id(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            report_id=report_id,
+            idempotency_key=idempotency_key,
+        )
 
         async def perform() -> IdempotentOutcome[_StoredConfirmationResponse]:
             confirmed = await self._perform_confirm(
@@ -101,26 +123,40 @@ class PerformanceConfirmationService:
                 contract_id=contract_id,
                 report_id=report_id,
                 payload=payload,
+                revision_id=revision_id,
             )
-            stored = _StoredConfirmationResponse(
-                report=confirmed,
+            return _confirmation_success_outcome(
+                confirmed,
                 request_id=current_request_id,
             )
-            return IdempotentOutcome(
-                status_code=200,
-                response=stored,
-                replay_payload=_stored_confirmation_response_payload(stored),
+
+        async def recover_pending() -> IdempotentOutcome[_StoredConfirmationResponse] | None:
+            return await self._recover_pending_outcome(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+                revision_id=revision_id,
+                payload=payload,
+                request_id=current_request_id,
             )
 
-        result = await self._idempotency.execute(
-            owner_id=owner_id,
-            operation=IdempotencyOperation.PERFORMANCE_REPORT_CONFIRM,
-            resource_id=report_id,
-            key=idempotency_key,
-            request_payload=payload,
-            perform=perform,
-            replay=_stored_confirmation_response_from_payload,
-        )
+        try:
+            result = await self._idempotency.execute(
+                owner_id=owner_id,
+                operation=IdempotencyOperation.PERFORMANCE_REPORT_CONFIRM,
+                resource_id=report_id,
+                key=idempotency_key,
+                request_payload=payload,
+                perform=perform,
+                replay=_stored_confirmation_response_from_payload,
+                pending_recovery=recover_pending,
+                preserve_pending_exception=lambda error: isinstance(
+                    error,
+                    _PerformanceConfirmationRecoveryRequired,
+                ),
+            )
+        except ExternalStorageFailure as error:
+            raise ExternalServiceUnavailable() from error
         return PerformanceConfirmationExecution(
             status_code=result.status_code,
             report=result.response.report,
@@ -135,6 +171,7 @@ class PerformanceConfirmationService:
         contract_id: UUID,
         report_id: UUID,
         payload: PerformanceReportConfirmation,
+        revision_id: UUID,
     ) -> PerformanceReportConfirmed:
         context = await self._guard.require_report(
             owner_id=owner_id,
@@ -152,8 +189,6 @@ class PerformanceConfirmationService:
         confirmed_payload = PerformanceConfirmedPayload(**payload.confirmed_payload.model_dump())
         engagement_rate = confirmed_payload.calculate_engagement_rate()
         version = payload.expected_revision + 1
-        revision_id = self._id_factory()
-
         previous_report = await self._get_previous_month_report(
             owner_id=owner_id,
             contract_id=contract_id,
@@ -235,18 +270,37 @@ class PerformanceConfirmationService:
             inquiry_drafts=inquiry_drafts,
         )
 
-        result = await self._confirmation_repository.confirm_performance_report_with_audit(
-            owner_id=owner_id,
-            contract_id=contract_id,
-            report_id=report_id,
-            expected_revision=payload.expected_revision,
-            revision=revision,
-        )
-        if result.outcome == "REVISION_CONFLICT":
+        try:
+            result = await self._confirmation_repository.confirm_performance_report_with_audit(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+                expected_revision=payload.expected_revision,
+                expected_comparison_revision_id=(
+                    previous_report.current_revision.id
+                    if previous_report is not None and previous_report.current_revision is not None
+                    else None
+                ),
+                revision=revision,
+            )
+        except ExternalStorageFailure as error:
+            # The RPC and its follow-up read share one repository method. A
+            # transport failure here cannot prove that the atomic append rolled
+            # back, so keep the idempotency reservation for deterministic recovery.
+            raise _PerformanceConfirmationRecoveryRequired(
+                "광고효과 리포트 확정 커밋 상태를 복구해야 합니다."
+            ) from error
+        if result.outcome in {"REVISION_CONFLICT", "COMPARISON_REVISION_CONFLICT"}:
             raise PerformanceReportRevisionConflict()
         if result.outcome == "CORRECTION_DEPENDENCY_EXISTS":
             raise PerformanceReportCorrectionDependencyExists()
-        if result.outcome == "INVALID_STATUS":
+        if result.outcome == "PERIOD_ORDER_CONFLICT":
+            raise PerformanceReportPeriodOrderConflict()
+        if result.outcome == "CONTRACT_INVALID_STATUS":
+            raise InvalidStatusTransition(
+                "현재 계약 상태에서는 광고효과 리포트를 확정할 수 없습니다."
+            )
+        if result.outcome == "REPORT_INVALID_STATUS":
             raise InvalidStatusTransition(
                 "지표를 추출하기 전에는 광고효과 리포트를 확정할 수 없습니다."
             )
@@ -256,6 +310,45 @@ class PerformanceConfirmationService:
             raise RuntimeError("광고효과 리포트 확정 결과가 없습니다.")
         return PerformanceReportConfirmed.model_validate(result.report.model_dump())
 
+    async def _recover_pending_outcome(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+        revision_id: UUID,
+        payload: PerformanceReportConfirmation,
+        request_id: str,
+    ) -> IdempotentOutcome[_StoredConfirmationResponse] | None:
+        try:
+            reports = await self._confirmation_repository.get_owned_contract_performance_reports(
+                owner_id=owner_id,
+                contract_id=contract_id,
+            )
+        except ExternalStorageFailure as error:
+            raise _PerformanceConfirmationRecoveryRequired(
+                "광고효과 리포트 확정 커밋 상태를 확인할 수 없습니다."
+            ) from error
+        report = next(
+            (candidate for candidate in reports or [] if candidate.id == report_id),
+            None,
+        )
+        if report is None or not _matches_committed_confirmation(
+            report,
+            contract_id=contract_id,
+            report_id=report_id,
+            revision_id=revision_id,
+            payload=payload,
+        ):
+            # The original RPC may still be in flight, may have rolled back, or a
+            # different correction may already be current. Never execute or replay
+            # a different revision while this reservation is pending.
+            return None
+        return _confirmation_success_outcome(
+            PerformanceReportConfirmed.model_validate(report.model_dump()),
+            request_id=request_id,
+        )
+
     async def _get_previous_month_report(
         self,
         *,
@@ -264,14 +357,14 @@ class PerformanceConfirmationService:
         period: str,
     ) -> PerformanceReport | None:
         previous_period = _immediately_preceding_month(period)
-        previous_access = await self._access_repository.get_owned_performance_report_for_period(
+        reports = await self._confirmation_repository.get_owned_contract_performance_reports(
             owner_id=owner_id,
             contract_id=contract_id,
-            period=previous_period,
         )
-        if previous_access is None:
-            return None
-        return await self._confirmation_repository.get_report(report_id=previous_access.id)
+        return next(
+            (report for report in reports or [] if report.period == previous_period),
+            None,
+        )
 
     async def _verified_shortfall_terms(
         self, *, owner_id: UUID, contract_id: UUID
@@ -319,8 +412,110 @@ def _stored_confirmation_response_from_payload(
     )
 
 
-def _immediately_preceding_month(period: str) -> str:
+def _confirmation_success_outcome(
+    report: PerformanceReportConfirmed,
+    *,
+    request_id: str,
+) -> IdempotentOutcome[_StoredConfirmationResponse]:
+    stored = _StoredConfirmationResponse(
+        report=report,
+        request_id=request_id,
+    )
+    return IdempotentOutcome(
+        status_code=200,
+        response=stored,
+        replay_payload=_stored_confirmation_response_payload(stored),
+    )
+
+
+def _confirmation_scope(
+    *,
+    owner_id: UUID,
+    contract_id: UUID,
+    report_id: UUID,
+    idempotency_key: UUID,
+) -> str:
+    return f"{owner_id}:{contract_id}:{report_id}:{idempotency_key}"
+
+
+def _confirmation_revision_id(
+    *,
+    owner_id: UUID,
+    contract_id: UUID,
+    report_id: UUID,
+    idempotency_key: UUID,
+) -> UUID:
+    scope = _confirmation_scope(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        report_id=report_id,
+        idempotency_key=idempotency_key,
+    )
+    return uuid5(_CONFIRMATION_ID_NAMESPACE, f"{scope}:revision")
+
+
+def _confirmation_request_id(
+    *,
+    owner_id: UUID,
+    contract_id: UUID,
+    report_id: UUID,
+    idempotency_key: UUID,
+) -> str:
+    scope = _confirmation_scope(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        report_id=report_id,
+        idempotency_key=idempotency_key,
+    )
+    return f"req_{uuid5(_CONFIRMATION_ID_NAMESPACE, f'{scope}:request').hex}"
+
+
+def _matches_committed_confirmation(
+    report: PerformanceReport,
+    *,
+    contract_id: UUID,
+    report_id: UUID,
+    revision_id: UUID,
+    payload: PerformanceReportConfirmation,
+) -> bool:
+    current = report.current_revision
+    expected_version = payload.expected_revision + 1
+    expected_payload = PerformanceConfirmedPayload(**payload.confirmed_payload.model_dump())
+    if (
+        report.id != report_id
+        or report.contract_id != contract_id
+        or report.revision_count != expected_version
+        or current is None
+        or current.id != revision_id
+        or current.report_id != report_id
+        or current.version != expected_version
+        or current.status != report.status
+        or current.confirmed_payload != expected_payload
+        or current.engagement_rate != expected_payload.calculate_engagement_rate()
+        or current.correction_reason != payload.correction_reason
+    ):
+        return False
+
+    if expected_version == 1:
+        if current.corrected_from_revision_id is not None:
+            return False
+    elif len(report.revisions) < 2 or current.corrected_from_revision_id != report.revisions[-2].id:
+        return False
+
+    owner_issue_notes = [
+        flag.issue_note
+        for flag in current.flags
+        if flag.flag_type is PerformanceFlagType.OWNER_REPORTED_ISSUE
+    ]
+    if payload.has_issue:
+        return owner_issue_notes == [payload.issue_note]
+    return owner_issue_notes == []
+
+
+def _immediately_preceding_month(period: str) -> str | None:
     year, month = (int(part) for part in period.split("-"))
     if month == 1:
-        return f"{year - 1}-12"
-    return f"{year}-{month - 1:02d}"
+        if year == 1:
+            return None
+        return f"{year - 1:04d}-12"
+    return f"{year:04d}-{month - 1:02d}"

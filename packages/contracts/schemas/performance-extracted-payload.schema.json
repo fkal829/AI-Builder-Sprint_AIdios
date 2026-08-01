@@ -42,7 +42,12 @@
         "verification_status"
       ],
       "properties": {
-        "value": {"type": ["integer", "null"], "minimum": 0},
+        "value": {
+          "type": ["integer", "null"],
+          "format": "int64",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
         "source_page": {"type": ["integer", "null"], "minimum": 1},
         "source_text": {"type": ["string", "null"], "minLength": 1},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
@@ -57,7 +62,12 @@
           },
           "then": {
             "properties": {
-              "value": {"type": "integer", "minimum": 0},
+              "value": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
               "source_page": {"type": "integer", "minimum": 1},
               "source_text": {"type": "string", "minLength": 1}
             }
@@ -99,7 +109,12 @@
         "verification_status"
       ],
       "properties": {
-        "value": {"type": ["integer", "null"]},
+        "value": {
+          "type": ["integer", "null"],
+          "format": "int64",
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807
+        },
         "source_page": {"type": ["integer", "null"], "minimum": 1},
         "source_text": {"type": ["string", "null"], "minLength": 1},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
@@ -114,7 +129,12 @@
           },
           "then": {
             "properties": {
-              "value": {"type": "integer"},
+              "value": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": -9223372036854775808,
+                "maximum": 9223372036854775807
+              },
               "source_page": {"type": "integer", "minimum": 1},
               "source_text": {"type": "string", "minLength": 1}
             }

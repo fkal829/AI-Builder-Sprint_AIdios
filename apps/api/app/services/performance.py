@@ -44,7 +44,9 @@ PERFORMANCE_IDEMPOTENCY_OPERATION_BY_ACTION: Final[
     }
 )
 
-_PERFORMANCE_PERIOD = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+_PERFORMANCE_PERIOD = re.compile(
+    r"^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])$"
+)
 PERFORMANCE_REPORT_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
     {"application/pdf", "image/png", "image/jpeg"}
 )

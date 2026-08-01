@@ -22,6 +22,27 @@ uvicorn app.main:app --reload
 
 라우터에서 외부 API를 직접 호출하거나 계약 상태를 직접 변경하지 않습니다.
 
+## 광고효과 16.2~16.5 live E2E
+
+`evaluation.performance_e2e_live`는 로컬 FastAPI에 실제 TCP로 접속해 live
+Supabase Auth·private Storage·PostgreSQL과 Upstage Parse·Solar를 한 번에 검증한다.
+합성 PDF, 임시 Auth 사용자와 `SIGNED` 계약만 사용하며 두 확인 플래그가
+모두 없으면 외부 호출을 시작하지 않는다. API key·원문·Storage 경로·
+임시 식별자는 출력하지 않고, 생성한 자료는 항상 정확한 범위로 정리한다.
+
+```bash
+# 터미널 1
+SUPABASE_MODE=live UPSTAGE_MODE=live uvicorn app.main:app --host 127.0.0.1 --port 8011
+
+# 터미널 2
+PERFORMANCE_E2E_BASE_URL=http://127.0.0.1:8011 \
+PERFORMANCE_E2E_TIMEOUT_SECONDS=600 \
+python -m evaluation.performance_e2e_live --confirm-live --cleanup-created-data
+```
+
+일반 `pytest`는 이 실시간 runner를 호출하지 않고 네트워크 없는 gate·스키마·
+정리 범위 테스트만 실행한다.
+
 ## 공개 토큰 로그 보호
 
 애플리케이션은 Uvicorn access log에 포함되는

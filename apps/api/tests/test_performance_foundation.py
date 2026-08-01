@@ -16,6 +16,7 @@ from app.schemas.documents import DocumentParseStatus, DocumentType
 from app.services.idempotency import IdempotencyService, IdempotentOutcome
 from app.services.performance import (
     PerformanceAccessGuard,
+    PerformanceReportIdentity,
     performance_upload_idempotency_payload,
 )
 
@@ -25,6 +26,12 @@ CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000041")
 REPORT_ID = UUID("00000000-0000-4000-8000-000000000071")
 DOCUMENT_ID = UUID("00000000-0000-4000-8000-000000000081")
 NOW = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+
+
+def test_performance_period_rejects_year_zero_and_accepts_first_ad_year() -> None:
+    assert PerformanceReportIdentity(contract_id=CONTRACT_ID, period="0001-01").period == "0001-01"
+    with pytest.raises(ValueError, match="YYYY-MM"):
+        PerformanceReportIdentity(contract_id=CONTRACT_ID, period="0000-12")
 
 
 def make_adapter() -> SupabaseAdapter:
@@ -265,9 +272,7 @@ class FakeClient:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
         self.rows = {
-            "contracts": [
-                {"id": str(CONTRACT_ID), "owner_id": str(OWNER_ID), "status": "SIGNED"}
-            ],
+            "contracts": [{"id": str(CONTRACT_ID), "owner_id": str(OWNER_ID), "status": "SIGNED"}],
             "performance_reports": [
                 {
                     "id": str(REPORT_ID),

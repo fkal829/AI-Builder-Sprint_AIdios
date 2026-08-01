@@ -703,7 +703,8 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 - `created_at`, `updated_at`
 
 DB는 `(contract_id, period)`와 `source_document_id`를 각각 고유하게 한다. `period`는
-`Asia/Seoul` 달력월의 `YYYY-MM`이며 계약·월별 논리 리포트는 한 건이다. 채널별 여러
+`Asia/Seoul` 달력월의 `YYYY-MM`이며 연도는 `0001`~`9999`만 허용하고 `0000`은 거부한다.
+계약·월별 논리 리포트는 한 건이다. 채널별 여러
 리포트와 `channel_key`는 P2 범위에 포함하지 않는다. 다른 요청으로 같은 월을 다시
 생성하면 `409 REPORT_PERIOD_ALREADY_EXISTS`다. 정정은 두 번째 report가 아니라 같은
 report의 새 revision으로 남긴다.
@@ -743,7 +744,11 @@ Document의 기술 상태를 원자적으로 claim한다. 15분 미만의 활성
 재시도로 원자 재점유한다. 이전 멱등 예약을 abandon하고
 `PERFORMANCE_REPORT_EXTRACTION_RECOVERED`를 기록한다. 현재 attempt ID와 일치하는 완료만
 상태와 payload를 저장할 수 있으며 이전 작업의 늦은 응답은 버린다. 서버는 stale 작업을
-자동 재개하거나 외부 AI를 자동 재호출하지 않는다.
+자동 재개하거나 extraction attempt 전체를 자동 재실행하지 않는다. 단, 이미 claim한
+동일 attempt 내부의 Solar 전송이 일시적인 transport 오류 또는 HTTP
+`429`/`500`/`502`/`503`/`504`로 실패하면 adapter가 최대 1회 전송 재시도할 수 있다.
+이 재전송은 새 attempt를 claim하거나 Document Parse를 다시 실행하는 명시적 재시도가
+아니다. 두 Solar 전송이 모두 실패하면 해당 attempt를 실패 처리한다.
 
 `Document.parse_status`는 파일 파싱 기술 상태이고 `PerformanceReport.status`는 사용자
 업무 상태다. 성공 시 Document를 `COMPLETED`, report를 `EXTRACTED`로 만들고 근거가 있는
@@ -780,6 +785,9 @@ AI 후보가 있더라도 소유자가 확정한 값만 비교한다. `null`이�
 `shares`는 계산에서 0으로 보되 null과 명시적 0의 존재 정보는 보존한다.
 `impressions=0`이면 반응률은 `null`이다. 판정은 반올림 전 충분한 정밀도의 `Decimal`로
 수행하고 API 저장·반환용 소수 6자리 반올림값을 판정에 다시 사용하지 않는다.
+정확한 DB·도메인 상한은 `36893488147419103228.000000`이다. JSON number로
+직렬화할 때의 IEEE-754 표현 상한은 올림 경계 `36893488147419103232`로
+OpenAPI에 반영하되, 신호 계산과 DB 검증은 직렬화 전 `Decimal` 값을 사용한다.
 
 `ENGAGEMENT_RATE_DROP`은 다음 조건을 모두 만족할 때만 만든다.
 
@@ -807,12 +815,19 @@ AI 후보가 있더라도 소유자가 확정한 값만 비교한다. `null`이�
   `409 REPORT_CORRECTION_DEPENDENCY_EXISTS`이며 연쇄 재계산하지 않는다.
 - `expected_revision`이 다르면 `409 REPORT_REVISION_CONFLICT`이고 새 revision을 만들지
   않는다.
+- 달력상 뒤 월이 이미 확정된 상태에서 과거 월을 처음 확정하면 저장된 월간 비교가
+  영구 누락되지 않도록 `409 REPORT_PERIOD_ORDER_CONFLICT`로 거부한다. 소상공인은
+  월 순서대로 다시 확인한다.
+- 바로 전월의 현재 revision ID는 flag 계산에 사용한 값과 원자 RPC 안에서 다시
+  비교한다. 그 사이 정정됐으면 `409 REPORT_REVISION_CONFLICT`로 재확인을 요구한다.
 
 PATCH 서비스는 같은 멱등 요청 재생을 상태·revision 검사보다 먼저 수행한다. 새 요청은
 report 행을 `FOR UPDATE`로 lock한 뒤 상태, 현재 version과 후속 확정 월을 다시 검사한다.
 `PerformanceReportRevision`, revision별 flag·문의 snapshot, report의
 `current_revision_id`·`revision_count`·현재 표시 상태와 감사 이벤트를 한 트랜잭션에
-저장한다.
+저장하고 같은 트랜잭션 snapshot을 성공 응답으로 반환한다. 16.5 조회도 owner-scoped
+단일 RPC의 한 statement snapshot만 사용한다. DB·RPC·schema cache 장애는 원문이나
+내부 오류를 노출하지 않고 `503 EXTERNAL_SERVICE_UNAVAILABLE`로 반환한다.
 
 `CONFIRMED`·`FLAGGED`는 과거 revision이 immutable이라는 의미에서 terminal이다. 정정은
 terminal 값을 전이하거나 덮어쓰지 않고 새 revision을 추가한다. report의 현재 projection은

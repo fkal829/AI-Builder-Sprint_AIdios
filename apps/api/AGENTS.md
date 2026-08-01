@@ -19,7 +19,8 @@ P0 데모 경로는 다음과 같다.
 
 광고효과 기록·대조(기획안 6.14)는 P2다. 16.2 업로드, 16.3 Upstage·Solar 지표 추출,
 16.4 사용자 확정·정정, 16.5 계약별 기록·대조 조회 FastAPI endpoint와 영속 기반은
-구현됐다. 배포 FastAPI·live Supabase 수직 E2E는 별도 검증한다.
+구현됐다. 로컬 FastAPI 실제 TCP와 live Supabase·Upstage를 함께 거친
+16.2~16.5 수직 E2E는 통과했고, 배포 FastAPI 환경은 별도 검증한다.
 
 이 서비스는 법률 자문, 사기 판정, 위법성 판정, 승소 가능성 예측을 제공하지 않는다.
 사용자와 계약 상대방이 같은 조건을 확인하고 합의 과정을 기록하도록 돕는 것이 목적이다.
@@ -494,6 +495,11 @@ B  POST  /api/v1/contracts/{contract_id}/obligations/{obligation_id}/evidence-li
 B  POST  /api/v1/public/obligations/{token}/evidence
 B  PATCH /api/v1/contracts/{contract_id}/obligations/{obligation_id}
 C  GET   /api/v1/dashboard
+
+B  POST  /api/v1/contracts/{contract_id}/performance-reports
+B  POST  /api/v1/contracts/{contract_id}/performance-reports/{report_id}/extract
+C  PATCH /api/v1/contracts/{contract_id}/performance-reports/{report_id}
+C  GET   /api/v1/contracts/{contract_id}/performance
 ```
 
 공통 응답 envelope는 다음 형태를 유지한다.
@@ -517,7 +523,7 @@ C  GET   /api/v1/dashboard
   `ANALYSIS_START_FAILED`, `EXTERNAL_SERVICE_UNAVAILABLE`, `ADJUSTMENT_LINK_EXPIRED`,
   `OBLIGATION_LINK_EXPIRED`, `INVALID_STATUS_TRANSITION`, `MODUSIGN_REQUEST_FAILED`,
   `WEBHOOK_AUTH_FAILED`, `UNAUTHORIZED_ACCESS`, `IDEMPOTENCY_CONFLICT`,
-  `REPORT_PERIOD_ALREADY_EXISTS`, `REPORT_REVISION_CONFLICT`,
+  `REPORT_PERIOD_ALREADY_EXISTS`, `REPORT_PERIOD_ORDER_CONFLICT`, `REPORT_REVISION_CONFLICT`,
   `REPORT_CORRECTION_DEPENDENCY_EXISTS`, `REPORT_EXTRACTION_IN_PROGRESS`,
   `REPORT_EXTRACT_FAILED`, `NOT_FOUND`, `VALIDATION_ERROR`로 제한한다. 추가가 필요하면
   명세와 테스트를 먼저 변경한다.
@@ -537,13 +543,16 @@ C  GET   /api/v1/dashboard
 - 모두싸인 웹훅처럼 vendor가 응답 형식을 정한 endpoint에는 공통 envelope를 강제하지
   않고 공식 명세의 acknowledgment 형식을 따른다.
 
-다음 5개 작업에는 UUID 형식의 `Idempotency-Key`가 필수다.
+다음 8개 작업에는 UUID 형식의 `Idempotency-Key`가 필수다.
 
 - 분석 시작
 - 조정 요청 초안 생성
 - 조정 링크 활성화
 - 모두싸인 서명 요청
 - 산출물 증빙 링크 생성
+- 광고효과 리포트 업로드
+- 광고효과 리포트 지표 추출
+- 광고효과 리포트 확정·정정
 
 멱등 키는 owner·operation·resource 범위로 저장한다. 같은 키와 같은 요청은 최초 상태
 코드와 응답을 재생하고, 같은 키와 다른 요청은 `409 IDEMPOTENCY_CONFLICT`로 거부한다.
@@ -862,7 +871,7 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
 - `AnalysisTask` 상태별 result·error 불변식, 최대 2회 시도와 최신 작업 조회
 - 소유자 권한, 유효·만료·잘못된 공개 토큰, scope 교차 사용 거부
 - 공개 API와 토큰 생성 응답의 `no-store`, 토큰·`public_url` 재노출 방지
-- 6개 작업의 같은 멱등 키·같은 요청 재생과 다른 요청의 `IDEMPOTENCY_CONFLICT`
+- 8개 작업의 같은 멱등 키·같은 요청 재생과 다른 요청의 `IDEMPOTENCY_CONFLICT`
 - 조정 초안의 실제 문구 미리보기·링크 부재, 응답의 1회 제출과 동시 중복 요청
 - 최종 조정 선택 검증과 클라이언트 임의 최종 문구 거부
 - Pydantic AI 스키마와 근거 누락 시 `확인 필요` 처리

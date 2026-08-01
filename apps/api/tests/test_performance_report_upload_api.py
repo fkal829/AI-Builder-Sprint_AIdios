@@ -409,6 +409,7 @@ async def test_authentication_and_unknown_contract_are_hidden_without_side_effec
 @pytest.mark.parametrize(
     ("period", "content", "content_type"),
     [
+        ("0000-12", make_pdf(), "application/pdf"),
         ("2026-13", make_pdf(), "application/pdf"),
         ("2026-8", make_pdf(), "application/pdf"),
         ("2026-08", b"plain report", "text/plain"),

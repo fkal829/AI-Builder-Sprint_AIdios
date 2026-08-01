@@ -96,6 +96,18 @@ class PerformanceReportRevisionConflict(ApiException):
         )
 
 
+class PerformanceReportPeriodOrderConflict(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=409,
+            code=ErrorCode.REPORT_PERIOD_ORDER_CONFLICT,
+            message=(
+                "더 뒤 월의 리포트가 이미 확정되어 이 월을 처음 확정할 수 없습니다. "
+                "월 순서대로 다시 확인해 주세요."
+            ),
+        )
+
+
 class PerformanceReportCorrectionDependencyExists(ApiException):
     def __init__(self) -> None:
         super().__init__(

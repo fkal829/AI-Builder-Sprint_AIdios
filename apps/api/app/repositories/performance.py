@@ -38,8 +38,11 @@ PerformanceReportUploadOutcome = Literal[
 PerformanceReportConfirmOutcome = Literal[
     "CONFIRMED",
     "REVISION_CONFLICT",
+    "COMPARISON_REVISION_CONFLICT",
+    "PERIOD_ORDER_CONFLICT",
     "CORRECTION_DEPENDENCY_EXISTS",
-    "INVALID_STATUS",
+    "CONTRACT_INVALID_STATUS",
+    "REPORT_INVALID_STATUS",
     "NOT_FOUND",
 ]
 
@@ -267,10 +270,26 @@ class PerformanceReportRepository(Protocol):
     P2-C-2 decision rules and rendered the P2-C-5 inquiry text. This boundary
     only owns the atomic persistence and the optimistic-lock/dependency guard:
     ``expected_revision`` must equal the report's current ``revision_count``,
-    and no later month may already be CONFIRMED/FLAGGED.
+    ``expected_comparison_revision_id`` must still be the immediately preceding
+    month's current revision, and no later month may already be CONFIRMED/FLAGGED.
     """
 
     async def get_report(self, *, report_id: UUID) -> PerformanceReport | None: ...
+
+    async def get_owned_contract_performance_reports(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> list[PerformanceReport] | None:
+        """Return one owner-scoped, transaction-consistent contract snapshot.
+
+        Implementations must load every report and its complete append-only
+        revision/flag/basis/draft graph in one database statement. ``None`` hides
+        both a missing contract and a foreign contract; an owned contract without
+        reports returns ``[]``.
+        """
+        ...
 
     async def confirm_performance_report_with_audit(
         self,
@@ -279,5 +298,6 @@ class PerformanceReportRepository(Protocol):
         contract_id: UUID,
         report_id: UUID,
         expected_revision: int,
+        expected_comparison_revision_id: UUID | None,
         revision: PerformanceReportRevision,
     ) -> PerformanceReportConfirmResult: ...

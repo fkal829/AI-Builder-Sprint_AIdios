@@ -1,21 +1,24 @@
 """P2-C-4: GET .../performance — month-by-month record and contract cross-check.
 
-Pure read: no AI, no state change, no audit event. Reuses P2-C-3's
-`PerformanceReportRepository.get_report` to assemble each report's full
-append-only history, then projects the confirmed months into
-`ContractPerformance`. That schema's own validator (app/schemas/performance.py)
-already enforces the "only the latest confirmed revision per month, in the
-same order, feeds confirmed_series/flags/inquiry_drafts" invariant — so a
-logic bug here surfaces as a `ValidationError`, not a silently wrong response.
+Pure read: no AI, no state change, no audit event. Loads the owner's contract
+and every report through one database snapshot RPC, then projects confirmed
+months into `ContractPerformance`. That schema's own validator
+(`app/schemas/performance.py`) enforces the "only the latest confirmed revision
+per month, in the same order, feeds confirmed_series/flags/inquiry_drafts"
+invariant — so a logic bug surfaces as a `ValidationError`, not a silently
+wrong response.
 """
 
 from uuid import UUID
 
 from app.core.enums import PerformanceReportStatus
-from app.core.exceptions import ResourceNotFound
+from app.core.exceptions import (
+    ExternalServiceUnavailable,
+    ExternalStorageFailure,
+    ResourceNotFound,
+)
 from app.repositories.performance import PerformanceAccessRepository, PerformanceReportRepository
 from app.schemas.performance import ContractPerformance, PerformanceConfirmedSeriesPoint
-from app.services.performance import PerformanceAccessGuard
 
 _CONFIRMED_STATUSES = frozenset(
     {PerformanceReportStatus.CONFIRMED, PerformanceReportStatus.FLAGGED}
@@ -29,9 +32,11 @@ class PerformanceAggregationService:
         access_repository: PerformanceAccessRepository,
         report_repository: PerformanceReportRepository,
     ) -> None:
+        # Kept in the constructor for dependency compatibility. The live read
+        # itself must go through the repository's single owner-scoped snapshot
+        # RPC rather than a guard query followed by per-report reads.
         self._access_repository = access_repository
         self._report_repository = report_repository
-        self._guard = PerformanceAccessGuard(access_repository)
 
     async def get_contract_performance(
         self,
@@ -39,25 +44,17 @@ class PerformanceAggregationService:
         owner_id: UUID,
         contract_id: UUID,
     ) -> ContractPerformance:
-        await self._guard.require_contract(owner_id=owner_id, contract_id=contract_id)
-
-        access_rows = await self._access_repository.list_owned_performance_reports(
-            owner_id=owner_id,
-            contract_id=contract_id,
-        )
-        if access_rows is None:
-            # The guard above already proved ownership; a None here only
-            # means the contract vanished between the two reads.
+        try:
+            snapshot = await self._report_repository.get_owned_contract_performance_reports(
+                owner_id=owner_id,
+                contract_id=contract_id,
+            )
+        except ExternalStorageFailure as error:
+            raise ExternalServiceUnavailable() from error
+        if snapshot is None:
             raise ResourceNotFound()
 
-        ordered_access = sorted(access_rows, key=lambda row: row.period)
-        reports = []
-        for row in ordered_access:
-            report = await self._report_repository.get_report(report_id=row.id)
-            if report is None:
-                # Same race as above: the report existed a moment ago.
-                raise ResourceNotFound()
-            reports.append(report)
+        reports = sorted(snapshot, key=lambda report: report.period)
 
         confirmed_reports = [report for report in reports if report.status in _CONFIRMED_STATUSES]
         confirmed_series = [

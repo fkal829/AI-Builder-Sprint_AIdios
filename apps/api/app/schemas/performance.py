@@ -25,20 +25,40 @@ from app.core.enums import (
 
 PerformancePeriod = Annotated[
     str,
-    Field(strict=True, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$"),
+    Field(
+        strict=True,
+        pattern=r"^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])$",
+    ),
 ]
 PerformanceConfirmedStatus = Literal[
     PerformanceReportStatus.CONFIRMED,
     PerformanceReportStatus.FLAGGED,
 ]
-NonNegativeMetric = Annotated[int, Field(strict=True, ge=0)]
-SignedMetric = Annotated[int, Field(strict=True)]
+POSTGRES_BIGINT_MIN = -(2**63)
+POSTGRES_BIGINT_MAX = 2**63 - 1
+MAX_ENGAGEMENT_RATE = Decimal("36893488147419103228.000000")
+MAX_SERIALIZED_ENGAGEMENT_RATE = 36893488147419103232
+NonNegativeMetric = Annotated[
+    int,
+    Field(strict=True, ge=0, le=POSTGRES_BIGINT_MAX),
+]
+SignedMetric = Annotated[
+    int,
+    Field(strict=True, ge=POSTGRES_BIGINT_MIN, le=POSTGRES_BIGINT_MAX),
+]
 EngagementRate = Annotated[
     Decimal,
-    Field(ge=0, decimal_places=6),
+    Field(ge=0, le=MAX_ENGAGEMENT_RATE, max_digits=26, decimal_places=6),
     PlainSerializer(lambda value: float(value), return_type=float, when_used="json"),
     WithJsonSchema(
-        {"type": "number", "minimum": 0, "x-decimal-places": 6},
+        {
+            "type": "number",
+            "minimum": 0,
+            # The exact Decimal maximum rounds upward by four when exposed as
+            # an IEEE-754 JSON number. Runtime and DB validation remain exact.
+            "maximum": MAX_SERIALIZED_ENGAGEMENT_RATE,
+            "x-decimal-places": 6,
+        },
         mode="serialization",
     ),
 ]
@@ -152,6 +172,10 @@ class PerformanceReportConfirmation(StrictPerformanceModel):
 
 
 class PerformanceFlagBasisSnapshot(StrictPerformanceModel):
+    # A basis snapshot must preserve the exact ExtractedTerm evidence text so
+    # the DB trigger can prove it belongs to the same verified contract term.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
     extracted_term_id: UUID
     document_id: UUID
     field: Literal[ExtractedField.CONTENT_QUANTITY, ExtractedField.POSTING_FREQUENCY]
@@ -160,6 +184,13 @@ class PerformanceFlagBasisSnapshot(StrictPerformanceModel):
     source_text: str = Field(min_length=1)
     confidence: float = Field(strict=True, ge=0, le=1)
     verification_status: Literal[VerificationStatus.VERIFIED]
+
+    @field_validator("source_text")
+    @classmethod
+    def require_nonblank_source_text_without_normalizing(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("근거 원문은 비어 있을 수 없습니다.")
+        return value
 
 
 class PerformanceFlag(StrictPerformanceModel):

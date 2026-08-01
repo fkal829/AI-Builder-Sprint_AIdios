@@ -1411,7 +1411,8 @@ endpoint, 추출 attempt RPC·service·Upstage·Solar 경계와 16.3 endpoint,
 append-only 확정·정정과 결정적 신호·문의 문안 snapshot의 16.4 endpoint, 최신 revision
 기준 집계·계약 대조의 16.5 endpoint까지 runtime에 구현해 operation 수는 4/4이다.
 
-`period`는 API에서 `YYYY-MM`으로 받고 `(contract_id, period)`를 DB 고유 제약으로
+`period`는 API에서 `YYYY-MM`으로 받되 연도 `0001`~`9999`만 허용하고,
+`(contract_id, period)`를 DB 고유 제약으로
 보호한다. 같은 `Idempotency-Key`와 같은 요청은 최초 응답을 재생하고, 다른 요청으로
 같은 월의 리포트를 다시 만들면 `409 REPORT_PERIOD_ALREADY_EXISTS`를 반환한다.
 확정값 정정은 같은 월의 두 번째 리포트를 생성하지 않고 16.4의 새 revision으로 남긴다.
@@ -1489,7 +1490,12 @@ Document·report UUID로 응답 유실과 멱등 응답 저장 실패를 복구�
 이 값을 대시보드·비교에 사용하거나 이 단계에서 문의 문안을 생성하지 않는다.
 timeout·HTTP 오류·Parse 실패·AI 스키마 오류는 고정 샘플로 대체하지 않고
 `502 REPORT_EXTRACT_FAILED`를 반환한다. 이때 상태는 `UPLOADED`를 유지하며 사용자의
-명시적 재시도만 허용한다.
+새 `Idempotency-Key`를 사용한 명시적 extraction attempt 재시도만 허용한다. 서버가
+attempt 전체를 자동으로 다시 실행하지는 않는다. 다만 이미 claim한 동일 attempt 안에서
+Solar 요청이 일시적인 transport 오류 또는 HTTP `429`/`500`/`502`/`503`/`504`로
+실패하면 adapter가 최대 1회 전송 재시도할 수 있다. 이 재전송은 새 attempt를 만들거나
+Document Parse를 다시 실행하지 않으며, 두 전송이 모두 실패하면 해당 attempt를
+`REPORT_EXTRACT_FAILED`로 종료한다.
 
 `Document.parse_status`는 파일 파싱 시도의 기술 상태이고 `PerformanceReport.status`는
 사용자 흐름의 업무 상태다. Parse 실패는 Document를 `FAILED`로 기록할 수 있지만
@@ -1517,7 +1523,8 @@ claim할 때 `extraction_attempt_id`와 `extraction_started_at`을 저장한다.
 있으며, 이전 멱등 예약을 abandon하고 `PERFORMANCE_REPORT_EXTRACTION_RECOVERED` 감사
 이벤트를 남긴다. 동일 attempt의 완료만 상태와 payload를 저장할 수 있어 오래된 작업의
 늦은 응답이 새 결과를 덮어쓰지 못하게 한다. 복구는 사용자의 명시적 재시도에서만
-수행하고 서버가 외부 AI 호출을 자동 재개하지 않는다.
+수행하고 서버가 extraction attempt 전체를 자동 재개하지 않는다. 동일 attempt 내부의
+Solar 일시적 전송 실패에 대한 최대 1회 재전송만 위 예외로 허용한다.
 
 ### 16.4 추출값 확인·수정 — P2-C
 
@@ -1529,6 +1536,7 @@ claim할 때 `extraction_attempt_id`와 `extraction_started_at`을 저장한다.
 - 구현 상태: canonical OpenAPI·FastAPI runtime 등록 완료
 - 성공: `200 PerformanceReportConfirmedResponse`
 - 오류: `401`, `404`, `409`, `422`
+- 저장 기반 장애: `503 EXTERNAL_SERVICE_UNAVAILABLE`
 
 요청 예시:
 
@@ -1559,6 +1567,9 @@ claim할 때 `extraction_attempt_id`와 `extraction_started_at`을 저장한다.
 비어 있지 않은 `correction_reason`을 받아 version N+1 정정 revision을 추가한다.
 revision이 다르면 `409 REPORT_REVISION_CONFLICT`를 반환한다. 기존 revision·flag·문의
 문안은 수정하거나 삭제하지 않으며, 같은 멱등 요청은 최초 revision 응답을 재생한다.
+달력상 뒤 월이 이미 확정된 상태에서 과거 월을 처음 확정하면 월간 비교 누락을 막기 위해
+`409 REPORT_PERIOD_ORDER_CONFLICT`로 거부한다. 바로 전월 revision이 flag 계산 이후
+정정된 경우도 원자 RPC에서 감지해 `409 REPORT_REVISION_CONFLICT`로 재확인을 요구한다.
 더 뒤의 확정 월이 있으면 `409 REPORT_CORRECTION_DEPENDENCY_EXISTS`로 정정을 거부한다.
 `expected_revision`은 0 이상 정수이며, 정정 사유는 앞뒤 공백과 제어문자를 제거한
 1~500자 문자열이어야 한다.
@@ -1579,6 +1590,9 @@ revision이 다르면 `409 REPORT_REVISION_CONFLICT`를 반환한다. 기존 rev
 `engagement_rate=null`로 둔다. 비교는 반올림 전 `Decimal` 값으로 수행하고 API는
 비율값을 소수 6자리 `ROUND_HALF_UP`으로 반환한다. 화면의 백분율 표시는 소수
 2자리로 반올림한다.
+정확한 DB·도메인 상한은 `36893488147419103228.000000`이고, JSON number
+IEEE-754 직렬화 상한 `36893488147419103232`를 OpenAPI 응답 경계로 사용한다.
+계산·신호·저장은 직렬화 전 정확한 `Decimal` 값으로만 수행한다.
 
 `has_issue=true`면 비어 있지 않은 `issue_note`가 필요하다. 사용자 이상 기록
 또는 17.3의 결정적 확인 신호가 하나 이상이면 `FLAGGED`, 그렇지 않으면
@@ -1600,6 +1614,7 @@ report의 `current_revision_id`·현재 상태와 감사 이벤트를 같은 트
 - 구현 상태: canonical OpenAPI·FastAPI runtime 등록 완료
 - 성공: `200 ContractPerformanceResponse`
 - 오류: `401`, `404`, `422`
+- 저장 기반 장애: `503 EXTERNAL_SERVICE_UNAVAILABLE`
 
 응답은 다음 네 구역을 포함한다.
 
@@ -1615,7 +1630,8 @@ report의 `current_revision_id`·현재 상태와 감사 이벤트를 같은 트
 기록, 감사 이벤트를 변경하지 않고 AI나 문안 생성기를 실행하지 않는다. 과거 revision은
 감사 이력으로만 제공하고 현재 집계에 중복 포함하지 않는다. 원본은
 `source_document_id`를 기존 문서 접근 API에 전달해 열람한다. 문의 문안은 저장된
-snapshot만 응답으로 제공하고 서버가 외부로 발송하지 않는다.
+snapshot만 응답으로 제공하고 서버가 외부로 발송하지 않는다. owner 확인과 전체
+report/revision/flag/문의 문안은 단일 DB statement snapshot으로 읽는다.
 
 ## 17. 데이터·상태·비교 규칙 — P2-0 확정값
 
@@ -1833,17 +1849,17 @@ revision·문의 문안 snapshot·조회 집계를 맡는다. API 개수는 2:2�
 ## 19. P2 구현 완료 기준
 
 - [x] 17.4 확정값 7개를 기획안·API 명세·OpenAPI·데이터 계약·공통 enum·오류·Pydantic에 같은 값으로 반영
-- [ ] 계획 OpenAPI 4개를 active로 전환하고 FastAPI runtime method·path·operationId·응답 일치
-- [ ] 구현 후 활성 API 34개, B 13개, C 21개 담당표 일치
-- [ ] `Document.type=PERFORMANCE_REPORT`, source Document 고유 FK, `PerformanceReport`, revision·basis 연결·flag·문의 snapshot·현재 projection DB 제약 일치
-- [ ] `REPORT_PERIOD_ALREADY_EXISTS`, `REPORT_REVISION_CONFLICT`, `REPORT_CORRECTION_DEPENDENCY_EXISTS`, `REPORT_EXTRACTION_IN_PROGRESS`, `REPORT_EXTRACT_FAILED` 상태·재시도·멱등 테스트
-- [ ] 원본 Document·AI 추출값·소유자 확정 revision·과거 revision 교차 혼용 금지
-- [ ] `UPLOADED → EXTRACTED → CONFIRMED / FLAGGED`, 추출 attempt claim·15분 stale 복구·늦은 응답 거부, terminal PATCH 최신 월 revision 추가·stale/dependency 409 테스트
-- [ ] 각 월의 최신 확정 revision만 광고효과 화면·계약 대조·재계약 근거에 집계
-- [ ] 수량 부족만 신호, 검증된 수량·월 주기 근거, 양월 1,000 노출·1.0%p·25%·saves/shares 구성 경계 테스트
-- [ ] 문의 문안 3종 exact template·길이·포맷·snapshot·GET 무생성·무AI·미발송·비판정 톤 테스트
-- [ ] 소유권·private Storage·문서 접근·`no-store`·multipart 멱등 fingerprint·로그 마스킹 테스트
-- [ ] revision·flag·문의 snapshot·현재 projection·감사 이벤트 원자 저장과 중복 방지
-- [ ] B·C 단위·통합·API 테스트와 기존 P0 전체 회귀 통과
-- [ ] Upstage·Solar mock/live 분리, 명시적 live 결과, `AI_USAGE.md` 갱신
+- [x] 계획 OpenAPI 4개를 active로 전환하고 FastAPI runtime method·path·operationId·응답 일치
+- [x] 구현 후 활성 API 34개, B 13개, C 21개 담당표 일치
+- [x] `Document.type=PERFORMANCE_REPORT`, source Document 고유 FK, `PerformanceReport`, revision·basis 연결·flag·문의 snapshot·현재 projection DB 제약 일치
+- [x] `REPORT_PERIOD_ALREADY_EXISTS`, `REPORT_PERIOD_ORDER_CONFLICT`, `REPORT_REVISION_CONFLICT`, `REPORT_CORRECTION_DEPENDENCY_EXISTS`, `REPORT_EXTRACTION_IN_PROGRESS`, `REPORT_EXTRACT_FAILED` 상태·재시도·멱등 테스트
+- [x] 원본 Document·AI 추출값·소유자 확정 revision·과거 revision 교차 혼용 금지
+- [x] `UPLOADED → EXTRACTED → CONFIRMED / FLAGGED`, 추출 attempt claim·15분 stale 복구·늦은 응답 거부, terminal PATCH 최신 월 revision 추가·stale/dependency 409 테스트
+- [x] 각 월의 최신 확정 revision만 광고효과 화면·계약 대조·재계약 근거에 집계
+- [x] 수량 부족만 신호, 검증된 수량·월 주기 근거, 양월 1,000 노출·1.0%p·25%·saves/shares 구성 경계 테스트
+- [x] 문의 문안 3종 exact template·길이·포맷·snapshot·GET 무생성·무AI·미발송·비판정 톤 테스트
+- [x] 소유권·private Storage·문서 접근·`no-store`·multipart 멱등 fingerprint·로그 마스킹 테스트
+- [x] revision·flag·문의 snapshot·현재 projection·감사 이벤트 원자 저장과 중복 방지
+- [x] B·C 단위·통합·API 테스트와 기존 P0 전체 회귀 통과
+- [x] Upstage·Solar mock/live 분리, 명시적 live 결과, `AI_USAGE.md` 갱신
 - [ ] 프론트 목업의 임시 데이터를 실제 API로 교체하고 최초 확정·정정·최신 조회·과거 이력 보존 E2E 통과

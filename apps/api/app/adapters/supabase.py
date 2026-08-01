@@ -402,9 +402,7 @@ class SupabaseAdapter:
         record: DocumentRecord,
     ) -> DocumentRecord | None:
         if record.type is DocumentType.PERFORMANCE_REPORT:
-            raise InvalidDocument(
-                "광고효과 리포트는 전용 업로드 API에서만 생성할 수 있습니다."
-            )
+            raise InvalidDocument("광고효과 리포트는 전용 업로드 API에서만 생성할 수 있습니다.")
         if self.mode == "mock":
             async with self._mock_lock:
                 if (owner_id, record.contract_id) not in self._mock_owned_contracts:
@@ -814,9 +812,7 @@ class SupabaseAdapter:
 
                 existing_report = self._mock_performance_reports.get(report_id)
                 if existing_report is not None:
-                    existing_document = self._mock_documents.get(
-                        existing_report.source_document_id
-                    )
+                    existing_document = self._mock_documents.get(existing_report.source_document_id)
                     if _performance_upload_is_replay(
                         report=existing_report,
                         source_document=existing_document,
@@ -841,8 +837,7 @@ class SupabaseAdapter:
                 }:
                     return PerformanceReportUploadResult(outcome="INVALID_STATUS")
                 if any(
-                    report.contract_id == source_document.contract_id
-                    and report.period == period
+                    report.contract_id == source_document.contract_id and report.period == period
                     for report in self._mock_performance_reports.values()
                 ):
                     return PerformanceReportUploadResult(outcome="PERIOD_ALREADY_EXISTS")
@@ -894,9 +889,7 @@ class SupabaseAdapter:
                     params,
                 ).execute()
             )
-            result = _performance_upload_result_from_payload(
-                _rpc_json_payload(response.data)
-            )
+            result = _performance_upload_result_from_payload(_rpc_json_payload(response.data))
         except ExternalStorageFailure:
             raise
         except Exception as error:
@@ -905,15 +898,12 @@ class SupabaseAdapter:
             ) from error
 
         if result.outcome in {"CREATED", "REPLAYED"}:
-            if (
-                result.report is None
-                or not _performance_upload_is_replay(
-                    report=result.report,
-                    source_document=result.source_document,
-                    report_id=report_id,
-                    period=period,
-                    requested_document=source_document,
-                )
+            if result.report is None or not _performance_upload_is_replay(
+                report=result.report,
+                source_document=result.source_document,
+                report_id=report_id,
+                period=period,
+                requested_document=source_document,
             ):
                 raise ExternalStorageFailure(
                     "성과 리포트 업로드 저장 결과가 요청과 일치하지 않습니다."
@@ -956,12 +946,16 @@ class SupabaseAdapter:
                     or document.type is not DocumentType.PERFORMANCE_REPORT
                 ):
                     return PerformanceExtractionClaim(outcome="NOT_FOUND")
-                if contract.status not in {
-                    ContractStatus.SIGNED,
-                    ContractStatus.IN_PROGRESS,
-                    ContractStatus.RENEWAL_DUE,
-                    ContractStatus.COMPLETED,
-                } or report.status is not PerformanceReportStatus.UPLOADED:
+                if (
+                    contract.status
+                    not in {
+                        ContractStatus.SIGNED,
+                        ContractStatus.IN_PROGRESS,
+                        ContractStatus.RENEWAL_DUE,
+                        ContractStatus.COMPLETED,
+                    }
+                    or report.status is not PerformanceReportStatus.UPLOADED
+                ):
                     return PerformanceExtractionClaim(outcome="INVALID_STATUS")
 
                 recovered = False
@@ -988,16 +982,13 @@ class SupabaseAdapter:
                 if started_at < created_at or (
                     report.updated_at is not None and started_at < report.updated_at
                 ):
-                    raise ValueError(
-                        "추출 attempt는 리포트의 마지막 수정 전에 시작할 수 없습니다."
-                    )
+                    raise ValueError("추출 attempt는 리포트의 마지막 수정 전에 시작할 수 없습니다.")
                 if recovered:
                     stale_keys = [
                         record_key
                         for record_key, record in self._mock_idempotency.items()
                         if record.owner_id == owner_id
-                        and record.operation
-                        is IdempotencyOperation.PERFORMANCE_REPORT_EXTRACT
+                        and record.operation is IdempotencyOperation.PERFORMANCE_REPORT_EXTRACT
                         and record.resource_id == report_id
                         and record.key != idempotency_key
                         and record.response_status is None
@@ -1011,8 +1002,7 @@ class SupabaseAdapter:
                             event_type="PERFORMANCE_REPORT_EXTRACTION_RECOVERED",
                             actor_type="OWNER",
                             summary=(
-                                "15분 이상 지연된 광고효과 리포트 추출을 "
-                                "명시적으로 재시도했습니다."
+                                "15분 이상 지연된 광고효과 리포트 추출을 명시적으로 재시도했습니다."
                             ),
                             created_at=started_at,
                             payload={
@@ -1104,12 +1094,16 @@ class SupabaseAdapter:
                         report=report,
                         source_document=document,
                     )
-                if contract.status not in {
-                    ContractStatus.SIGNED,
-                    ContractStatus.IN_PROGRESS,
-                    ContractStatus.RENEWAL_DUE,
-                    ContractStatus.COMPLETED,
-                } or report.status is not PerformanceReportStatus.UPLOADED:
+                if (
+                    contract.status
+                    not in {
+                        ContractStatus.SIGNED,
+                        ContractStatus.IN_PROGRESS,
+                        ContractStatus.RENEWAL_DUE,
+                        ContractStatus.COMPLETED,
+                    }
+                    or report.status is not PerformanceReportStatus.UPLOADED
+                ):
                     return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
                 if document.parse_status is not DocumentParseStatus.PROCESSING:
                     return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
@@ -1208,12 +1202,16 @@ class SupabaseAdapter:
                 contract, report, document = owned
                 if report.extraction_attempt_id != attempt_id:
                     return PerformanceExtractionApplyResult(outcome="STALE")
-                if contract.status not in {
-                    ContractStatus.SIGNED,
-                    ContractStatus.IN_PROGRESS,
-                    ContractStatus.RENEWAL_DUE,
-                    ContractStatus.COMPLETED,
-                } or report.status is not PerformanceReportStatus.UPLOADED:
+                if (
+                    contract.status
+                    not in {
+                        ContractStatus.SIGNED,
+                        ContractStatus.IN_PROGRESS,
+                        ContractStatus.RENEWAL_DUE,
+                        ContractStatus.COMPLETED,
+                    }
+                    or report.status is not PerformanceReportStatus.UPLOADED
+                ):
                     return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
                 if (
                     report.extracted_payload is None
@@ -1228,10 +1226,7 @@ class SupabaseAdapter:
                     )
                 if document.parse_status is not DocumentParseStatus.PROCESSING:
                     return PerformanceExtractionApplyResult(outcome="INVALID_STATUS")
-                if (
-                    report.extraction_started_at is None
-                    or failed_at < report.extraction_started_at
-                ):
+                if report.extraction_started_at is None or failed_at < report.extraction_started_at:
                     raise ValueError("추출 실패 시각은 attempt 시작 전일 수 없습니다.")
 
                 failed_report = replace(report, updated_at=failed_at)
@@ -1272,9 +1267,7 @@ class SupabaseAdapter:
             except Exception as error:
                 last_error = error
         assert last_error is not None
-        raise ExternalStorageFailure(
-            "광고효과 추출 실패 상태 저장에 실패했습니다."
-        ) from last_error
+        raise ExternalStorageFailure("광고효과 추출 실패 상태 저장에 실패했습니다.") from last_error
 
     def _mock_performance_extraction_rows(
         self,
@@ -1333,9 +1326,12 @@ class SupabaseAdapter:
         report_row = report_response.data[0]
 
         try:
-            revision_rows, flags_by_revision, basis_by_flag, drafts_by_flag = (
-                await self._live_performance_revision_rows(client, report_id=report_id)
-            )
+            (
+                revision_rows,
+                flags_by_revision,
+                basis_by_flag,
+                drafts_by_flag,
+            ) = await self._live_performance_revision_rows(client, report_id=report_id)
             return _performance_report_from_rows(
                 report_row=report_row,
                 revision_rows=revision_rows,
@@ -1349,6 +1345,62 @@ class SupabaseAdapter:
             raise ExternalStorageFailure(
                 "광고효과 리포트 조회 결과가 올바르지 않습니다."
             ) from error
+
+    async def get_owned_contract_performance_reports(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> list[PerformanceReport] | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if (
+                    (owner_id, contract_id) not in self._mock_owned_contracts
+                    or contract is None
+                    or contract.owner_id != owner_id
+                ):
+                    return None
+                access_rows = sorted(
+                    (
+                        report
+                        for report in self._mock_performance_reports.values()
+                        if report.contract_id == contract_id
+                    ),
+                    key=lambda report: (report.period, str(report.id)),
+                )
+                return [
+                    _performance_report_from_access(
+                        access,
+                        self._mock_performance_report_revisions.get(access.id, []),
+                    )
+                    for access in access_rows
+                ]
+
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "get_owned_contract_performance_snapshot",
+                    {
+                        "p_owner_id": str(owner_id),
+                        "p_contract_id": str(contract_id),
+                    },
+                ).execute()
+            )
+            payload = _rpc_json_payload(response.data)
+            return _owned_contract_performance_reports_from_payload(
+                payload,
+                contract_id=contract_id,
+            )
+        except ExternalStorageFailure:
+            raise
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "계약별 광고효과 snapshot 조회 결과가 올바르지 않습니다."
+            ) from error
+        except Exception as error:
+            raise ExternalStorageFailure("계약별 광고효과 snapshot 조회에 실패했습니다.") from error
 
     async def _live_performance_revision_rows(
         self,
@@ -1387,7 +1439,7 @@ class SupabaseAdapter:
             )
             flag_rows: list[dict] = flags_response.data or []
             for row in flag_rows:
-                flags_by_revision.setdefault(row["report_revision_id"], []).append(row)
+                flags_by_revision.setdefault(str(row["report_revision_id"]), []).append(row)
             flag_ids = [row["id"] for row in flag_rows]
             if flag_ids:
                 basis_response = await asyncio.to_thread(
@@ -1399,7 +1451,7 @@ class SupabaseAdapter:
                     )
                 )
                 for row in basis_response.data or []:
-                    basis_by_flag.setdefault(row["flag_id"], []).append(row)
+                    basis_by_flag.setdefault(str(row["flag_id"]), []).append(row)
                 drafts_response = await asyncio.to_thread(
                     lambda: (
                         client.table("performance_inquiry_drafts")
@@ -1409,7 +1461,7 @@ class SupabaseAdapter:
                     )
                 )
                 for row in drafts_response.data or []:
-                    drafts_by_flag[row["flag_id"]] = row
+                    drafts_by_flag[str(row["flag_id"])] = row
             return revision_rows, flags_by_revision, basis_by_flag, drafts_by_flag
         except Exception as error:
             raise ExternalStorageFailure(
@@ -1423,6 +1475,7 @@ class SupabaseAdapter:
         contract_id: UUID,
         report_id: UUID,
         expected_revision: int,
+        expected_comparison_revision_id: UUID | None,
         revision: PerformanceReportRevision,
     ) -> PerformanceReportConfirmResult:
         if self.mode == "mock":
@@ -1437,22 +1490,51 @@ class SupabaseAdapter:
                     or report.contract_id != contract_id
                 ):
                     return PerformanceReportConfirmResult(outcome="NOT_FOUND")
+                if contract.status not in {
+                    ContractStatus.SIGNED,
+                    ContractStatus.IN_PROGRESS,
+                    ContractStatus.RENEWAL_DUE,
+                    ContractStatus.COMPLETED,
+                }:
+                    return PerformanceReportConfirmResult(outcome="CONTRACT_INVALID_STATUS")
                 if report.status is PerformanceReportStatus.UPLOADED:
-                    return PerformanceReportConfirmResult(outcome="INVALID_STATUS")
+                    return PerformanceReportConfirmResult(outcome="REPORT_INVALID_STATUS")
                 if report.revision_count != expected_revision:
                     return PerformanceReportConfirmResult(outcome="REVISION_CONFLICT")
-                if expected_revision > 0:
-                    later_exists = any(
-                        other.contract_id == contract_id
+
+                previous_period = _previous_performance_period(report.period)
+                previous_report = next(
+                    (
+                        other
+                        for other in self._mock_performance_reports.values()
+                        if other.contract_id == contract_id
+                        and other.period == previous_period
                         and other.status
                         in {PerformanceReportStatus.CONFIRMED, PerformanceReportStatus.FLAGGED}
-                        and other.period > report.period
-                        for other in self._mock_performance_reports.values()
-                    )
-                    if later_exists:
-                        return PerformanceReportConfirmResult(
-                            outcome="CORRECTION_DEPENDENCY_EXISTS"
+                    ),
+                    None,
+                )
+                current_comparison_revision_id = (
+                    previous_report.current_revision_id if previous_report is not None else None
+                )
+                if current_comparison_revision_id != expected_comparison_revision_id:
+                    return PerformanceReportConfirmResult(outcome="COMPARISON_REVISION_CONFLICT")
+
+                later_exists = any(
+                    other.contract_id == contract_id
+                    and other.status
+                    in {PerformanceReportStatus.CONFIRMED, PerformanceReportStatus.FLAGGED}
+                    and other.period > report.period
+                    for other in self._mock_performance_reports.values()
+                )
+                if later_exists:
+                    return PerformanceReportConfirmResult(
+                        outcome=(
+                            "PERIOD_ORDER_CONFLICT"
+                            if expected_revision == 0
+                            else "CORRECTION_DEPENDENCY_EXISTS"
                         )
+                    )
 
                 history = [*self._mock_performance_report_revisions.get(report_id, []), revision]
                 self._mock_performance_report_revisions[report_id] = history
@@ -1493,6 +1575,11 @@ class SupabaseAdapter:
             "p_contract_id": str(contract_id),
             "p_report_id": str(report_id),
             "p_expected_revision": expected_revision,
+            "p_expected_comparison_revision_id": (
+                str(expected_comparison_revision_id)
+                if expected_comparison_revision_id is not None
+                else None
+            ),
             "p_revision_id": str(revision.id),
             "p_status": revision.status.value,
             "p_confirmed_payload": revision.confirmed_payload.model_dump(mode="json"),
@@ -1524,13 +1611,17 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("광고효과 리포트 확정 저장에 실패했습니다.") from error
         payload = _rpc_json_payload(response.data)
-        outcome = payload.get("outcome")
-        if outcome != "CONFIRMED":
-            return PerformanceReportConfirmResult(outcome=outcome)
-        report = await self.get_report(report_id=report_id)
-        if report is None:
-            raise ExternalStorageFailure("확정된 광고효과 리포트를 다시 조회하지 못했습니다.")
-        return PerformanceReportConfirmResult(outcome="CONFIRMED", report=report)
+        try:
+            return _performance_confirm_result_from_payload(
+                payload,
+                contract_id=contract_id,
+                report_id=report_id,
+                revision=revision,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "광고효과 리포트 확정 snapshot이 올바르지 않습니다."
+            ) from error
 
     async def create_signed_access_url(
         self,
@@ -3840,9 +3931,7 @@ class SupabaseAdapter:
                     if review.contract_id == contract_id
                 ]
                 return (
-                    max(reviews, key=lambda item: (item.created_at, item.id))
-                    if reviews
-                    else None
+                    max(reviews, key=lambda item: (item.created_at, item.id)) if reviews else None
                 )
         client = self._require_live_client()
         params = {"p_owner_id": str(owner_id), "p_contract_id": str(contract_id)}
@@ -4963,14 +5052,10 @@ def _performance_report_access_from_row(row: dict) -> PerformanceReportAccess:
             else None
         ),
         created_at=(
-            _parse_datetime(row["created_at"])
-            if row.get("created_at") is not None
-            else None
+            _parse_datetime(row["created_at"]) if row.get("created_at") is not None else None
         ),
         updated_at=(
-            _parse_datetime(row["updated_at"])
-            if row.get("updated_at") is not None
-            else None
+            _parse_datetime(row["updated_at"]) if row.get("updated_at") is not None else None
         ),
     )
 
@@ -4980,6 +5065,13 @@ def _performance_report_from_access(
     revisions: list[PerformanceReportRevision],
 ) -> PerformanceReport:
     ordered = sorted(revisions, key=lambda revision: revision.version)
+    current_revision = ordered[-1] if ordered else None
+    if access.revision_count != len(ordered):
+        raise ValueError("성과 리포트 revision_count가 저장된 revision 수와 다릅니다.")
+    if (access.current_revision_id is None) != (current_revision is None):
+        raise ValueError("성과 리포트 현재 revision projection이 저장 이력과 다릅니다.")
+    if current_revision is not None and access.current_revision_id != current_revision.id:
+        raise ValueError("성과 리포트 current_revision_id가 최신 revision과 다릅니다.")
     return PerformanceReport(
         id=access.id,
         contract_id=access.contract_id,
@@ -4987,8 +5079,8 @@ def _performance_report_from_access(
         source_document_id=access.source_document_id,
         status=access.status,
         extracted_payload=access.extracted_payload,
-        current_revision=ordered[-1] if ordered else None,
-        revision_count=len(ordered),
+        current_revision=current_revision,
+        revision_count=access.revision_count,
         revisions=ordered,
         created_at=access.created_at,
         updated_at=access.updated_at,
@@ -5041,21 +5133,21 @@ def _performance_revision_from_row(
     flags = [
         _performance_flag_from_row(
             flag_row,
-            basis_rows=basis_by_flag.get(flag_row["id"], []),
-            draft_row=drafts_by_flag.get(flag_row["id"]),
+            basis_rows=basis_by_flag.get(str(flag_row["id"]), []),
+            draft_row=drafts_by_flag.get(str(flag_row["id"])),
         )
         for flag_row in flag_rows
     ]
     inquiry_drafts = [
         PerformanceInquiryDraft(
-            id=UUID(str(drafts_by_flag[flag_row["id"]]["id"])),
+            id=UUID(str(drafts_by_flag[str(flag_row["id"])]["id"])),
             flag_id=UUID(str(flag_row["id"])),
-            text=drafts_by_flag[flag_row["id"]]["text"],
-            template_version=drafts_by_flag[flag_row["id"]]["template_version"],
-            created_at=_parse_datetime(drafts_by_flag[flag_row["id"]]["created_at"]),
+            text=drafts_by_flag[str(flag_row["id"])]["text"],
+            template_version=drafts_by_flag[str(flag_row["id"])]["template_version"],
+            created_at=_parse_datetime(drafts_by_flag[str(flag_row["id"])]["created_at"]),
         )
         for flag_row in flag_rows
-        if flag_row["id"] in drafts_by_flag
+        if str(flag_row["id"]) in drafts_by_flag
     ]
     return PerformanceReportRevision(
         id=UUID(str(row["id"])),
@@ -5083,13 +5175,26 @@ def _performance_report_from_rows(
     revisions = [
         _performance_revision_from_row(
             revision_row,
-            flag_rows=flags_by_revision.get(revision_row["id"], []),
+            flag_rows=flags_by_revision.get(str(revision_row["id"]), []),
             basis_by_flag=basis_by_flag,
             drafts_by_flag=drafts_by_flag,
         )
         for revision_row in revision_rows
     ]
     extracted_payload = report_row.get("extracted_payload")
+    persisted_revision_count = int(report_row.get("revision_count", 0))
+    persisted_current_revision_id = (
+        UUID(str(report_row["current_revision_id"]))
+        if report_row.get("current_revision_id") is not None
+        else None
+    )
+    current_revision = revisions[-1] if revisions else None
+    if persisted_revision_count != len(revisions):
+        raise ValueError("성과 리포트 revision_count가 저장된 revision 수와 다릅니다.")
+    if (persisted_current_revision_id is None) != (current_revision is None):
+        raise ValueError("성과 리포트 현재 revision projection이 저장 이력과 다릅니다.")
+    if current_revision is not None and persisted_current_revision_id != current_revision.id:
+        raise ValueError("성과 리포트 current_revision_id가 최신 revision과 다릅니다.")
     return PerformanceReport(
         id=UUID(str(report_row["id"])),
         contract_id=UUID(str(report_row["contract_id"])),
@@ -5101,11 +5206,62 @@ def _performance_report_from_rows(
             if extracted_payload is not None
             else None
         ),
-        current_revision=revisions[-1] if revisions else None,
-        revision_count=len(revisions),
+        current_revision=current_revision,
+        revision_count=persisted_revision_count,
         revisions=revisions,
         created_at=_parse_datetime(report_row["created_at"]),
         updated_at=_parse_datetime(report_row["updated_at"]),
+    )
+
+
+def _performance_report_from_snapshot_payload(snapshot: object) -> PerformanceReport:
+    if not isinstance(snapshot, dict):
+        raise ValueError("성과 리포트 snapshot은 객체여야 합니다.")
+    report_row = snapshot.get("report")
+    revision_rows = snapshot.get("revisions")
+    flag_rows = snapshot.get("flags")
+    basis_rows = snapshot.get("basis_terms")
+    draft_rows = snapshot.get("inquiry_drafts")
+    if not isinstance(report_row, dict) or not all(
+        isinstance(rows, list) for rows in (revision_rows, flag_rows, basis_rows, draft_rows)
+    ):
+        raise ValueError("성과 리포트 snapshot의 중첩 컬렉션이 올바르지 않습니다.")
+    if not all(
+        isinstance(row, dict)
+        for rows in (revision_rows, flag_rows, basis_rows, draft_rows)
+        for row in rows
+    ):
+        raise ValueError("성과 리포트 snapshot 행이 올바르지 않습니다.")
+
+    revision_ids = {str(row["id"]) for row in revision_rows}
+    flags_by_revision: dict[str, list[dict]] = {}
+    for row in flag_rows:
+        revision_id = str(row["report_revision_id"])
+        if revision_id not in revision_ids:
+            raise ValueError("성과 확인 신호가 snapshot 밖의 revision을 참조합니다.")
+        flags_by_revision.setdefault(revision_id, []).append(row)
+
+    flag_ids = {str(row["id"]) for row in flag_rows}
+    basis_by_flag: dict[str, list[dict]] = {}
+    for row in basis_rows:
+        flag_id = str(row["flag_id"])
+        if flag_id not in flag_ids:
+            raise ValueError("성과 근거가 snapshot 밖의 확인 신호를 참조합니다.")
+        basis_by_flag.setdefault(flag_id, []).append(row)
+
+    drafts_by_flag: dict[str, dict] = {}
+    for row in draft_rows:
+        flag_id = str(row["flag_id"])
+        if flag_id not in flag_ids or flag_id in drafts_by_flag:
+            raise ValueError("성과 문의 문안의 확인 신호 연결이 올바르지 않습니다.")
+        drafts_by_flag[flag_id] = row
+
+    return _performance_report_from_rows(
+        report_row=report_row,
+        revision_rows=revision_rows,
+        flags_by_revision=flags_by_revision,
+        basis_by_flag=basis_by_flag,
+        drafts_by_flag=drafts_by_flag,
     )
 
 
@@ -5181,6 +5337,111 @@ def _rpc_json_payload(data: object) -> dict:
     return payload
 
 
+def _performance_confirm_result_from_payload(
+    payload: dict,
+    *,
+    contract_id: UUID,
+    report_id: UUID,
+    revision: PerformanceReportRevision,
+) -> PerformanceReportConfirmResult:
+    outcome = payload.get("outcome")
+    allowed_outcomes = {
+        "CONFIRMED",
+        "REVISION_CONFLICT",
+        "COMPARISON_REVISION_CONFLICT",
+        "PERIOD_ORDER_CONFLICT",
+        "CORRECTION_DEPENDENCY_EXISTS",
+        "CONTRACT_INVALID_STATUS",
+        "REPORT_INVALID_STATUS",
+        "NOT_FOUND",
+    }
+    if outcome not in allowed_outcomes:
+        raise ValueError("알 수 없는 광고효과 리포트 확정 결과입니다.")
+    snapshot = payload.get("report_snapshot")
+    if outcome != "CONFIRMED":
+        if snapshot is not None:
+            raise ValueError("거부된 광고효과 리포트 확정 결과에 snapshot이 포함됐습니다.")
+        return PerformanceReportConfirmResult(outcome=outcome)
+
+    report = _performance_report_from_snapshot_payload(snapshot)
+    if (
+        report.id != report_id
+        or report.contract_id != contract_id
+        or report.current_revision is None
+        or report.current_revision.id != revision.id
+        or report.current_revision.version != revision.version
+        or not _performance_revision_snapshot_matches(report.current_revision, revision)
+        or report.revision_count != revision.version
+    ):
+        raise ValueError("확정 RPC snapshot이 이번 요청의 revision projection과 다릅니다.")
+    return PerformanceReportConfirmResult(outcome="CONFIRMED", report=report)
+
+
+def _performance_revision_snapshot_matches(
+    actual: PerformanceReportRevision,
+    expected: PerformanceReportRevision,
+) -> bool:
+    if (
+        actual.id,
+        actual.report_id,
+        actual.version,
+        actual.status,
+        actual.confirmed_payload,
+        actual.engagement_rate,
+        actual.corrected_from_revision_id,
+        actual.correction_reason,
+        actual.confirmed_at,
+    ) != (
+        expected.id,
+        expected.report_id,
+        expected.version,
+        expected.status,
+        expected.confirmed_payload,
+        expected.engagement_rate,
+        expected.corrected_from_revision_id,
+        expected.correction_reason,
+        expected.confirmed_at,
+    ):
+        return False
+    return {flag.id: flag for flag in actual.flags} == {
+        flag.id: flag for flag in expected.flags
+    } and {draft.id: draft for draft in actual.inquiry_drafts} == {
+        draft.id: draft for draft in expected.inquiry_drafts
+    }
+
+
+def _owned_contract_performance_reports_from_payload(
+    payload: dict,
+    *,
+    contract_id: UUID,
+) -> list[PerformanceReport] | None:
+    outcome = payload.get("outcome")
+    raw_snapshots = payload.get("report_snapshots")
+    if outcome == "NOT_FOUND":
+        if raw_snapshots is not None:
+            raise ValueError("소유하지 않은 계약 snapshot에 리포트가 포함됐습니다.")
+        return None
+    if outcome != "FOUND" or not isinstance(raw_snapshots, list):
+        raise ValueError("계약별 광고효과 snapshot 결과가 올바르지 않습니다.")
+
+    reports = [_performance_report_from_snapshot_payload(snapshot) for snapshot in raw_snapshots]
+    if any(report.contract_id != contract_id for report in reports):
+        raise ValueError("계약별 광고효과 snapshot에 다른 계약의 리포트가 포함됐습니다.")
+    expected_order = sorted(reports, key=lambda report: (report.period, str(report.id)))
+    if reports != expected_order or len({report.id for report in reports}) != len(reports):
+        raise ValueError("계약별 광고효과 snapshot의 정렬 또는 고유성이 올바르지 않습니다.")
+    return reports
+
+
+def _previous_performance_period(period: str) -> str | None:
+    year, month = (int(part) for part in period.split("-"))
+    if month == 1:
+        if year == 1:
+            return None
+        return f"{year - 1:04d}-12"
+    return f"{year:04d}-{month - 1:02d}"
+
+
 def _performance_upload_result_from_payload(payload: dict) -> PerformanceReportUploadResult:
     outcome = payload.get("outcome")
     successful = outcome in {"CREATED", "REPLAYED"}
@@ -5216,9 +5477,7 @@ def _performance_upload_result_from_payload(payload: dict) -> PerformanceReportU
             ),
         )
     except (KeyError, TypeError, ValueError) as error:
-        raise ExternalStorageFailure(
-            "성과 리포트 업로드 저장 결과가 올바르지 않습니다."
-        ) from error
+        raise ExternalStorageFailure("성과 리포트 업로드 저장 결과가 올바르지 않습니다.") from error
 
 
 def _performance_extraction_claim_from_payload(
@@ -5252,9 +5511,7 @@ def _performance_extraction_claim_from_payload(
             ),
         )
     except (KeyError, TypeError, ValueError) as error:
-        raise ExternalStorageFailure(
-            "광고효과 추출 점유 결과가 올바르지 않습니다."
-        ) from error
+        raise ExternalStorageFailure("광고효과 추출 점유 결과가 올바르지 않습니다.") from error
 
 
 def _performance_extraction_apply_result_from_payload(
@@ -5282,9 +5539,7 @@ def _performance_extraction_apply_result_from_payload(
             ),
         )
     except (KeyError, TypeError, ValueError) as error:
-        raise ExternalStorageFailure(
-            "광고효과 추출 저장 결과가 올바르지 않습니다."
-        ) from error
+        raise ExternalStorageFailure("광고효과 추출 저장 결과가 올바르지 않습니다.") from error
 
 
 def _analysis_task_record_from_row(row: dict) -> AnalysisTaskRecord:

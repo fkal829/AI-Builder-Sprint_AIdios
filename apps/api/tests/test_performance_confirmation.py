@@ -6,17 +6,19 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.adapters.supabase import SupabaseAdapter
+from app.adapters.supabase import SupabaseAdapter, _previous_performance_period
 from app.api.dependencies import get_performance_confirmation_service, get_supabase_adapter
 from app.core.enums import (
     ContractStatus,
     ExtractedField,
     ExtractedSourceType,
     ExtractedValueType,
+    IdempotencyOperation,
     PerformanceMetricVerificationStatus,
     PerformanceReportStatus,
     VerificationStatus,
 )
+from app.core.exceptions import ExternalStorageFailure
 from app.main import app
 from app.repositories.analysis import AnalysisTaskRecord
 from app.repositories.contracts import ContractRecord
@@ -30,12 +32,24 @@ from app.schemas.performance import (
     PerformanceSignedMetricCandidate,
 )
 from app.services.idempotency import IdempotencyService
-from app.services.performance_confirmation import PerformanceConfirmationService
+from app.services.performance_confirmation import (
+    PerformanceConfirmationService,
+    _confirmation_request_id,
+    _confirmation_revision_id,
+    _immediately_preceding_month,
+)
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000201")
 DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000202")
 BEARER_TOKEN = "performance-confirm-owner-token"
 NOW = datetime(2026, 8, 5, 9, tzinfo=UTC)
+
+
+def test_first_ad_month_has_no_representable_previous_period() -> None:
+    assert _immediately_preceding_month("0001-01") is None
+    assert _previous_performance_period("0001-01") is None
+    assert _immediately_preceding_month("0001-02") == "0001-01"
+    assert _previous_performance_period("0001-02") == "0001-01"
 
 
 @pytest.fixture
@@ -64,7 +78,11 @@ async def performance_context():
             access_repository=adapter,
             confirmation_repository=adapter,
             analysis_repository=adapter,
-            idempotency=IdempotencyService(adapter),
+            idempotency=IdempotencyService(
+                adapter,
+                pending_replay_attempts=1,
+                pending_replay_delay_seconds=0,
+            ),
             now=clock,
         )
 
@@ -260,6 +278,14 @@ async def confirm(
     )
 
 
+def confirmation_idempotency_records(adapter: SupabaseAdapter):
+    return [
+        record
+        for record in adapter.mock_idempotency_records
+        if record.operation is IdempotencyOperation.PERFORMANCE_REPORT_CONFIRM
+    ]
+
+
 async def test_first_confirmation_creates_version_one(performance_context) -> None:
     client, adapter, _now = performance_context
     contract_id = uuid4()
@@ -424,6 +450,7 @@ async def test_confirmation_rejected_before_extraction(performance_context) -> N
     seed_contract(adapter, contract_id=contract_id)
     report_id = seed_extracted_report(adapter, contract_id=contract_id, period="2026-07")
     existing = adapter._mock_performance_reports[report_id]
+    key = uuid4()
     adapter._mock_performance_reports[report_id] = PerformanceReportAccess(
         id=report_id,
         contract_id=contract_id,
@@ -440,11 +467,29 @@ async def test_confirmation_rejected_before_extraction(performance_context) -> N
     )
 
     response = await confirm(
-        client, contract_id=contract_id, report_id=report_id, body=confirmation_payload()
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=key,
     )
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+    assert "지표를 추출하기 전" in response.json()["error"]["message"]
+    assert confirmation_idempotency_records(adapter) == []
+
+    adapter._mock_performance_reports[report_id] = existing
+    retried = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=key,
+    )
+
+    assert retried.status_code == 200
+    assert confirmation_idempotency_records(adapter)[0].response_status == 200
 
 
 async def test_engagement_rate_drop_detected_across_two_months(performance_context) -> None:
@@ -543,6 +588,207 @@ async def test_idempotent_replay_returns_identical_response_without_new_revision
     assert first.headers["X-Request-ID"] == replay.headers["X-Request-ID"]
     assert first.headers["X-Request-ID"] == first.json()["requestId"]
     assert len(adapter.mock_performance_report_revisions[report_id]) == 1
+
+
+async def test_commit_unknown_recovers_exact_revision_and_logical_first_response(
+    performance_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, adapter, _now = performance_context
+    contract_id = uuid4()
+    seed_contract(adapter, contract_id=contract_id)
+    report_id = seed_extracted_report(adapter, contract_id=contract_id, period="2026-07")
+    key = uuid4()
+    original = adapter.confirm_performance_report_with_audit
+    calls = 0
+
+    async def commit_then_lose_response(**kwargs):
+        nonlocal calls
+        calls += 1
+        await original(**kwargs)
+        raise ExternalStorageFailure("private confirmation rpc response lost")
+
+    monkeypatch.setattr(
+        adapter,
+        "confirm_performance_report_with_audit",
+        commit_then_lose_response,
+    )
+
+    first = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=key,
+    )
+
+    assert first.status_code == 503
+    assert first.json()["error"]["code"] == "EXTERNAL_SERVICE_UNAVAILABLE"
+    assert "private confirmation" not in first.text
+    assert calls == 1
+    assert len(adapter.mock_performance_report_revisions[report_id]) == 1
+    pending = confirmation_idempotency_records(adapter)
+    assert len(pending) == 1
+    assert pending[0].response_status is None
+
+    recovered = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=key,
+    )
+
+    expected_request_id = _confirmation_request_id(
+        owner_id=OWNER_ID,
+        contract_id=contract_id,
+        report_id=report_id,
+        idempotency_key=key,
+    )
+    expected_revision_id = _confirmation_revision_id(
+        owner_id=OWNER_ID,
+        contract_id=contract_id,
+        report_id=report_id,
+        idempotency_key=key,
+    )
+    assert recovered.status_code == 200
+    assert recovered.json()["requestId"] == expected_request_id
+    assert recovered.headers["X-Request-ID"] == expected_request_id
+    assert UUID(recovered.json()["data"]["current_revision"]["id"]) == expected_revision_id
+    assert calls == 1
+    assert len(adapter.mock_performance_report_revisions[report_id]) == 1
+    assert len(adapter.mock_audit_events) == 1
+    completed = confirmation_idempotency_records(adapter)
+    assert len(completed) == 1
+    assert completed[0].response_status == 200
+    assert completed[0].response_payload == {
+        "report": recovered.json()["data"],
+        "requestId": expected_request_id,
+    }
+
+
+async def test_pre_commit_infrastructure_failure_abandons_key_and_can_retry(
+    performance_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, adapter, _now = performance_context
+    contract_id = uuid4()
+    seed_contract(adapter, contract_id=contract_id)
+    report_id = seed_extracted_report(adapter, contract_id=contract_id, period="2026-07")
+    key = uuid4()
+    original = adapter.get_latest_analysis_task
+    calls = 0
+
+    async def fail_once_before_confirmation(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ExternalStorageFailure("private analysis lookup unavailable")
+        return await original(**kwargs)
+
+    monkeypatch.setattr(
+        adapter,
+        "get_latest_analysis_task",
+        fail_once_before_confirmation,
+    )
+
+    failed = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=key,
+    )
+
+    assert failed.status_code == 503
+    assert failed.json()["error"]["code"] == "EXTERNAL_SERVICE_UNAVAILABLE"
+    assert "private analysis" not in failed.text
+    assert confirmation_idempotency_records(adapter) == []
+    assert adapter.mock_performance_report_revisions.get(report_id) is None
+
+    retried = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=key,
+    )
+
+    assert retried.status_code == 200
+    assert len(adapter.mock_performance_report_revisions[report_id]) == 1
+    assert confirmation_idempotency_records(adapter)[0].response_status == 200
+
+
+async def test_pending_commit_is_not_recovered_after_another_revision_becomes_current(
+    performance_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, adapter, _now = performance_context
+    contract_id = uuid4()
+    seed_contract(adapter, contract_id=contract_id)
+    report_id = seed_extracted_report(adapter, contract_id=contract_id, period="2026-07")
+    pending_key = uuid4()
+    later_key = uuid4()
+    original = adapter.confirm_performance_report_with_audit
+    calls = 0
+
+    async def lose_only_first_response(**kwargs):
+        nonlocal calls
+        calls += 1
+        result = await original(**kwargs)
+        if calls == 1:
+            raise ExternalStorageFailure("first confirmation response lost")
+        return result
+
+    monkeypatch.setattr(
+        adapter,
+        "confirm_performance_report_with_audit",
+        lose_only_first_response,
+    )
+
+    first = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=pending_key,
+    )
+    assert first.status_code == 503
+
+    later = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(
+            expected_revision=1,
+            correction_reason="다른 요청이 먼저 정정함",
+            confirmed_payload={
+                **confirmation_payload()["confirmed_payload"],
+                "impressions": 12_500,
+            },
+        ),
+        idempotency_key=later_key,
+    )
+    assert later.status_code == 200
+    assert later.json()["data"]["revision_count"] == 2
+
+    stale_recovery = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(),
+        idempotency_key=pending_key,
+    )
+
+    assert stale_recovery.status_code == 409
+    assert stale_recovery.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+    assert calls == 2
+    assert len(adapter.mock_performance_report_revisions[report_id]) == 2
+    records = confirmation_idempotency_records(adapter)
+    pending_record = next(record for record in records if record.key == pending_key)
+    later_record = next(record for record in records if record.key == later_key)
+    assert pending_record.response_status is None
+    assert later_record.response_status == 200
 
 
 async def test_different_body_with_same_idempotency_key_conflicts(performance_context) -> None:
@@ -667,6 +913,7 @@ async def test_live_adapter_calls_confirm_rpc_with_expected_params(monkeypatch) 
         contract_id=contract_id,
         report_id=report_id,
         expected_revision=0,
+        expected_comparison_revision_id=None,
         revision=revision,
     )
 
@@ -679,6 +926,7 @@ async def test_live_adapter_calls_confirm_rpc_with_expected_params(monkeypatch) 
                 "p_contract_id": str(contract_id),
                 "p_report_id": str(report_id),
                 "p_expected_revision": 0,
+                "p_expected_comparison_revision_id": None,
                 "p_revision_id": str(revision_id),
                 "p_status": "CONFIRMED",
                 "p_confirmed_payload": payload.model_dump(mode="json"),

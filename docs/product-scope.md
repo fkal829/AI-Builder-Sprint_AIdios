@@ -24,7 +24,9 @@
 - 리포트 업로드·영속 저장과 Upstage·Solar 지표 추출 API 구현됨
 - 소상공인 확정값 저장·append-only 정정·계약 조건 대조·문의 문안·계약별 조회 API 구현됨
 - 비식별 합성 PDF의 Upstage Document Parse·Solar Adapter live 연결은 검증됨
-- 배포 FastAPI·live Supabase를 포함한 수직 E2E는 별도 검증이 필요함
+- 로컬 FastAPI 실제 TCP·live Supabase Auth/Storage/PostgreSQL·Upstage Parse·Solar를
+  포함한 16.2~16.5 수직 E2E 통과, 합성 fixture 정리 확인
+- 배포 FastAPI 환경의 수직 E2E는 배포 후 별도 검증
 
 ## 비목표
 

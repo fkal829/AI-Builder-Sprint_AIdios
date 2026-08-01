@@ -153,6 +153,13 @@ private 원본을 다운로드하고 Upstage Parse 후 이 mapper를 호출한�
 endpoint에 연결됐다. 일반 자동 테스트는 mock parser·mapper나 고정 fake를
 사용하며 외부 네트워크를 호출하지 않는다.
 
+16.3 서버는 stale 작업이나 extraction attempt 전체를 자동으로 재실행하지 않는다.
+사용자가 새 `Idempotency-Key`로 명시적으로 재시도해야 Document Parse부터 새 attempt가
+시작된다. 다만 이미 claim한 동일 attempt 안에서 Solar 요청이 일시적인 transport 오류
+또는 HTTP `429`/`500`/`502`/`503`/`504`로 실패하면 mapper가 최대 1회 전송
+재시도한다. 이 재전송은 Document Parse를 다시 실행하거나 새 attempt를 claim하지 않으며,
+두 전송이 모두 실패하면 `REPORT_EXTRACT_FAILED`로 종료한다.
+
 2026-08-01 사용자의 명시적 요청으로 비식별 합성 PDF를 사용한 live Adapter
 연결 검증을 1회 실행했다. Upstage Document Parse와 Solar Chat을 순서대로 실제
 호출했고 exit code 0으로 완료됐다. Parse 결과는 1페이지였으며 Solar 설정 모델은
@@ -160,7 +167,27 @@ endpoint에 연결됐다. 일반 자동 테스트는 mock parser·mapper나 고�
 모두 원문 근거를 가진 `VERIFIED`로 strict Pydantic 검증을 통과했고 합성 PDF의
 기대 정수값과 일치했다. API key·PDF 원문·`source_text`·외부 raw 응답은 결과에
 기록하지 않았고 Supabase DB·Storage에는 쓰지 않았다. 이 결과는 Adapter live
-연결 증거이며 배포된 FastAPI와 live Supabase를 함께 거치는 E2E 증거는 아니다.
+연결 증거이며 아래 수직 E2E와 분리해 기록한다.
+
+### 2026-08-01 광고효과 16.2~16.5 live 수직 E2E
+
+로컬 FastAPI를 실제 TCP로 기동한 뒤 live Supabase Auth·private Storage·
+PostgreSQL, Upstage Document Parse, Solar Chat을 통과하는 합성 리포트 한 건을
+명시적으로 실행했다. 배포된 FastAPI가 아닌 로컬 서버의 live 외부 연동
+검증이며, 배포 환경은 별도로 확인해야 한다.
+
+- 16.2 업로드 `201`, 16.3 추출·16.4 확정·16.5 조회 `200`
+- Parse 1페이지, `solar-pro3`, `performance-report-metrics-v1`, 8개 지표 모두
+  원문 근거가 있는 `VERIFIED`이며 기대 정수 8/8 일치
+- 업로드·추출·확정 멱등 재생과 최초 `requestId` 일치 3/3, `no-store` 7/7
+- private bucket, 익명 public object 읽기 거부, 감사 이벤트 3/3,
+  멱등 레코드 3/3 확인
+- 임시 Auth 사용자·계약·Storage·DB 대상 정리 6/6, 잔여 fixture 없음
+- API key·원문·`source_text`·Storage 경로·외부 raw 응답을 요약에 노출하지 않음
+
+재현 runner는 `apps/api/evaluation/performance_e2e_live.py`이다. localhost 목적지와
+`--confirm-live --cleanup-created-data` 두 플래그를 모두 강제하며, 일반 자동 테스트에서는
+외부 네트워크를 호출하지 않는다.
 
 아래 명령은 이미 Parse된 고정 fixture로 Solar mapper만 다시 점검할 때 사용하는
 최소 재현 절차다. 유료 호출 전 명시적 확인을 다시 받아야 한다.

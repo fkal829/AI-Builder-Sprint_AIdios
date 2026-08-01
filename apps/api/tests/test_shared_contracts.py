@@ -100,9 +100,7 @@ def test_extracted_term_schema_has_structured_fields_and_values() -> None:
         "BOOLEAN",
     ]
     assert "confidence" in schema["properties"]
-    assert set(schema["properties"]["field"]["enum"]) == {
-        field.value for field in ExtractedField
-    }
+    assert set(schema["properties"]["field"]["enum"]) == {field.value for field in ExtractedField}
     assert {
         "id",
         "contract_id",
@@ -140,11 +138,9 @@ def test_review_schema_distinguishes_source_and_model_confidence() -> None:
 
 def test_performance_extracted_payload_schema_matches_runtime_and_openapi() -> None:
     schema = json.loads(
-        (
-            SHARED_CONTRACTS
-            / "schemas"
-            / "performance-extracted-payload.schema.json"
-        ).read_text(encoding="utf-8")
+        (SHARED_CONTRACTS / "schemas" / "performance-extracted-payload.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
     runtime_schema = PerformanceExtractedPayload.model_json_schema()
     openapi = yaml.safe_load(
@@ -172,11 +168,9 @@ def test_performance_extracted_payload_schema_matches_runtime_and_openapi() -> N
 
 def test_performance_extracted_payload_schema_keeps_metric_boundaries() -> None:
     schema = json.loads(
-        (
-            SHARED_CONTRACTS
-            / "schemas"
-            / "performance-extracted-payload.schema.json"
-        ).read_text(encoding="utf-8")
+        (SHARED_CONTRACTS / "schemas" / "performance-extracted-payload.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
     definitions = schema["$defs"]
     openapi_definitions = yaml.safe_load(
@@ -196,8 +190,18 @@ def test_performance_extracted_payload_schema_keeps_metric_boundaries() -> None:
     assert signed["additionalProperties"] is False
     assert set(non_negative["required"]) == required_candidate_fields
     assert set(signed["required"]) == required_candidate_fields
-    assert non_negative["properties"]["value"]["minimum"] == 0
-    assert "minimum" not in signed["properties"]["value"]
+    assert non_negative["properties"]["value"] == {
+        "type": ["integer", "null"],
+        "format": "int64",
+        "minimum": 0,
+        "maximum": 9223372036854775807,
+    }
+    assert signed["properties"]["value"] == {
+        "type": ["integer", "null"],
+        "format": "int64",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+    }
     assert schema["properties"]["published_content_count"] == {
         "$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"
     }

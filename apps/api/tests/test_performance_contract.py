@@ -22,6 +22,10 @@ from app.core.enums import (
 from app.core.errors import ErrorCode
 from app.schemas.documents import ContractDocumentUploadType, DocumentType
 from app.schemas.performance import (
+    MAX_ENGAGEMENT_RATE,
+    MAX_SERIALIZED_ENGAGEMENT_RATE,
+    POSTGRES_BIGINT_MAX,
+    POSTGRES_BIGINT_MIN,
     ContractPerformance,
     PerformanceConfirmedPayload,
     PerformanceConfirmedPayloadInput,
@@ -201,15 +205,17 @@ def test_performance_events_are_public_after_the_foundation_migration() -> None:
         assert f"        - {event}" in openapi
 
 
-def test_performance_error_codes_match_the_five_approved_codes() -> None:
+def test_performance_error_codes_match_the_six_approved_codes() -> None:
     assert {
         ErrorCode.REPORT_PERIOD_ALREADY_EXISTS.value,
+        ErrorCode.REPORT_PERIOD_ORDER_CONFLICT.value,
         ErrorCode.REPORT_REVISION_CONFLICT.value,
         ErrorCode.REPORT_CORRECTION_DEPENDENCY_EXISTS.value,
         ErrorCode.REPORT_EXTRACTION_IN_PROGRESS.value,
         ErrorCode.REPORT_EXTRACT_FAILED.value,
     } == {
         "REPORT_PERIOD_ALREADY_EXISTS",
+        "REPORT_PERIOD_ORDER_CONFLICT",
         "REPORT_REVISION_CONFLICT",
         "REPORT_CORRECTION_DEPENDENCY_EXISTS",
         "REPORT_EXTRACTION_IN_PROGRESS",
@@ -251,6 +257,40 @@ def test_performance_metric_candidates_are_strict_and_evidence_backed() -> None:
             verification_status=PerformanceMetricVerificationStatus.VERIFIED,
             roas=2,
         )
+
+
+def test_performance_metric_candidates_enforce_postgres_bigint_boundaries() -> None:
+    non_negative = make_non_negative_candidate(POSTGRES_BIGINT_MAX)
+    signed_min = PerformanceSignedMetricCandidate(
+        value=POSTGRES_BIGINT_MIN,
+        source_page=1,
+        source_text=f"팔로워 순증 {POSTGRES_BIGINT_MIN}",
+        confidence=0.9,
+        verification_status=PerformanceMetricVerificationStatus.VERIFIED,
+    )
+    signed_max = PerformanceSignedMetricCandidate(
+        value=POSTGRES_BIGINT_MAX,
+        source_page=1,
+        source_text=f"팔로워 순증 {POSTGRES_BIGINT_MAX}",
+        confidence=0.9,
+        verification_status=PerformanceMetricVerificationStatus.VERIFIED,
+    )
+
+    assert non_negative.value == POSTGRES_BIGINT_MAX
+    assert signed_min.value == POSTGRES_BIGINT_MIN
+    assert signed_max.value == POSTGRES_BIGINT_MAX
+
+    with pytest.raises(ValidationError):
+        make_non_negative_candidate(POSTGRES_BIGINT_MAX + 1)
+    for overflow in (POSTGRES_BIGINT_MIN - 1, POSTGRES_BIGINT_MAX + 1):
+        with pytest.raises(ValidationError):
+            PerformanceSignedMetricCandidate(
+                value=overflow,
+                source_page=1,
+                source_text=f"팔로워 순증 {overflow}",
+                confidence=0.9,
+                verification_status=PerformanceMetricVerificationStatus.VERIFIED,
+            )
 
 
 def test_confirmed_payload_rejects_derived_or_unknown_fields() -> None:
@@ -305,6 +345,45 @@ def test_confirmed_payload_allows_negative_follower_net_change_but_rejects_boole
     assert payload.follower_net_change == -12
     with pytest.raises(ValidationError):
         PerformanceConfirmedPayloadInput(**confirmed_payload_values(published_content_count=True))
+
+
+def test_confirmed_payload_models_enforce_postgres_bigint_boundaries() -> None:
+    non_negative_fields = (
+        "impressions",
+        "likes",
+        "comments",
+        "reach",
+        "saves",
+        "shares",
+        "published_content_count",
+        "inquiries",
+        "reservations",
+        "purchases",
+    )
+    boundary_values = {
+        **{field: POSTGRES_BIGINT_MAX for field in non_negative_fields},
+        "follower_net_change": POSTGRES_BIGINT_MIN,
+    }
+
+    for model in (PerformanceConfirmedPayloadInput, PerformanceConfirmedPayload):
+        payload = model(**confirmed_payload_values(**boundary_values))
+        assert payload.impressions == POSTGRES_BIGINT_MAX
+        assert payload.follower_net_change == POSTGRES_BIGINT_MIN
+
+        for field in non_negative_fields:
+            with pytest.raises(ValidationError):
+                model(
+                    **confirmed_payload_values(
+                        **{field: POSTGRES_BIGINT_MAX + 1},
+                    )
+                )
+        for overflow in (POSTGRES_BIGINT_MIN - 1, POSTGRES_BIGINT_MAX + 1):
+            with pytest.raises(ValidationError):
+                model(
+                    **confirmed_payload_values(
+                        follower_net_change=overflow,
+                    )
+                )
 
 
 def test_published_content_count_candidate_preserves_not_found_and_zero() -> None:
@@ -373,6 +452,70 @@ def test_revision_validates_decimal_half_up_engagement_rate() -> None:
                 "engagement_rate": Decimal("0.666666"),
             }
         )
+
+
+def test_engagement_rate_enforces_derived_numeric_26_6_maximum() -> None:
+    payload = make_confirmed_payload(
+        impressions=1,
+        likes=POSTGRES_BIGINT_MAX,
+        comments=POSTGRES_BIGINT_MAX,
+        saves=POSTGRES_BIGINT_MAX,
+        shares=POSTGRES_BIGINT_MAX,
+    )
+    assert payload.calculate_engagement_rate() == MAX_ENGAGEMENT_RATE
+
+    revision = PerformanceReportRevision(
+        id=uuid4(),
+        report_id=uuid4(),
+        version=1,
+        status=PerformanceReportStatus.CONFIRMED,
+        confirmed_payload=payload,
+        engagement_rate=MAX_ENGAGEMENT_RATE,
+        corrected_from_revision_id=None,
+        correction_reason=None,
+        confirmed_at=NOW,
+        flags=[],
+        inquiry_drafts=[],
+    )
+    assert revision.engagement_rate == Decimal("36893488147419103228.000000")
+    serialized_rate = revision.model_dump(mode="json")["engagement_rate"]
+    assert Decimal.from_float(serialized_rate) == Decimal(MAX_SERIALIZED_ENGAGEMENT_RATE)
+
+    with pytest.raises(ValidationError) as error:
+        PerformanceReportRevision(
+            **{
+                **revision.model_dump(),
+                "engagement_rate": MAX_ENGAGEMENT_RATE + Decimal("0.000001"),
+            }
+        )
+    assert any(detail["type"] == "less_than_equal" for detail in error.value.errors())
+
+    flag_values = {
+        "id": uuid4(),
+        "report_revision_id": uuid4(),
+        "flag_type": PerformanceFlagType.ENGAGEMENT_RATE_DROP,
+        "basis_extracted_term_ids": [],
+        "basis_snapshots": [],
+        "comparison_report_revision_id": uuid4(),
+        "expected_content_count": None,
+        "expected_period_unit": None,
+        "actual_content_count": None,
+        "previous_engagement_rate": MAX_ENGAGEMENT_RATE,
+        "current_engagement_rate": MAX_ENGAGEMENT_RATE - Decimal("0.000001"),
+        "issue_note": None,
+        "created_at": NOW,
+    }
+    flag = PerformanceFlag(**flag_values)
+    assert flag.previous_engagement_rate == MAX_ENGAGEMENT_RATE
+
+    with pytest.raises(ValidationError) as error:
+        PerformanceFlag(
+            **{
+                **flag_values,
+                "previous_engagement_rate": MAX_ENGAGEMENT_RATE + Decimal("0.000001"),
+            }
+        )
+    assert any(detail["type"] == "less_than_equal" for detail in error.value.errors())
 
 
 def test_revision_requires_null_rate_for_zero_impressions() -> None:
@@ -484,6 +627,78 @@ def test_deliverable_flag_requires_two_verified_basis_snapshots_and_a_shortfall(
     assert PerformanceFlag(**values).actual_content_count == 3
     with pytest.raises(ValidationError, match="수량 부족"):
         PerformanceFlag(**{**values, "actual_content_count": 4})
+
+
+def test_basis_snapshot_preserves_exact_nonblank_evidence_text() -> None:
+    source_text = "  매월 게시물 4건을 게재한다.  "
+    snapshot = PerformanceFlagBasisSnapshot(
+        extracted_term_id=uuid4(),
+        document_id=uuid4(),
+        field=ExtractedField.CONTENT_QUANTITY,
+        source_type=ExtractedSourceType.CONTRACT_DOCUMENT,
+        source_page=1,
+        source_text=source_text,
+        confidence=0.9,
+        verification_status=VerificationStatus.VERIFIED,
+    )
+
+    assert snapshot.source_text == source_text
+    with pytest.raises(ValidationError, match="비어"):
+        PerformanceFlagBasisSnapshot(**{**snapshot.model_dump(), "source_text": "   "})
+
+
+def test_performance_flag_count_fields_enforce_postgres_bigint_boundaries() -> None:
+    revision_id = uuid4()
+    quantity_term_id = uuid4()
+    frequency_term_id = uuid4()
+    values = {
+        "id": uuid4(),
+        "report_revision_id": revision_id,
+        "flag_type": PerformanceFlagType.DELIVERABLE_COUNT_SHORTFALL,
+        "basis_extracted_term_ids": [quantity_term_id, frequency_term_id],
+        "basis_snapshots": [
+            PerformanceFlagBasisSnapshot(
+                extracted_term_id=quantity_term_id,
+                document_id=uuid4(),
+                field=ExtractedField.CONTENT_QUANTITY,
+                source_type=ExtractedSourceType.CONTRACT_DOCUMENT,
+                source_page=1,
+                source_text="월별 게시 수량을 정한다.",
+                confidence=0.9,
+                verification_status=VerificationStatus.VERIFIED,
+            ),
+            PerformanceFlagBasisSnapshot(
+                extracted_term_id=frequency_term_id,
+                document_id=uuid4(),
+                field=ExtractedField.POSTING_FREQUENCY,
+                source_type=ExtractedSourceType.CONTRACT_DOCUMENT,
+                source_page=1,
+                source_text="매월 게시한다.",
+                confidence=0.9,
+                verification_status=VerificationStatus.VERIFIED,
+            ),
+        ],
+        "comparison_report_revision_id": None,
+        "expected_content_count": POSTGRES_BIGINT_MAX,
+        "expected_period_unit": "MONTH",
+        "actual_content_count": POSTGRES_BIGINT_MAX - 1,
+        "previous_engagement_rate": None,
+        "current_engagement_rate": None,
+        "issue_note": None,
+        "created_at": NOW,
+    }
+
+    flag = PerformanceFlag(**values)
+    assert flag.expected_content_count == POSTGRES_BIGINT_MAX
+    assert flag.actual_content_count == POSTGRES_BIGINT_MAX - 1
+
+    for field in ("expected_content_count", "actual_content_count"):
+        with pytest.raises(ValidationError) as error:
+            PerformanceFlag(**{**values, field: POSTGRES_BIGINT_MAX + 1})
+        assert any(
+            detail["loc"] == (field,) and detail["type"] == "less_than_equal"
+            for detail in error.value.errors()
+        )
 
 
 def test_report_revisions_reference_the_actual_previous_revision() -> None:
@@ -704,6 +919,77 @@ def test_pydantic_performance_properties_match_openapi() -> None:
         assert set(pydantic_schema["required"]) == set(openapi_schema["required"]), name
         assert pydantic_schema["additionalProperties"] is False
         assert openapi_schema["additionalProperties"] is False
+
+
+def test_openapi_performance_numeric_bounds_match_runtime_contract() -> None:
+    canonical = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    schemas = canonical["components"]["schemas"]
+
+    non_negative_candidate = schemas["PerformanceNonNegativeMetricCandidate"]
+    assert non_negative_candidate["properties"]["value"] == {
+        "type": ["integer", "null"],
+        "format": "int64",
+        "minimum": 0,
+        "maximum": POSTGRES_BIGINT_MAX,
+    }
+    assert non_negative_candidate["allOf"][0]["then"]["properties"]["value"] == {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0,
+        "maximum": POSTGRES_BIGINT_MAX,
+    }
+
+    signed_candidate = schemas["PerformanceSignedMetricCandidate"]
+    assert signed_candidate["properties"]["value"] == {
+        "type": ["integer", "null"],
+        "format": "int64",
+        "minimum": POSTGRES_BIGINT_MIN,
+        "maximum": POSTGRES_BIGINT_MAX,
+    }
+    assert signed_candidate["allOf"][0]["then"]["properties"]["value"] == {
+        "type": "integer",
+        "format": "int64",
+        "minimum": POSTGRES_BIGINT_MIN,
+        "maximum": POSTGRES_BIGINT_MAX,
+    }
+
+    non_negative_fields = {
+        "impressions",
+        "likes",
+        "comments",
+        "reach",
+        "saves",
+        "shares",
+        "published_content_count",
+        "inquiries",
+        "reservations",
+        "purchases",
+    }
+    for schema_name in ("PerformanceConfirmedPayloadInput", "PerformanceConfirmedPayload"):
+        properties = schemas[schema_name]["properties"]
+        for field in non_negative_fields:
+            assert properties[field]["format"] == "int64"
+            assert properties[field]["minimum"] == 0
+            assert properties[field]["maximum"] == POSTGRES_BIGINT_MAX
+        assert properties["follower_net_change"]["format"] == "int64"
+        assert properties["follower_net_change"]["minimum"] == POSTGRES_BIGINT_MIN
+        assert properties["follower_net_change"]["maximum"] == POSTGRES_BIGINT_MAX
+
+    flag_schema = schemas["PerformanceFlag"]
+    for field in ("expected_content_count", "actual_content_count"):
+        assert flag_schema["properties"][field]["format"] == "int64"
+        assert flag_schema["properties"][field]["minimum"] == 0
+        assert flag_schema["properties"][field]["maximum"] == POSTGRES_BIGINT_MAX
+    for field in ("previous_engagement_rate", "current_engagement_rate"):
+        assert flag_schema["properties"][field]["minimum"] == 0
+        assert flag_schema["properties"][field]["maximum"] == MAX_SERIALIZED_ENGAGEMENT_RATE
+        assert flag_schema["properties"][field]["x-decimal-places"] == 6
+
+    for schema_name in ("PerformanceReportRevision", "PerformanceConfirmedSeriesPoint"):
+        rate = schemas[schema_name]["properties"]["engagement_rate"]
+        assert rate["minimum"] == 0
+        assert rate["maximum"] == MAX_SERIALIZED_ENGAGEMENT_RATE
+        assert rate["x-decimal-places"] == 6
 
 
 def test_openapi_marks_no_performance_operations_as_planned() -> None:

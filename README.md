@@ -10,7 +10,8 @@
 
 광고효과 기록·대조(기획안 6.14)는 P2입니다. 백엔드 16.2 리포트 업로드, 16.3
 Upstage·Solar 지표 추출, 16.4 사용자 확정·정정, 16.5 계약 대조·조회까지 구현했습니다.
-배포 FastAPI·live Supabase를 함께 거치는 수직 E2E는 별도 검증 항목입니다.
+로컬 FastAPI 실제 TCP·live Supabase Auth/Storage/PostgreSQL·Upstage Parse·
+Solar를 함께 거친 16.2~16.5 수직 E2E도 통과했습니다. 배포 환경 검증은 별도입니다.
 
 ## 저장소 구조
 

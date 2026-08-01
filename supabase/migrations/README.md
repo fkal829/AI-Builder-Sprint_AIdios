@@ -109,6 +109,34 @@ Document 기술 상태에 반영하며, 이전 작업의 늦은 응답은 저장
 저장한다. 서버가 미리 만든 Document·report ID와 동일한 불변 메타데이터로
 재호출하면 기존 커밋을 재생하고 행과 감사 이벤트를 중복 생성하지 않는다.
 
+`20260801040000_add_performance_report_confirmation.sql`은 16.4·16.5 확정 기반으로
+append-only revision, 계약 근거 snapshot, 확인 신호, 미발송 문의 문안과
+현재 projection·감사 이벤트를 한 트랜잭션에 저장하는 RPC를 추가한다.
+
+`20260801050000_add_performance_report_atomic_snapshots.sql`은 계약 단위 lock으로
+월별 확정을 직렬화하고, 비교 revision 충돌·과거 월 역순 확정을 거부한다.
+확정 응답과 계약별 조회는 각각 하나의 DB snapshot에서 완전한 그래프를
+반환하고, child table 직접 INSERT 권한을 회수한다.
+
+`20260801060000_harden_performance_basis_and_period.sql`은 이미 적용된 050000을
+수정하지 않고 후속 불변식을 추가한다. 근거 snapshot이 같은 계약·문서의
+실제 `VERIFIED ExtractedTerm`과 원문·페이지·confidence까지 정확히 일치하는지
+trigger로 강제하고 기존 행도 검증한다. 달력에 없는 `0000-MM`을 DB에서
+거부하고, `0001-01`의 전월을 `null`로 처리하며 계약·리포트 상태 거부
+결과를 분리한다.
+
+`20260801070000_enforce_performance_basis_integrity.sql`은 수량 부족 신호가
+수량·월 주기 근거를 정확히 한 건씩 갖도록 지연 constraint trigger로
+강제한다. 근거 snapshot 검증 동안 원본 ExtractedTerm을 잠그고, 근거로
+사용된 원본을 포함한 ExtractedTerm 전체를 append-only로 만들어 UPDATE를
+차단한다. 참조된 원본 삭제는 기존 FK가 막고 service-role 직접 변경 권한도 회수한다.
+기존 flag와 snapshot도 자동 수정 없이 다시 검증한다.
+
+`20260801080000_fix_deferred_basis_trigger_execution.sql`은 070000의 지연
+constraint trigger가 confirmation RPC 반환 뒤 service-role 트랜잭션의 commit
+시점에도 비공개 검증 helper를 호출할 수 있도록, 완전히 한정된 trigger wrapper만
+`SECURITY DEFINER`로 전환한다. helper의 직접 실행 권한은 계속 공개하지 않는다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

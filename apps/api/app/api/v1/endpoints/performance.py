@@ -51,8 +51,11 @@ PERFORMANCE_REPORT_UPLOAD_OPENAPI = {
                     "properties": {
                         "period": {
                             "type": "string",
-                            "pattern": r"^[0-9]{4}-(0[1-9]|1[0-2])$",
-                            "description": "리포트 대상 달력 월(YYYY-MM)",
+                            "pattern": (
+                                r"^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|"
+                                r"00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])$"
+                            ),
+                            "description": "리포트 대상 달력 월(YYYY-MM, 연도 0001~9999)",
                             "examples": ["2026-07"],
                         },
                         "file": {
@@ -274,6 +277,11 @@ async def extract_performance_report(
             "description": "요청 검증 실패",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
+        503: {
+            "model": ErrorResponse,
+            "description": "광고효과 확정 저장 기반 장애",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
     },
 )
 async def confirm_performance_report(
@@ -325,6 +333,11 @@ async def confirm_performance_report(
         422: {
             "model": ErrorResponse,
             "description": "요청 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "광고효과 조회 저장 기반 장애",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
     },

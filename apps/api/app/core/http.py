@@ -16,6 +16,7 @@ CANONICAL_OPERATION_IDS = {
     ("GET", "/contracts"): "listContracts",
     ("POST", "/contracts"): "createContract",
     ("GET", "/contracts/{contract_id}"): "getContract",
+    ("DELETE", "/contracts/{contract_id}"): "deleteContract",
     ("GET", "/contracts/{contract_id}/timeline"): "getContractTimeline",
     ("PUT", "/contracts/{contract_id}/renewal-decision"): "saveRenewalDecision",
     ("POST", "/contracts/{contract_id}/documents"): "uploadContractDocument",

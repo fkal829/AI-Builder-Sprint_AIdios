@@ -17,6 +17,7 @@ from app.schemas.signatures import (
     EmbeddedSignatureDraftCreate,
     Signature,
 )
+from app.services.signature_reconciliation import SignatureReconciler
 from app.services.state_machine import InvalidStatusTransition
 from app.services.webhooks import ModusignWebhookService
 
@@ -44,6 +45,12 @@ class SignatureService:
         self._embedded_redirect_url = embedded_redirect_url
         self._webhook_secret = webhook_secret
         self._now = now or (lambda: datetime.now(UTC))
+        self._reconciler = SignatureReconciler(
+            repository=repository,
+            modusign=modusign,
+            webhook_secret=webhook_secret,
+            now=now,
+        )
 
     async def create_embedded_draft(
         self,
@@ -162,6 +169,7 @@ class SignatureService:
         )
         if record is None:
             raise ResourceNotFound()
+        record = await self._reconciler.reconcile(owner_id=owner_id, record=record)
         return record.signature
 
     def _utc_now(self) -> datetime:

@@ -213,6 +213,28 @@ For C-8 webhook reconciliation, set a long random `MODUSIGN_WEBHOOK_SECRET` in t
 webhook registration. When it is empty or does not match, `/api/v1/webhooks/modusign` rejects the
 event with `401`; it never accepts an unsigned webhook.
 
+`GET /contracts/{contract_id}/signature`는 매 조회마다 서명이 아직 종결 상태(`COMPLETED`,
+`ABORTED`, `FAILED`)가 아니면 Modusign `get_document_status`로 현재 상태를 한 번 더
+확인하고, 웹훅과 동일한 `apply_modusign_document_status` RPC로 반영합니다. 로컬 개발처럼
+Modusign이 콜백할 수 없는 환경에서 웹훅이 아예 도착하지 않아도(또는 유실돼도) 감사
+타임라인과 서명 상태가 실제 벤더 상태 뒤에 영구히 멈추지 않게 하기 위한 보정 경로이며,
+RPC 자체가 멱등적이라 반복 호출해도 감사 이벤트가 중복 생성되지 않습니다. Modusign 조회가
+실패하면 조용히 마지막으로 알려진 상태를 그대로 반환합니다.
+
+`GET /contracts`(계약 목록)도 같은 보정을 씁니다. 응답에 담긴 계약 중 `READY_TO_SIGN`
+또는 `SIGNING` 상태인 계약마다 위와 같은 방식으로 동기화한 뒤 목록을 다시 읽어 반환하므로,
+사용자가 어느 계약이 서명 완료됐는지 몰라도 대시보드/목록을 한 번 새로고침하면 전부
+반영됩니다. 이 동기화 로직은 `app/services/signature_reconciliation.py`의
+`SignatureReconciler`에 있으며 `SignatureService`와 `ContractService`가 함께 재사용합니다.
+
+`DELETE /contracts/{contract_id}`는 테스트 중 쌓인 초기 계약을 정리하기 위한 소유자
+API입니다. `DRAFT`, `ANALYZING`, `REVIEW_REQUIRED`, `NEGOTIATING` 계약 중 조정 요청이
+없거나 모두 `DRAFT`이고 Signature 시도가 전혀 없는 경우만 삭제합니다. 조정 요청이 한
+번이라도 발송됐거나 모두싸인 초안·서명 시도가 있거나 `READY_TO_SIGN` 이후인 계약은
+`409 INVALID_STATUS_TRANSITION`으로 보호됩니다. 이 검사는
+`20260802020000_delete_discardable_contracts.sql`의 DB 함수에서도 행 잠금 뒤 반복되며,
+성공 시 종속 초기 데이터와 서버가 생성한 비공개 문서 Storage 경로를 정리합니다.
+
 ## Supabase live 준비
 
 `SUPABASE_MODE=live`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`는 실행 중인 API의

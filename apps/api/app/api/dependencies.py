@@ -31,6 +31,7 @@ from app.services.performance_upload import PerformanceReportUploadService
 from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
 from app.services.revised_contracts import RevisedContractService
+from app.services.signature_reconciliation import SignatureReconciler
 from app.services.signatures import SignatureService
 from app.services.tone_polish import TonePolishService
 from app.services.understood_terms import UnderstoodTermService
@@ -178,8 +179,16 @@ async def get_review_item_service(
 
 async def get_contract_service(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+    modusign: Annotated[ModusignAdapter, Depends(get_modusign_adapter)],
 ) -> ContractService:
-    return ContractService(supabase)
+    return ContractService(
+        supabase,
+        signatures=SignatureReconciler(
+            repository=supabase,
+            modusign=modusign,
+            webhook_secret=get_settings().modusign_webhook_secret,
+        ),
+    )
 
 
 async def get_dashboard_service(

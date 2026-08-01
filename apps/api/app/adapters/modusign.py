@@ -107,19 +107,36 @@ class ModusignAdapter:
             raise ModusignAdapterError("Mock document status must be supplied by a test double.")
         response_data = await self._request("GET", f"/documents/{document_id}", json=None)
         try:
-            metadata = {
-                str(item["key"]): str(item["value"])
-                for item in response_data.get("metadatas", [])
-                if isinstance(item, dict) and isinstance(item.get("key"), str)
-                and isinstance(item.get("value"), str)
-            }
-            return ModusignDocumentStatus(
-                id=str(response_data["id"]),
-                status=ModusignStatus(str(response_data["status"])),
-                metadata=metadata,
-            )
+            return _document_status(response_data)
         except (KeyError, TypeError, ValueError) as error:
             raise ModusignAdapterError("The vendor response had an unsupported shape.") from error
+
+    async def list_recent_documents(self, *, limit: int = 50) -> list[ModusignDocumentStatus]:
+        """Recent documents, newest first, for signature discovery.
+
+        An embedded draft's id is NOT the id of the document it becomes once
+        the user sends it, and there is no lookup from one to the other, so a
+        signature whose webhook never arrived has no document id to query.
+        Listing lets us find it again by the metadata we attached at creation.
+        """
+        if self._mode == "mock":
+            raise ModusignAdapterError("Mock document listing must be supplied by a test double.")
+        response_data = await self._request(
+            "GET", "/documents", json=None, params={"limit": limit}
+        )
+        documents = response_data.get("documents")
+        if not isinstance(documents, list):
+            raise ModusignAdapterError("The vendor response had an unsupported shape.")
+        found: list[ModusignDocumentStatus] = []
+        for entry in documents:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                found.append(_document_status(entry))
+            except (KeyError, TypeError, ValueError):
+                # One malformed or unknown-status entry must not hide the rest.
+                continue
+        return found
 
     async def _request(
         self,
@@ -127,6 +144,7 @@ class ModusignAdapter:
         path: str,
         *,
         json: dict[str, Any] | None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         encoded = base64.b64encode(
             f"{self._account_email}:{self._api_key}".encode()
@@ -138,10 +156,14 @@ class ModusignAdapter:
         }
         try:
             if self._client is not None:
-                response = await self._client.request(method, path, headers=headers, json=json)
+                response = await self._client.request(
+                    method, path, headers=headers, json=json, params=params
+                )
             else:
                 async with httpx.AsyncClient(base_url=self._base_url, timeout=15.0) as client:
-                    response = await client.request(method, path, headers=headers, json=json)
+                    response = await client.request(
+                        method, path, headers=headers, json=json, params=params
+                    )
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as error:
@@ -149,3 +171,18 @@ class ModusignAdapter:
         if not isinstance(payload, dict):
             raise ModusignAdapterError("The vendor response had an unsupported shape.")
         return payload
+
+
+def _document_status(payload: dict[str, Any]) -> ModusignDocumentStatus:
+    metadata = {
+        str(item["key"]): str(item["value"])
+        for item in payload.get("metadatas", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("key"), str)
+        and isinstance(item.get("value"), str)
+    }
+    return ModusignDocumentStatus(
+        id=str(payload["id"]),
+        status=ModusignStatus(str(payload["status"])),
+        metadata=metadata,
+    )

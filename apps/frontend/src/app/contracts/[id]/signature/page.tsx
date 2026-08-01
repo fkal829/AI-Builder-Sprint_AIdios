@@ -1,12 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { Timeline } from "@/components/Timeline";
 import { useAsync } from "@/lib/hooks";
-import { adapter, isUsingMock, type LiveSignature } from "@/lib/adapter";
+import { adapter, isUsingMock, type LiveSignature, type LiveSignatureView } from "@/lib/adapter";
 import { MODUSIGN_STATUS_LABEL, modusignStep } from "@/lib/status";
+
+const TERMINAL_SIGNATURE_STATUSES: LiveSignature["status"][] = [
+  "COMPLETED",
+  "ABORTED",
+  "FAILED",
+];
+
+const SIGNATURE_POLL_INTERVAL_MS = 4_000;
 
 type SignerFields = {
   ownerName: string;
@@ -27,10 +35,41 @@ const EMPTY_SIGNERS: SignerFields = {
 export default function SignaturePage() {
   const { id } = useParams<{ id: string }>();
   const state = useAsync(() => adapter.getSignatureView(id), [id]);
+  const [liveView, setLiveView] = useState<LiveSignatureView | null>(null);
   const [signers, setSigners] = useState<SignerFields>(EMPTY_SIGNERS);
   const [creating, setCreating] = useState(false);
   const [editorUrl, setEditorUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // 모두싸인 서명은 웹훅으로 비동기 진행된다(§C-8). 최초 1회 조회만으로는
+  // 초안 생성 이후의 SIGNATURE_STARTED/COMPLETED 감사 이벤트를 화면이 알 수 없어
+  // 진행 중일 때 배경에서 다시 조회해 타임라인·상태를 갱신한다.
+  const view: LiveSignatureView | null =
+    liveView ?? (state.status === "ready" ? state.data : null);
+
+  const refreshView = async () => {
+    try {
+      const next = await adapter.getSignatureView(id);
+      setLiveView(next);
+    } catch {
+      // 폴링 중 일시 오류는 조용히 무시하고 다음 주기에 다시 시도한다.
+    }
+  };
+
+  useEffect(() => {
+    if (isUsingMock) return;
+    if (!view) return;
+    if (view.signature && TERMINAL_SIGNATURE_STATUSES.includes(view.signature.status)) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      if (alive) void refreshView();
+    }, SIGNATURE_POLL_INTERVAL_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, view]);
 
   const isComplete =
     signers.ownerName.trim().length >= 2 &&
@@ -38,11 +77,11 @@ export default function SignaturePage() {
     signers.ownerEmail.includes("@") &&
     signers.agencyEmail.includes("@") &&
     signers.ownerEmail.trim() !== signers.agencyEmail.trim();
-  const canCreateDraft = isUsingMock || (state.status === "ready"
+  const canCreateDraft = isUsingMock || (view !== null
     && (
-      state.data.signature === null
-      || state.data.signature.status === "FAILED"
-      || state.data.signature.status === "ABORTED"
+      view.signature === null
+      || view.signature.status === "FAILED"
+      || view.signature.status === "ABORTED"
     ));
 
   const createDraft = async () => {
@@ -75,6 +114,7 @@ export default function SignaturePage() {
       ]);
       setEditorUrl(draft.editorUrl);
       window.localStorage.removeItem(`dandi:confirmed-revision:${id}`);
+      await refreshView();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "모두싸인 초안을 만들지 못했습니다.");
     } finally {
@@ -87,7 +127,7 @@ export default function SignaturePage() {
       title="서명 준비 · 상태"
       backHref="/dashboard"
       footer={
-        state.status === "ready" && state.data.signature?.modusignStatus === "COMPLETED" ? (
+        view?.signature?.modusignStatus === "COMPLETED" ? (
           <CTAButton href={`/contracts/${id}/performance`}>
             리포트 올리고 이행 확인하기
           </CTAButton>
@@ -129,17 +169,17 @@ export default function SignaturePage() {
 
         {error && <p className="text-xs font-bold text-red-700">{error}</p>}
 
-        {state.status === "loading" && (
+        {state.status === "loading" && !view && (
           <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
         )}
-        {state.status === "error" && (
+        {state.status === "error" && !view && (
           <p className="py-10 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>
         )}
 
-        {state.status === "ready" && (
+        {view && (
           <>
-            {state.data.signature ? (
-              <SignatureStatus sig={state.data.signature} />
+            {view.signature ? (
+              <SignatureStatus sig={view.signature} />
             ) : (
               <div className="rounded-xl border border-neutral200 bg-white p-4 text-sm text-neutral500">
                 아직 생성된 모두싸인 초안이 없습니다.
@@ -147,7 +187,7 @@ export default function SignaturePage() {
             )}
             <div>
               <h3 className="mb-3 text-[13px] font-bold text-neutral700">감사 타임라인</h3>
-              <Timeline events={state.data.timeline} />
+              <Timeline events={view.timeline} />
             </div>
           </>
         )}

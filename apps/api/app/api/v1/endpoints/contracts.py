@@ -52,6 +52,7 @@ from app.schemas.contracts import (
     AuditEvent,
     Contract,
     ContractCreate,
+    ContractDeletion,
     ContractListItem,
     RenewalDecision,
     RenewalDecisionRequest,
@@ -504,6 +505,26 @@ async def get_contract(
 ) -> ApiResponse[Contract]:
     contract = await service.get(owner_id=owner_id, contract_id=contract_id)
     return ApiResponse(data=contract, error=None, request_id=request_id(request))
+
+
+@router.delete(
+    "/{contract_id}",
+    response_model=ApiResponse[ContractDeletion],
+    responses={
+        401: {"model": ApiResponse[None], "description": "인증 실패"},
+        404: {"model": ApiResponse[None], "description": "계약을 찾을 수 없음"},
+        409: {"model": ApiResponse[None], "description": "보호되는 계약 생애주기"},
+        422: {"model": ApiResponse[None], "description": "계약 ID 검증 실패"},
+    },
+)
+async def delete_contract(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[ContractService, Depends(get_contract_service)],
+) -> ApiResponse[ContractDeletion]:
+    deleted = await service.delete(owner_id=owner_id, contract_id=contract_id)
+    return ApiResponse(data=deleted, error=None, request_id=request_id(request))
 
 
 @router.get(

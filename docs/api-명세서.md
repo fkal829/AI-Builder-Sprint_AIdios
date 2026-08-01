@@ -51,6 +51,7 @@ attempt·완료·복구 RPC와 비공개 AI Adapter 조합기, append-only 확�
 | B | `GET` | `/health` | 서버 상태 확인 |
 | C | `GET` | `/contracts` | 계약 목록·만료 D-day 조회 |
 | C | `POST` | `/contracts` | 계약 생성 |
+| C | `DELETE` | `/contracts/{contract_id}` | 조정 요청 발송 전 계약 삭제 |
 | C | `GET` | `/contracts/{contract_id}` | 계약 상세 조회 |
 | C | `GET` | `/contracts/{contract_id}/timeline` | 감사 타임라인 조회 |
 | C | `PUT` | `/contracts/{contract_id}/renewal-decision` | 갱신·조건 변경·종료 의사 저장 |
@@ -299,7 +300,40 @@ canonical 날짜·갱신·금액, 사용자 이해조건, 재계약 의사와 �
 `understood_term`은 새로고침 뒤 조항 카드의 `내가 이해한 조건`을 다시 표시하는 데
 사용한다.
 
-### 3.5 계약 감사 타임라인 조회
+### 3.5 조정 요청 발송 전 계약 삭제
+
+`DELETE /api/v1/contracts/{contract_id}`
+
+- 인증: Bearer
+- 담당: C
+- 성공: `200 ContractDeletionResponse`
+- 오류: `401`, `404`, `409`, `422`
+
+삭제는 소유자 본인의 초기 계약에만 허용한다. Contract 상태는 `DRAFT`, `ANALYZING`,
+`REVIEW_REQUIRED`, `NEGOTIATING` 중 하나여야 하며, 조정 요청이 있다면 모든 요청이
+`DRAFT`여야 한다. 발송 이력이 있는 `SENT`, `OPENED`, `RESPONDED`, `CONFIRMED`,
+`EXPIRED` 조정 요청이나 상태와 무관한 모두싸인 Signature 행이 하나라도 있으면 삭제를
+거부한다. `READY_TO_SIGN`, `SIGNING`, `SIGNED`, `IN_PROGRESS`, `COMPLETED`,
+`RENEWAL_DUE` 계약도 삭제할 수 없다.
+
+성공 시 계약, 업로드 문서 메타데이터, 분석 결과, 검토 항목, 발송 전 조정 초안과 감사
+타임라인을 하나의 DB 트랜잭션에서 삭제한다. 비공개 Storage 객체는 DB가 반환한 서버 생성
+경로만 삭제하며, 파일명이나 클라이언트 입력 경로를 사용하지 않는다. 상태와 하위 행을
+잠근 뒤 조건을 다시 검사하므로 조정 발송 또는 서명 생성과 동시에 실행되어도 둘 중 하나만
+성공한다.
+
+```json
+{
+  "data": {
+    "contract_id": "contract_uuid",
+    "deleted": true
+  },
+  "error": null,
+  "requestId": "req_123abc"
+}
+```
+
+### 3.6 계약 감사 타임라인 조회
 
 `GET /api/v1/contracts/{contract_id}/timeline`
 
@@ -331,7 +365,7 @@ EVIDENCE_DISPUTED, RENEWAL_DECISION_SAVED
 상태나 사용자 의사가 실제로 바뀌는 쓰기는 대응 이벤트와 원자적으로 기록한다. 멱등
 재생처럼 상태가 바뀌지 않으면 새 이벤트를 만들지 않는다.
 
-### 3.6 만료·재계약 의사 저장
+### 3.7 만료·재계약 의사 저장
 
 `PUT /api/v1/contracts/{contract_id}/renewal-decision`
 
@@ -1336,7 +1370,7 @@ C는 B의 분석 결과가 완성될 때까지 기다리지 않고 고정 `Revie
 | 순서 | 구현 내용 | 연결 API·완료 조건 |
 | --- | --- | --- |
 | C-1 | 계약·조정·서명 상태 규칙 | 잘못된 전이는 `409`, B의 repository에서 감사 이벤트와 원자 기록 |
-| C-2 | 계약 생성·목록·상세·타임라인·갱신 의사 | 계약 API 5개, 무부작용 갱신 저장, 정렬 테스트 통과 |
+| C-2 | 계약 생성·목록·상세·초기 삭제·타임라인·갱신 의사 | 계약 API 6개, 보호 경계·무부작용 갱신 저장·정렬 테스트 통과 |
 | C-3 | 공개 토큰·멱등 키 기반 | B의 공통 저장 기반으로 hash·scope·만료·동일 요청 재생 테스트 통과 |
 | C-4 | 조정 초안·상세·발송 | B의 ReviewItem fixture로 미리보기와 계약당 1회 `/send` |
 | C-5 | 대행사 공개 조회·열람 기록·1회 응답 | GET 무변경, `/open` 최초 시각 유지, 전체 항목 정확히 한 번 제출 |

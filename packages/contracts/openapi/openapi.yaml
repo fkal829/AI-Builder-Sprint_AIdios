@@ -78,6 +78,32 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
+    delete:
+      summary: 발송 전 계약 삭제
+      operationId: deleteContract
+      tags: [contracts]
+      description: |
+        소유자 본인이 만든 계약 중 조정 요청이 아직 발송되지 않고 서명 시도가 없는
+        초기 계약만 삭제한다. Contract 상태는 DRAFT, ANALYZING, REVIEW_REQUIRED,
+        NEGOTIATING만 허용하며 AdjustmentRequest는 없거나 DRAFT여야 한다.
+        한 번이라도 발송된 조정 요청, 모두싸인 서명 시도 또는 READY_TO_SIGN 이후
+        생애주기 기록이 있으면 삭제하지 않는다. 상태와 관련 행은 DB 트랜잭션에서
+        다시 잠그고 검사한 뒤 삭제한다.
+      responses:
+        "200":
+          description: 계약과 발송 전 하위 데이터 삭제 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractDeletionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/InvalidTransition"
+        "422":
+          $ref: "#/components/responses/ValidationError"
   /contracts/{contract_id}/timeline:
     parameters:
       - $ref: "#/components/parameters/ContractId"
@@ -1401,6 +1427,19 @@ components:
         - type: object
           properties:
             data: {$ref: "#/components/schemas/Contract"}
+    ContractDeletion:
+      type: object
+      additionalProperties: false
+      required: [contract_id, deleted]
+      properties:
+        contract_id: {type: string, format: uuid}
+        deleted: {type: boolean, const: true}
+    ContractDeletionResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/ContractDeletion"}
     RenewalDecisionType:
       type: string
       enum: [RENEW_SAME_TERMS, RENEW_WITH_CHANGES, TERMINATE]

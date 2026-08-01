@@ -705,33 +705,61 @@ function mapObligation(data: ApiObligation): LiveObligation {
 function mapTimeline(events: ApiAuditEvent[]): AuditEvent[] {
   return events.map((event, index) => ({
     id: event.id,
-    label: event.summary?.trim() || auditEventLabel(event.event_type),
+    // 화면 문구는 event_type에서 만든다. 저장된 summary는 이벤트를 기록한 계층마다
+    // 문체와 언어가 달라서(일부는 영어) 그대로 쓰면 사용자에게 섞여 보이고, 특히
+    // 서명 동기화는 진행/완료/중단을 한 문장으로 기록해 상태 구분이 사라진다.
+    // event_type은 상태마다 값이 다르므로 구분이 항상 보장된다.
+    label: auditEventLabel(event.event_type) ?? event.summary?.trim() ?? event.event_type,
     date: event.created_at.slice(5, 10).replace("-", "/"),
     state: index === events.length - 1 ? "current" : "done",
   }));
 }
 
-function auditEventLabel(eventType: string): string {
-  const labels: Record<string, string> = {
-    CONTRACT_CREATED: "계약 등록",
-    DOCUMENT_UPLOADED: "계약 문서 업로드",
-    UNDERSTOOD_TERMS_SAVED: "이해조건 저장",
-    ANALYSIS_STARTED: "계약 분석 시작",
-    ANALYSIS_COMPLETED: "계약 분석 완료",
-    ADJUSTMENT_SENT: "조정 요청 발송",
-    ADJUSTMENT_RESPONDED: "대행사 응답",
-    ADJUSTMENT_CONFIRMED: "조정 결과 확정",
-    REVISED_CONTRACT_REVIEW_CREATED: "수정 계약서 대조",
-    REVISED_CONTRACT_CONFIRMED: "수정 계약서 확인",
-    SIGNATURE_DRAFT_CREATED: "모두싸인 초안 생성",
-    SIGNATURE_STARTED: "서명 시작",
-    SIGNATURE_COMPLETED: "서명 완료",
-    EVIDENCE_SUBMITTED: "산출물 증빙 제출",
-    EVIDENCE_APPROVED: "산출물 증빙 승인",
-    EVIDENCE_DISPUTED: "산출물 증빙 이의",
-    RENEWAL_DECISION_SAVED: "재계약 결정 저장",
-  };
-  return labels[eventType] ?? eventType;
+/* 계약 생애 전체의 감사 이벤트 문구(기획안 §6.10).
+   원칙 #1에 따라 판정하지 않고 일어난 사실만 서술한다. */
+const AUDIT_EVENT_LABELS: Record<string, string> = {
+  CONTRACT_CREATED: "계약을 생성했습니다.",
+  CONTRACT_STARTED: "계약이 시작되었습니다.",
+  CONTRACT_COMPLETED: "계약이 완료되었습니다.",
+  CONTRACT_RENEWAL_DUE: "재계약 검토 시점이 되었습니다.",
+  DOCUMENT_UPLOADED: "계약 문서가 업로드되었습니다.",
+  UNDERSTOOD_TERMS_SAVED: "사용자가 이해한 계약 조건이 저장되었습니다.",
+  ANALYSIS_STARTED: "계약 분석을 시작했습니다.",
+  ANALYSIS_RESTARTED: "계약 분석을 다시 시작했습니다.",
+  ANALYSIS_COMPLETED: "계약 분석을 완료했습니다.",
+  ANALYSIS_FAILED: "계약 분석을 완료하지 못했습니다.",
+  REVIEW_ITEM_SELECTION_UPDATED: "검토 항목 선택을 변경했습니다.",
+  ADJUSTMENT_DRAFT_CREATED: "조정 요청 초안을 생성했습니다.",
+  ADJUSTMENT_SENT: "조정 요청을 발송했습니다.",
+  ADJUSTMENT_OPENED: "대행사가 조정 요청을 열람했습니다.",
+  ADJUSTMENT_RESPONDED: "대행사가 조정 요청에 응답했습니다.",
+  ADJUSTMENT_CONFIRMED: "조정 결과를 확정했습니다.",
+  ADJUSTMENT_EXPIRED: "조정 요청 링크가 만료되었습니다.",
+  AGREEMENT_CREATED: "합의서를 생성했습니다.",
+  REVISED_CONTRACT_REVIEW_CREATED: "수정 계약서 대조를 생성했습니다.",
+  REVISED_CONTRACT_CONFIRMED: "수정 계약서 대조 결과를 확인했습니다.",
+  SIGNATURE_DRAFT_CREATED: "모두싸인 서명 초안을 만들었습니다.",
+  SIGNATURE_REQUESTED: "서명을 요청했습니다.",
+  SIGNATURE_STARTED: "양측 서명이 진행 중입니다.",
+  SIGNATURE_COMPLETED: "양측 서명이 완료되었습니다.",
+  SIGNATURE_ABORTED: "서명이 중단되었습니다.",
+  SIGNATURE_FAILED: "서명을 완료하지 못했습니다.",
+  OBLIGATION_CREATED: "산출물 확인 항목을 만들었습니다.",
+  EVIDENCE_LINK_CREATED: "산출물 증빙 제출 링크를 만들었습니다.",
+  EVIDENCE_SUBMITTED: "산출물 증빙이 제출되었습니다.",
+  EVIDENCE_APPROVED: "산출물 증빙을 승인했습니다.",
+  EVIDENCE_DISPUTED: "산출물 증빙에 이의를 남겼습니다.",
+  RENEWAL_DECISION_SAVED: "재계약 의사를 저장했습니다.",
+  PERFORMANCE_REPORT_UPLOADED: "광고효과 리포트를 업로드했습니다.",
+  PERFORMANCE_REPORT_EXTRACTED: "광고효과 리포트에서 지표를 추출했습니다.",
+  PERFORMANCE_REPORT_CONFIRMED: "광고효과 리포트를 확정했습니다.",
+  PERFORMANCE_REPORT_FLAGGED: "광고효과 리포트에 확인이 필요한 항목이 있습니다.",
+  PERFORMANCE_REPORT_CORRECTED: "광고효과 리포트를 정정했습니다.",
+  PERFORMANCE_REPORT_EXTRACTION_RECOVERED: "광고효과 리포트 추출을 다시 시도했습니다.",
+};
+
+function auditEventLabel(eventType: string): string | undefined {
+  return AUDIT_EVENT_LABELS[eventType];
 }
 
 function mapPerformanceCandidate(data: ApiPerformanceMetricCandidate): PerformanceMetricCandidate {

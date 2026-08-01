@@ -47,6 +47,12 @@ class RenewalDecisionSaveOutcome(StrEnum):
     OUTSIDE_REVIEW_WINDOW = "OUTSIDE_REVIEW_WINDOW"
 
 
+class ContractDeleteOutcome(StrEnum):
+    DELETED = "DELETED"
+    NOT_FOUND = "NOT_FOUND"
+    PROTECTED = "PROTECTED"
+
+
 @dataclass(frozen=True)
 class RenewalDecisionSaveResult:
     outcome: RenewalDecisionSaveOutcome
@@ -65,6 +71,14 @@ class ContractRepository(Protocol):
     async def get(self, *, owner_id: UUID, contract_id: UUID) -> ContractRecord | None: ...
 
     async def list(self, *, owner_id: UUID) -> Sequence[ContractRecord]: ...
+
+    async def delete_discardable(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        deleted_at: datetime,
+    ) -> ContractDeleteOutcome: ...
 
     async def list_audit_events(
         self,

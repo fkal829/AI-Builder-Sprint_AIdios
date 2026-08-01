@@ -95,6 +95,13 @@ class ContractListItem(BaseModel):
     auto_renewal_d_day: int | None = None
 
 
+class ContractDeletion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_id: UUID
+    deleted: Literal[True] = True
+
+
 class AuditEvent(BaseModel):
     id: UUID
     event_type: AuditEventType

@@ -155,6 +155,24 @@ Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서�
 | 계약 타임라인 | `created_at` 오름차순, `id` 오름차순 |
 | 이행 항목 목록 | `due_date` 오름차순, `id` 오름차순 |
 
+### 초기 계약 삭제 불변식
+
+- 계약 삭제는 소유자 인증이 필요한 `DELETE /contracts/{contract_id}`에서만 수행한다.
+- 삭제 가능한 Contract 상태는 `DRAFT`, `ANALYZING`, `REVIEW_REQUIRED`,
+  `NEGOTIATING`으로 제한한다.
+- 같은 계약의 AdjustmentRequest는 없거나 모두 `DRAFT`여야 한다. `SENT`, `OPENED`,
+  `RESPONDED`, `CONFIRMED`, `EXPIRED` 이력이 하나라도 있으면 현재 계약 상태와 관계없이
+  삭제하지 않는다.
+- Signature 행은 상태와 관계없이 하나라도 있으면 삭제하지 않는다. 외부 초안·문서와
+  내부 추적 기록의 연결을 잃지 않기 위한 보수적인 경계다.
+- DB 함수는 Contract, AdjustmentRequest, Signature 관련 행을 잠근 뒤 조건을 다시
+  검사한다. 조정 발송·서명 생성과 삭제가 경쟁하면 하나의 트랜잭션만 성공해야 한다.
+- 성공한 삭제는 계약에 종속된 발송 전 데이터와 감사 타임라인을 함께 제거한다. Storage는
+  삭제된 Document의 서버 생성 `storage_path`만 대상으로 하며 원본 파일명이나 클라이언트
+  입력 경로를 사용하지 않는다.
+- 소유하지 않았거나 이미 없는 계약은 `404 NOT_FOUND`, 보호되는 생애주기 계약은
+  `409 INVALID_STATUS_TRANSITION`으로 반환한다.
+
 ## 6. 문서·AI 분석 계약
 
 ### 6.1 분석 작업

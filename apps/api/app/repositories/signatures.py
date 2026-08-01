@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
+from app.core.enums import ModusignStatus
 from app.schemas.signatures import Signature
 
 
@@ -55,3 +56,13 @@ class SignatureRepository(Protocol):
         owner_id: UUID,
         contract_id: UUID,
     ) -> SignatureRecord | None: ...
+
+    async def apply_modusign_document_status(
+        self,
+        *,
+        signature_id: UUID,
+        document_id: str,
+        event_key: str,
+        status: ModusignStatus,
+        processed_at: datetime,
+    ) -> bool: ...

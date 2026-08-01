@@ -8,9 +8,13 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient, MockTransport, Request, Response
 
-from app.adapters.modusign import ModusignAdapter, ModusignAdapterError
+from app.adapters.modusign import ModusignAdapter, ModusignAdapterError, ModusignDocumentStatus
 from app.adapters.supabase import SupabaseAdapter
-from app.api.dependencies import get_modusign_adapter, get_supabase_adapter
+from app.api.dependencies import (
+    get_modusign_adapter,
+    get_signature_service,
+    get_supabase_adapter,
+)
 from app.core.enums import ContractStatus, InternalSignatureStatus, ModusignStatus
 from app.main import app
 from app.repositories.agreements import AgreementRecord
@@ -22,6 +26,8 @@ from app.schemas.agreements import (
     OriginalContractReference,
 )
 from app.schemas.signatures import SignatureSigner
+from app.services.signatures import SignatureService
+from app.services.webhooks import ModusignWebhookService
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000027")
 DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000046")
@@ -199,6 +205,161 @@ async def test_creates_embedded_draft_without_contacts_or_auto_sending(signature
     )
     assert retrieved.status_code == 200
     assert retrieved.json()["data"] == signature
+
+
+RECONCILE_WEBHOOK_SECRET = "test-reconcile-webhook-secret"
+
+
+class FakeDocumentListModusignAdapter:
+    """Stands in for Modusign after the user sent an embedded draft.
+
+    The sent draft became a document with a *different* id, and no webhook
+    reached us, so the only way back to it is the metadata we attached when
+    creating the draft.
+    """
+
+    def __init__(self, *, documents: list[ModusignDocumentStatus]) -> None:
+        self.documents = documents
+        self.listed = 0
+        self.fetched: list[str] = []
+
+    async def list_recent_documents(self, *, limit: int = 50) -> list[ModusignDocumentStatus]:
+        self.listed += 1
+        return self.documents
+
+    async def get_document_status(self, *, document_id: str) -> ModusignDocumentStatus:
+        self.fetched.append(document_id)
+        for document in self.documents:
+            if document.id == document_id:
+                return document
+        raise ModusignAdapterError("unknown document")
+
+
+def signature_document(
+    *, document_id: str, signature_id: UUID, status: ModusignStatus, secret: str
+) -> ModusignDocumentStatus:
+    return ModusignDocumentStatus(
+        id=document_id,
+        status=status,
+        metadata=ModusignWebhookService.build_signature_metadata(
+            signature_id=signature_id, webhook_secret=secret
+        ),
+    )
+
+
+def override_signature_service(adapter: SupabaseAdapter, modusign) -> None:
+    async def factory():
+        return SignatureService(
+            repository=adapter,
+            agreements=adapter,
+            revisions=adapter,
+            documents=adapter,
+            storage=adapter,
+            modusign=modusign,
+            embedded_redirect_url="",
+            webhook_secret=RECONCILE_WEBHOOK_SECRET,
+        )
+
+    app.dependency_overrides[get_signature_service] = factory
+
+
+async def test_get_signature_reconciles_with_modusign_when_no_webhook_arrived(
+    signature_context,
+) -> None:
+    client, adapter = signature_context
+    contract_id, agreement = await ready_contract_with_agreement(client, adapter)
+
+    created = await client.post(
+        f"/api/v1/contracts/{contract_id}/signature-embedded-drafts",
+        headers=owner_headers(idempotency_key=uuid4()),
+        json=request_payload(agreement),
+    )
+    assert created.status_code == 201
+    draft = created.json()["data"]["signature"]
+    assert draft["status"] == "EDITING"
+    assert draft["modusign_document_id"] is None
+    signature_id = UUID(draft["id"])
+    # The document id is unrelated to the draft id, exactly as the vendor behaves.
+    document_id = "dd655b70-8dcf-11f1-812b-d19927853d2e"
+    assert document_id != draft["modusign_draft_id"]
+
+    fake_modusign = FakeDocumentListModusignAdapter(
+        documents=[
+            signature_document(
+                document_id=document_id,
+                signature_id=signature_id,
+                status=ModusignStatus.COMPLETED,
+                secret=RECONCILE_WEBHOOK_SECRET,
+            )
+        ]
+    )
+    override_signature_service(adapter, fake_modusign)
+
+    retrieved = await client.get(
+        f"/api/v1/contracts/{contract_id}/signature",
+        headers=owner_headers(),
+    )
+
+    assert retrieved.status_code == 200
+    signature = retrieved.json()["data"]
+    assert signature["status"] == "COMPLETED"
+    assert signature["modusign_status"] == "COMPLETED"
+    assert signature["modusign_document_id"] == document_id
+    assert fake_modusign.listed == 1
+    assert adapter.mock_contracts[contract_id].status == ContractStatus.SIGNED
+    assert [event.event_type for event in adapter.mock_audit_events].count(
+        "SIGNATURE_COMPLETED"
+    ) == 1
+
+    # Reading again must not re-apply the already-completed transition or duplicate
+    # the audit event, since a real webhook could still arrive afterward.
+    again = await client.get(
+        f"/api/v1/contracts/{contract_id}/signature",
+        headers=owner_headers(),
+    )
+    assert again.status_code == 200
+    assert again.json()["data"]["status"] == "COMPLETED"
+    assert [event.event_type for event in adapter.mock_audit_events].count(
+        "SIGNATURE_COMPLETED"
+    ) == 1
+
+
+async def test_signature_ignores_document_without_a_valid_metadata_proof(
+    signature_context,
+) -> None:
+    """Vendor metadata alone must not be enough to claim one of our signatures."""
+    client, adapter = signature_context
+    contract_id, agreement = await ready_contract_with_agreement(client, adapter)
+
+    created = await client.post(
+        f"/api/v1/contracts/{contract_id}/signature-embedded-drafts",
+        headers=owner_headers(idempotency_key=uuid4()),
+        json=request_payload(agreement),
+    )
+    signature_id = UUID(created.json()["data"]["signature"]["id"])
+
+    forged = ModusignDocumentStatus(
+        id="99999999-0000-0000-0000-000000000000",
+        status=ModusignStatus.COMPLETED,
+        metadata={
+            "aidos_signature_id": str(signature_id),
+            "aidos_signature_proof": "0" * 64,
+        },
+    )
+    fake_modusign = FakeDocumentListModusignAdapter(documents=[forged])
+    override_signature_service(adapter, fake_modusign)
+
+    retrieved = await client.get(
+        f"/api/v1/contracts/{contract_id}/signature",
+        headers=owner_headers(),
+    )
+
+    assert retrieved.status_code == 200
+    assert retrieved.json()["data"]["status"] == "EDITING"
+    assert adapter.mock_contracts[contract_id].status == ContractStatus.READY_TO_SIGN
+    assert "SIGNATURE_COMPLETED" not in [
+        event.event_type for event in adapter.mock_audit_events
+    ]
 
 
 async def test_rejects_invalid_signer_set_and_preserves_ready_contract(signature_context) -> None:

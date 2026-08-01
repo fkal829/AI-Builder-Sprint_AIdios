@@ -3,6 +3,7 @@ import type {
   LiveDocumentClause,
   LiveReviewItem,
 } from "./adapter";
+import { displayText } from "./displayText";
 import { SIGNAL_META } from "./status";
 import type { ClauseCard, ContractDetail, DocClause } from "./types";
 
@@ -36,7 +37,9 @@ export function liveReviewItemToClause(
     signal: item.type,
     original: {
       page: item.sourcePage ?? 0,
-      text: item.sourceText ?? "원문 근거를 찾지 못했습니다.",
+      text: item.sourceText
+        ? displayText(item.sourceText)
+        : "원문 근거를 찾지 못했습니다.",
     },
     understood: null,
     aiExplanation: item.plainExplanation,
@@ -99,7 +102,9 @@ export function liveReviewToDashboard(review: LiveContractReview): ReviewDashboa
     id: item.id,
     no: item.sourcePage ? `${item.sourcePage}쪽` : `확인 ${index + 1}`,
     title: SIGNAL_META[item.type],
-    body: item.sourceText ?? "계약서에서 직접 연결할 원문 근거를 찾지 못했습니다.",
+    body: item.sourceText
+      ? displayText(item.sourceText)
+      : "계약서에서 직접 연결할 원문 근거를 찾지 못했습니다.",
     sourcePage: item.sourcePage ?? undefined,
     confidence: item.sourceConfidence,
     risk: riskFor(item),
@@ -123,8 +128,8 @@ export function liveReviewToDashboard(review: LiveContractReview): ReviewDashboa
         return {
           id: clause.id,
           no: clause.heading,
-          title: clause.title,
-          body: clause.sourceText,
+          title: displayText(clause.title),
+          body: displayText(clause.sourceText),
           sourcePage: clause.sourcePage,
           confidence: clause.confidence,
           risk,

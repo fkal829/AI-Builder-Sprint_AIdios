@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from app.core.enums import ContractStatus
 from app.core.exceptions import ResourceNotFound
 from app.repositories.contracts import (
+    ContractDeleteOutcome,
     ContractRecord,
     ContractRepository,
     RenewalDecisionSaveOutcome,
@@ -13,15 +14,21 @@ from app.schemas.contracts import (
     AuditEvent,
     Contract,
     ContractCreate,
+    ContractDeletion,
     ContractListItem,
     RenewalDecision,
     RenewalDecisionRequest,
 )
+from app.services.signature_reconciliation import SignatureReconciler
 from app.services.state_machine import InvalidStatusTransition
 
 # Korea has no daylight saving time.  A fixed offset keeps Asia/Seoul date
 # calculations available in minimal Windows environments without tzdata.
 SEOUL = timezone(timedelta(hours=9), name="Asia/Seoul")
+
+# A contract can only have a pending, non-terminal signature while it sits in
+# one of these statuses (see supabase/migrations/*_add_modusign_webhook_reconciliation.sql).
+_SIGNATURE_PENDING_STATUSES = (ContractStatus.READY_TO_SIGN, ContractStatus.SIGNING)
 
 
 class ContractService:
@@ -31,9 +38,11 @@ class ContractService:
         self,
         repository: ContractRepository,
         *,
+        signatures: SignatureReconciler | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
+        self._signatures = signatures
         self._now = now or (lambda: datetime.now(UTC))
 
     async def create(self, *, owner_id: UUID, payload: ContractCreate) -> Contract:
@@ -62,17 +71,54 @@ class ContractService:
     async def list(self, *, owner_id: UUID) -> Sequence[ContractListItem]:
         today = self._now().astimezone(SEOUL).date()
         records = await self._repository.list(owner_id=owner_id)
+        records = await self._with_reconciled_signatures(owner_id=owner_id, records=records)
         ordered = sorted(
             records,
             key=lambda item: (item.end_date is None, item.end_date, str(item.id)),
         )
         return [_list_item_from_record(record, today=today) for record in ordered]
 
+    async def _with_reconciled_signatures(
+        self, *, owner_id: UUID, records: Sequence[ContractRecord]
+    ) -> Sequence[ContractRecord]:
+        """A contract stuck at READY_TO_SIGN/SIGNING may only be stale because
+        Modusign's webhook (C-8) never reached this server. Reconciling every
+        pending signature here means simply reloading the contract list shows
+        the true signing state, without visiting that contract's signature page.
+        """
+        if self._signatures is None:
+            return records
+        pending_ids = [
+            record.id for record in records if record.status in _SIGNATURE_PENDING_STATUSES
+        ]
+        if not pending_ids:
+            return records
+        for contract_id in pending_ids:
+            await self._signatures.reconcile_owned(owner_id=owner_id, contract_id=contract_id)
+        refreshed = {
+            record.id: record for record in await self._repository.list(owner_id=owner_id)
+        }
+        return [refreshed.get(record.id, record) for record in records]
+
     async def get(self, *, owner_id: UUID, contract_id: UUID) -> Contract:
         record = await self._repository.get(owner_id=owner_id, contract_id=contract_id)
         if record is None:
             raise ResourceNotFound()
         return _contract_from_record(record)
+
+    async def delete(self, *, owner_id: UUID, contract_id: UUID) -> ContractDeletion:
+        outcome = await self._repository.delete_discardable(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            deleted_at=self._utc_now(),
+        )
+        if outcome is ContractDeleteOutcome.NOT_FOUND:
+            raise ResourceNotFound()
+        if outcome is ContractDeleteOutcome.PROTECTED:
+            raise InvalidStatusTransition(
+                "조정 요청을 발송했거나 서명 단계가 시작된 계약은 삭제할 수 없습니다."
+            )
+        return ContractDeletion(contract_id=contract_id)
 
     async def timeline(self, *, owner_id: UUID, contract_id: UUID) -> Sequence[AuditEvent]:
         events = await self._repository.list_audit_events(

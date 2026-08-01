@@ -138,3 +138,64 @@ test("live review loads all parsed clauses and exposes the signed PDF only as a 
   assert.doesNotMatch(page, /<iframe/);
   assert.doesNotMatch(page, /localStorage[^]*documentAccessUrl/);
 });
+
+test("audit timeline is rendered in Korean and distinguishes every signature status", async () => {
+  const adapter = await source("src/lib/adapter.ts");
+
+  // 저장된 summary는 기록 계층마다 언어·문체가 다르고, 서명 동기화는 진행/완료를
+  // 같은 문장으로 남긴다. 화면 문구는 상태마다 값이 다른 event_type에서 만든다.
+  assert.match(
+    adapter,
+    /label: auditEventLabel\(event\.event_type\) \?\? event\.summary\?\.trim\(\) \?\? event\.event_type/,
+  );
+  assert.doesNotMatch(adapter, /label: event\.summary\?\.trim\(\) \|\| auditEventLabel/);
+
+  const labels = adapter.slice(
+    adapter.indexOf("const AUDIT_EVENT_LABELS"),
+    adapter.indexOf("function auditEventLabel"),
+  );
+
+  // 서명 4개 상태가 서로 다른 문구여야 타임라인에서 구분된다.
+  const signatureLabels = ["SIGNATURE_STARTED", "SIGNATURE_COMPLETED", "SIGNATURE_ABORTED", "SIGNATURE_FAILED"]
+    .map((type) => new RegExp(`${type}: "([^"]+)"`).exec(labels)?.[1]);
+  assert.ok(signatureLabels.every(Boolean), "모든 서명 상태에 문구가 있어야 합니다");
+  assert.equal(new Set(signatureLabels).size, signatureLabels.length, "서명 상태 문구가 서로 달라야 합니다");
+
+  // 백엔드 AuditEventType 전부를 덮어야 영어 summary가 화면에 새지 않는다.
+  const enums = await readFile(
+    new URL("../../api/app/core/enums.py", import.meta.url),
+    "utf8",
+  );
+  const afterClass = enums.slice(enums.indexOf("class AuditEventType"));
+  const nextClass = afterClass.indexOf("\nclass ", 1);
+  const block = nextClass === -1 ? afterClass : afterClass.slice(0, nextClass);
+  const backendTypes = [...block.matchAll(/^\s{4}(\w+) = "/gm)].map((m) => m[1]);
+  assert.ok(backendTypes.length > 20, "AuditEventType 파싱에 실패했습니다");
+  const missing = backendTypes.filter((type) => !new RegExp(`\\n  ${type}: "`).test(labels));
+  assert.deepEqual(missing, [], `문구가 없는 감사 이벤트: ${missing.join(", ")}`);
+
+  for (const label of [...labels.matchAll(/: "([^"]+)"/g)].map((m) => m[1])) {
+    assert.doesNotMatch(label, /[A-Za-z]{4,}/, `사용자 문구에 영어가 남아 있습니다: ${label}`);
+  }
+});
+
+test("signature page keeps polling the timeline until Modusign reaches a terminal status", async () => {
+  const page = await source("src/app/contracts/[id]/signature/page.tsx");
+
+  // 모두싸인 서명은 웹훅(C-8)으로 비동기 진행되므로, 최초 1회 조회만으로는
+  // 초안 생성 이후의 SIGNATURE_STARTED/COMPLETED 감사 이벤트를 화면이 볼 수 없다.
+  // 진행 중(REQUEST_READY/REQUESTING/EDITING/SIGNING)일 때는 계속 다시 조회해야 한다.
+  assert.match(page, /TERMINAL_SIGNATURE_STATUSES/);
+  assert.match(page, /"COMPLETED"[^]*"ABORTED"[^]*"FAILED"/);
+  assert.match(page, /setTimeout\(\(\) => \{\s*if \(alive\) void refreshView\(\);/);
+  assert.match(page, /await adapter\.getSignatureView\(id\)/);
+
+  // 렌더링은 최초 조회 스냅샷(state.data)이 아니라 매 폴링마다 갱신되는
+  // liveView 기반 view를 사용해야 새 감사 이벤트가 화면에 반영된다.
+  assert.match(page, /const view: LiveSignatureView \| null =\s*\n\s*liveView \?\?/);
+  assert.match(page, /<Timeline events={view\.timeline} \/>/);
+  assert.doesNotMatch(page, /Timeline events={state\.data\.timeline}/);
+
+  // 초안 생성 직후에는 4초 폴링을 기다리지 않고 즉시 갱신한다.
+  assert.match(page, /setEditorUrl\(draft\.editorUrl\);\s*\n\s*window\.localStorage\.removeItem\([^)]+\);\s*\n\s*await refreshView\(\);/);
+});

@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import logging
 import re
 import secrets
 from collections import Counter
@@ -53,6 +54,7 @@ from app.repositories.agreements import AgreementCreationContext, AgreementRecor
 from app.repositories.analysis import AnalysisTaskRecord, QueuedAnalysisJob
 from app.repositories.contracts import (
     AuditEventRecord,
+    ContractDeleteOutcome,
     ContractRecord,
     RenewalDecisionSaveOutcome,
     RenewalDecisionSaveResult,
@@ -159,6 +161,16 @@ class MockModusignWebhookEvent:
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+logger = logging.getLogger(__name__)
+
+_DISCARDABLE_CONTRACT_STATUSES = {
+    ContractStatus.DRAFT,
+    ContractStatus.ANALYZING,
+    ContractStatus.REVIEW_REQUIRED,
+    ContractStatus.NEGOTIATING,
+}
 
 
 class SupabaseAdapter:
@@ -1919,6 +1931,197 @@ class SupabaseAdapter:
         except Exception as error:
             raise ExternalStorageFailure("계약 목록 조회에 실패했습니다.") from error
         return [_contract_record_from_row(row, owner_id=owner_id) for row in response.data or []]
+
+    async def delete_discardable(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        deleted_at: datetime,
+    ) -> ContractDeleteOutcome:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if contract is None or contract.owner_id != owner_id:
+                    return ContractDeleteOutcome.NOT_FOUND
+
+                requests = [
+                    request
+                    for request in self._mock_adjustment_requests.values()
+                    if request.contract_id == contract_id
+                ]
+                has_signature = any(
+                    record.signature.contract_id == contract_id
+                    for record in self._mock_signatures.values()
+                )
+                has_advanced_record = (
+                    any(
+                        record.agreement.contract_id == contract_id
+                        for record in self._mock_agreements.values()
+                    )
+                    or any(
+                        review.contract_id == contract_id
+                        for review in self._mock_revised_contract_reviews.values()
+                    )
+                    or any(
+                        report.contract_id == contract_id
+                        for report in self._mock_performance_reports.values()
+                    )
+                )
+                if (
+                    contract.status not in _DISCARDABLE_CONTRACT_STATUSES
+                    or any(
+                        request.status is not AdjustmentRequestStatus.DRAFT
+                        for request in requests
+                    )
+                    or has_signature
+                    or has_advanced_record
+                ):
+                    return ContractDeleteOutcome.PROTECTED
+
+                document_ids = {
+                    document.id
+                    for document in self._mock_documents.values()
+                    if document.contract_id == contract_id
+                }
+                storage_paths = {
+                    document.storage_path
+                    for document in self._mock_documents.values()
+                    if document.id in document_ids
+                }
+                request_ids = {request.id for request in requests}
+                obligation_ids = {
+                    obligation.id
+                    for obligation in self._mock_obligations.values()
+                    if obligation.contract_id == contract_id
+                }
+                resource_ids = {contract_id, *request_ids, *obligation_ids}
+
+                self._mock_documents = {
+                    key: value
+                    for key, value in self._mock_documents.items()
+                    if key not in document_ids
+                }
+                for path in storage_paths:
+                    self._mock_objects.pop(path, None)
+                    self._mock_object_content_types.pop(path, None)
+                self._mock_signed_accesses = {
+                    key: value
+                    for key, value in self._mock_signed_accesses.items()
+                    if value.path not in storage_paths
+                }
+                self._mock_analysis_tasks = {
+                    key: value
+                    for key, value in self._mock_analysis_tasks.items()
+                    if value.contract_id != contract_id
+                }
+                self._mock_obligations = {
+                    key: value
+                    for key, value in self._mock_obligations.items()
+                    if value.contract_id != contract_id
+                }
+                self._mock_review_items = {
+                    key: value
+                    for key, value in self._mock_review_items.items()
+                    if value.contract_id != contract_id
+                }
+                self._mock_review_item_details = {
+                    key: value
+                    for key, value in self._mock_review_item_details.items()
+                    if value.contract_id != contract_id
+                }
+                self._mock_adjustment_requests = {
+                    key: value
+                    for key, value in self._mock_adjustment_requests.items()
+                    if key not in request_ids
+                }
+                self._mock_adjustment_responses = {
+                    key: value
+                    for key, value in self._mock_adjustment_responses.items()
+                    if key not in request_ids
+                }
+                self._mock_final_clauses = {
+                    key: value
+                    for key, value in self._mock_final_clauses.items()
+                    if key not in request_ids
+                }
+                self._mock_public_tokens = {
+                    key: value
+                    for key, value in self._mock_public_tokens.items()
+                    if value.resource_id not in resource_ids
+                }
+                self._mock_idempotency = {
+                    key: value
+                    for key, value in self._mock_idempotency.items()
+                    if key[2] not in resource_ids
+                }
+                self._mock_audit_events = [
+                    event for event in self._mock_audit_events if event.contract_id != contract_id
+                ]
+                self._mock_understood_terms.pop(contract_id, None)
+                self._mock_renewal_decisions.pop(contract_id, None)
+                self._mock_owned_contracts.discard((owner_id, contract_id))
+                self._mock_contracts.pop(contract_id, None)
+                return ContractDeleteOutcome.DELETED
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_contract_id": str(contract_id),
+            "p_deleted_at": deleted_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc("delete_discardable_contract", params).execute()
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("계약 삭제에 실패했습니다.") from error
+        row = response.data
+        if isinstance(row, list):
+            row = row[0] if len(row) == 1 else None
+        if not isinstance(row, dict):
+            raise ExternalStorageFailure("계약 삭제 결과가 올바르지 않습니다.")
+        try:
+            outcome = ContractDeleteOutcome(str(row["outcome"]))
+            storage_paths = row.get("storage_paths", [])
+            if not isinstance(storage_paths, list) or not all(
+                isinstance(path, str) and path for path in storage_paths
+            ):
+                raise ValueError("invalid storage paths")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure("계약 삭제 결과가 올바르지 않습니다.") from error
+
+        if outcome is not ContractDeleteOutcome.DELETED:
+            return outcome
+
+        cleanup_succeeded = True
+        for path in storage_paths:
+            try:
+                await self.delete_private_object(path=path)
+            except ExternalStorageFailure:
+                cleanup_succeeded = False
+                logger.warning(
+                    "Deleted contract has a pending private storage cleanup.",
+                    extra={"contract_id": str(contract_id)},
+                )
+        if cleanup_succeeded:
+            try:
+                await asyncio.to_thread(
+                    lambda: client.rpc(
+                        "mark_contract_storage_cleaned",
+                        {
+                            "p_owner_id": str(owner_id),
+                            "p_contract_id": str(contract_id),
+                            "p_cleaned_at": self._clock().isoformat(),
+                        },
+                    ).execute()
+                )
+            except Exception:
+                logger.warning(
+                    "Contract storage cleanup marker could not be persisted.",
+                    extra={"contract_id": str(contract_id)},
+                )
+        return outcome
 
     async def get_dashboard(
         self,

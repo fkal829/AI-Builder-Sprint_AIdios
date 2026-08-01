@@ -5,10 +5,28 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.adapters.modusign import ModusignAdapter, ModusignDocumentStatus
 from app.adapters.supabase import MockAuditEvent, SupabaseAdapter
-from app.api.dependencies import get_supabase_adapter
-from app.core.enums import ContractStatus
+from app.api.dependencies import (
+    get_contract_service,
+    get_modusign_adapter,
+    get_supabase_adapter,
+)
+from app.core.enums import (
+    AdjustmentRequestStatus,
+    ContractStatus,
+    InternalSignatureStatus,
+    ModusignStatus,
+)
 from app.main import app
+from app.repositories.adjustments import AdjustmentRequestRecord
+from app.repositories.documents import DocumentRecord
+from app.repositories.signatures import SignatureRecord
+from app.schemas.documents import DocumentParseStatus, DocumentType
+from app.schemas.signatures import Signature
+from app.services.contracts import ContractService
+from app.services.signature_reconciliation import SignatureReconciler
+from app.services.webhooks import ModusignWebhookService
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000013")
 OTHER_OWNER_ID = UUID("00000000-0000-4000-8000-000000000099")
@@ -31,7 +49,15 @@ async def contract_context():
     async def override_adapter():
         return adapter
 
+    # ContractService now reconciles pending signatures through the Modusign
+    # adapter (see test_reconciles_pending_signatures_when_listing_contracts
+    # below). Pin it to mock mode explicitly rather than letting DI fall back
+    # to whatever MODUSIGN_MODE/API key happens to be in a developer's .env.
+    async def override_modusign():
+        return ModusignAdapter(account_email="", api_key="", mode="mock")
+
     app.dependency_overrides[get_supabase_adapter] = override_adapter
+    app.dependency_overrides[get_modusign_adapter] = override_modusign
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
@@ -117,6 +143,165 @@ async def test_contract_detail_returns_saved_understood_term(contract_context) -
     }
 
 
+async def test_deletes_contract_and_unsent_child_data(contract_context) -> None:
+    client, adapter = contract_context
+    contract_id = UUID((await create_contract(client, "삭제할 테스트 계약"))["id"])
+    document_id = uuid4()
+    storage_path = f"{OWNER_ID}/{contract_id}/{document_id}.pdf"
+    created_at = datetime(2026, 8, 2, tzinfo=UTC)
+    adapter._mock_documents[document_id] = DocumentRecord(
+        id=document_id,
+        contract_id=contract_id,
+        type=DocumentType.CONTRACT,
+        parse_status=DocumentParseStatus.COMPLETED,
+        storage_path=storage_path,
+        content_type="application/pdf",
+        size_bytes=10,
+        page_count=1,
+        created_at=created_at,
+    )
+    adapter._mock_objects[storage_path] = b"test-pdf"
+    adapter._mock_object_content_types[storage_path] = "application/pdf"
+    request_id = uuid4()
+    adapter._mock_adjustment_requests[request_id] = AdjustmentRequestRecord(
+        id=request_id,
+        contract_id=contract_id,
+        status=AdjustmentRequestStatus.DRAFT,
+        items=(),
+        expires_in_hours=72,
+        sent_at=None,
+        expires_at=None,
+        opened_at=None,
+        responded_at=None,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+    response = await client.delete(
+        f"/api/v1/contracts/{contract_id}", headers=authorization_header()
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"contract_id": str(contract_id), "deleted": True}
+    assert contract_id not in adapter.mock_contracts
+    assert document_id not in adapter.mock_documents
+    assert storage_path not in adapter.mock_objects
+    assert request_id not in adapter.mock_adjustment_requests
+    assert not [event for event in adapter.mock_audit_events if event.contract_id == contract_id]
+    detail = await client.get(
+        f"/api/v1/contracts/{contract_id}", headers=authorization_header()
+    )
+    assert detail.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ContractStatus.ANALYZING,
+        ContractStatus.REVIEW_REQUIRED,
+        ContractStatus.NEGOTIATING,
+    ],
+)
+async def test_deletes_each_pre_send_contract_status(contract_context, status) -> None:
+    client, adapter = contract_context
+    contract_id = UUID((await create_contract(client, f"{status.value} 삭제"))["id"])
+    adapter._mock_contracts[contract_id] = replace(
+        adapter._mock_contracts[contract_id], status=status
+    )
+
+    response = await client.delete(
+        f"/api/v1/contracts/{contract_id}", headers=authorization_header()
+    )
+
+    assert response.status_code == 200
+    assert contract_id not in adapter.mock_contracts
+
+
+async def test_rejects_deletion_after_adjustment_was_sent(contract_context) -> None:
+    client, adapter = contract_context
+    contract_id = UUID((await create_contract(client, "조정 발송 계약"))["id"])
+    adapter._mock_contracts[contract_id] = replace(
+        adapter._mock_contracts[contract_id], status=ContractStatus.NEGOTIATING
+    )
+    sent_at = datetime(2026, 8, 2, tzinfo=UTC)
+    request_id = uuid4()
+    adapter._mock_adjustment_requests[request_id] = AdjustmentRequestRecord(
+        id=request_id,
+        contract_id=contract_id,
+        status=AdjustmentRequestStatus.SENT,
+        items=(),
+        expires_in_hours=72,
+        sent_at=sent_at,
+        expires_at=sent_at.replace(day=5),
+        opened_at=None,
+        responded_at=None,
+        created_at=sent_at,
+        updated_at=sent_at,
+    )
+
+    response = await client.delete(
+        f"/api/v1/contracts/{contract_id}", headers=authorization_header()
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+    assert contract_id in adapter.mock_contracts
+    assert request_id in adapter.mock_adjustment_requests
+
+
+async def test_rejects_deletion_when_any_signature_attempt_exists(contract_context) -> None:
+    client, adapter = contract_context
+    contract_id = UUID((await create_contract(client, "서명 시도 계약"))["id"])
+    signature_id = uuid4()
+    adapter._mock_signatures[signature_id] = SignatureRecord(
+        signature=Signature(
+            id=signature_id,
+            contract_id=contract_id,
+            status=InternalSignatureStatus.EDITING,
+            modusign_status=ModusignStatus.DRAFT,
+            modusign_draft_id="protected-draft-id",
+            requested_at=datetime(2026, 8, 2, tzinfo=UTC),
+        ),
+        agreement_id=uuid4(),
+        agreement_version=1,
+        idempotency_key=uuid4(),
+    )
+
+    response = await client.delete(
+        f"/api/v1/contracts/{contract_id}", headers=authorization_header()
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+    assert contract_id in adapter.mock_contracts
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ContractStatus.READY_TO_SIGN,
+        ContractStatus.SIGNING,
+        ContractStatus.SIGNED,
+        ContractStatus.IN_PROGRESS,
+        ContractStatus.COMPLETED,
+        ContractStatus.RENEWAL_DUE,
+    ],
+)
+async def test_rejects_deletion_for_protected_contract_status(contract_context, status) -> None:
+    client, adapter = contract_context
+    contract_id = UUID((await create_contract(client, f"{status.value} 보호"))["id"])
+    adapter._mock_contracts[contract_id] = replace(
+        adapter._mock_contracts[contract_id], status=status
+    )
+
+    response = await client.delete(
+        f"/api/v1/contracts/{contract_id}", headers=authorization_header()
+    )
+
+    assert response.status_code == 409
+    assert contract_id in adapter.mock_contracts
+
+
 async def test_lists_contracts_by_expiry_with_null_last_and_stable_id(contract_context) -> None:
     client, adapter = contract_context
     first = UUID((await create_contract(client, "종료일 빠른 계약"))["id"])
@@ -151,6 +336,100 @@ async def test_lists_contracts_by_expiry_with_null_last_and_stable_id(contract_c
     assert third_item["auto_renewal_d_day"] is None
 
 
+RECONCILE_WEBHOOK_SECRET = "test-reconcile-webhook-secret"
+
+
+class FakeDocumentListModusignAdapter:
+    """Stands in for Modusign after the user sent an embedded draft.
+
+    The sent draft became a document with a *different* id and no webhook
+    reached us, so the document is only findable by the metadata we attached
+    when the draft was created.
+    """
+
+    def __init__(self, *, documents: list[ModusignDocumentStatus]) -> None:
+        self.documents = documents
+        self.listed = 0
+
+    async def list_recent_documents(self, *, limit: int = 50) -> list[ModusignDocumentStatus]:
+        self.listed += 1
+        return self.documents
+
+    async def get_document_status(self, *, document_id: str) -> ModusignDocumentStatus:
+        for document in self.documents:
+            if document.id == document_id:
+                return document
+        raise AssertionError("unexpected direct fetch")
+
+
+async def test_reconciles_pending_signatures_when_listing_contracts(contract_context) -> None:
+    """Simply reloading the contract list must reflect real signing progress,
+    even for a contract nobody has opened the signature page for yet — the
+    user should not have to guess which of many contracts finished signing."""
+    client, adapter = contract_context
+    signed_id = UUID((await create_contract(client, "서명 완료 계약"))["id"])
+    untouched_id = UUID((await create_contract(client, "아직 서명 전 계약"))["id"])
+    adapter._mock_contracts[signed_id] = replace(
+        adapter._mock_contracts[signed_id], status=ContractStatus.READY_TO_SIGN
+    )
+    signature_id = uuid4()
+    adapter._mock_signatures[signature_id] = SignatureRecord(
+        signature=Signature(
+            id=signature_id,
+            contract_id=signed_id,
+            status=InternalSignatureStatus.EDITING,
+            modusign_status=ModusignStatus.DRAFT,
+            modusign_draft_id="01KYZ1RCJ5SCBQ62HFTKWM26MF",
+            requested_at=datetime(2026, 8, 1, tzinfo=UTC),
+        ),
+        agreement_id=uuid4(),
+        agreement_version=1,
+        idempotency_key=uuid4(),
+    )
+    document_id = "dd655b70-8dcf-11f1-812b-d19927853d2e"
+
+    fake_modusign = FakeDocumentListModusignAdapter(
+        documents=[
+            ModusignDocumentStatus(
+                id=document_id,
+                status=ModusignStatus.COMPLETED,
+                metadata=ModusignWebhookService.build_signature_metadata(
+                    signature_id=signature_id, webhook_secret=RECONCILE_WEBHOOK_SECRET
+                ),
+            )
+        ]
+    )
+
+    async def override_contract_service():
+        return ContractService(
+            adapter,
+            signatures=SignatureReconciler(
+                repository=adapter,
+                modusign=fake_modusign,
+                webhook_secret=RECONCILE_WEBHOOK_SECRET,
+            ),
+        )
+
+    app.dependency_overrides[get_contract_service] = override_contract_service
+
+    response = await client.get("/api/v1/contracts", headers=authorization_header())
+
+    assert response.status_code == 200
+    contracts = {item["id"]: item for item in response.json()["data"]}
+    assert contracts[str(signed_id)]["status"] == "SIGNED"
+    assert contracts[str(untouched_id)]["status"] == "DRAFT"
+    assert adapter.mock_contracts[signed_id].status == ContractStatus.SIGNED
+    assert "SIGNATURE_COMPLETED" in [
+        event.event_type
+        for event in adapter.mock_audit_events
+        if event.contract_id == signed_id
+    ]
+
+    # One listing serves the whole page: a DRAFT contract has no pending
+    # signature, so it must not cost an extra vendor call.
+    assert fake_modusign.listed == 1
+
+
 async def test_hides_other_owner_contract_from_detail_and_timeline(contract_context) -> None:
     client, adapter = contract_context
     own_contract = UUID((await create_contract(client, "내 계약"))["id"])
@@ -168,6 +447,13 @@ async def test_hides_other_owner_contract_from_detail_and_timeline(contract_cont
         response = await client.get(path, headers=authorization_header())
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    deletion = await client.delete(
+        f"/api/v1/contracts/{foreign_contract}", headers=authorization_header()
+    )
+    assert deletion.status_code == 404
+    assert deletion.json()["error"]["code"] == "NOT_FOUND"
+    assert foreign_contract in adapter.mock_contracts
 
 
 async def test_timeline_is_ordered_and_never_returns_internal_payload(contract_context) -> None:

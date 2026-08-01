@@ -113,6 +113,19 @@ test("live comparison shows every parsed clause on the left and selected request
   assert.match(request, /return \[\.\.\.automaticItems, \.\.\.manualItems\]/);
 });
 
+test("live contract text decodes escaped quotation marks without rendering HTML", async () => {
+  const [viewModel, textFormatter] = await Promise.all([
+    source("src/lib/reviewViewModel.ts"),
+    source("src/lib/displayText.ts"),
+  ]);
+
+  assert.match(textFormatter, /String\.fromCodePoint/);
+  assert.match(textFormatter, /quot: '\"'/);
+  assert.match(viewModel, /displayText\(clause\.sourceText\)/);
+  assert.match(viewModel, /displayText\(item\.sourceText\)/);
+  assert.doesNotMatch(viewModel, /dangerouslySetInnerHTML/);
+});
+
 test("public adjustment links are restored, copied explicitly, and never auto-sent", async () => {
   const [requestPage, responsesPage, card, storage] = await Promise.all([
     source("src/app/contracts/[id]/request/page.tsx"),

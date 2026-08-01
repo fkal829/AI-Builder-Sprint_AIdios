@@ -1,0 +1,4 @@
+interface:
+  display_name: "단디 Issue → PR"
+  short_description: "Issue부터 검증된 PR까지 팀 Git 흐름 적용"
+  default_prompt: "$dandi-issue-to-pr을 사용해 이 작업을 연결 이슈부터 검증된 Pull Request까지 진행해 주세요."

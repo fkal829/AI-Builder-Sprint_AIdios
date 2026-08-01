@@ -1,0 +1,39 @@
+name: 기타 작업
+description: 문서, 리팩터링, 테스트, 유지보수 작업을 제안합니다.
+title: "chore: "
+body:
+  - type: markdown
+    attributes:
+      value: 제목의 `chore`를 작업에 맞게 `docs`, `refactor`, `test` 등으로 바꿔도 됩니다.
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 작업 목적
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 작업 범위
+      value: |
+        포함:
+        -
+
+        제외:
+        -
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 검증 계획
+    validations:
+      required: true

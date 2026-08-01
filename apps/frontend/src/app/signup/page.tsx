@@ -1,92 +1,105 @@
 "use client";
 
+import { FormEvent, Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useState } from "react";
 import { AuthShell, Field } from "@/components/AuthShell";
 import { isUsingDemoOwnerToken, isUsingMock } from "@/lib/adapter";
+import { getSignupErrorMessage } from "@/lib/authErrors";
 import { getPasswordValidationError, PASSWORD_MIN_LENGTH } from "@/lib/authPassword";
 import {
   getSupabaseBrowserClient,
   isSupabaseAuthConfigured,
 } from "@/lib/supabase/client";
 
-function safeNextPath(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/dashboard";
-  return value;
+export default function SignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignupInner />
+    </Suspense>
+  );
 }
 
-function SignupForm() {
+function safeNext(next: string | null): string {
+  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  return "/dashboard";
+}
+
+function SignupInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const nextPath = safeNextPath(searchParams.get("next"));
-  const loginHref = searchParams.has("next")
-    ? `/login?next=${encodeURIComponent(nextPath)}`
-    : "/login";
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [confirmationSent, setConfirmationSent] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [confirmError, setConfirmError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(
-    searchParams.get("error")
-      ? "이메일 확인 링크를 처리하지 못했습니다. 다시 가입해 주세요."
-      : null,
-  );
+  const params = useSearchParams();
+  const next = safeNext(params.get("next"));
   const configured = isSupabaseAuthConfigured();
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!email.trim() || !configured) return;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [agree, setAgree] = useState(false);
+  const [error, setError] = useState(
+    params.get("error") ? "이메일 확인 링크를 처리하지 못했습니다. 다시 가입해 주세요." : "",
+  );
+  const [passwordError, setPasswordError] = useState("");
+  const [confirmError, setConfirmError] = useState("");
+  const [confirmationSent, setConfirmationSent] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-    const nextPasswordError = getPasswordValidationError(password);
-    const nextConfirmError = password === confirmPassword
-      ? null
-      : "비밀번호가 서로 다릅니다.";
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    const nextPasswordError = getPasswordValidationError(password) ?? "";
+    const nextConfirmError = password === confirm
+      ? ""
+      : "비밀번호가 서로 다릅니다. 다시 한 번 확인해주세요.";
     setPasswordError(nextPasswordError);
     setConfirmError(nextConfirmError);
-    setFormError(null);
     if (nextPasswordError || nextConfirmError) return;
-
-    setSubmitting(true);
-    const callbackUrl = new URL("/auth/callback", window.location.origin);
-    callbackUrl.searchParams.set("flow", "signup");
-    callbackUrl.searchParams.set("next", nextPath);
-    const { data, error: authError } = await getSupabaseBrowserClient().auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: callbackUrl.toString(),
-      },
-    });
-    setSubmitting(false);
-
-    if (authError) {
-      setFormError("회원가입하지 못했습니다. 입력 내용을 확인하고 다시 시도해 주세요.");
+    if (!agree) {
+      setError("이용약관과 개인정보처리방침에 동의해주세요.");
       return;
     }
-    if (data.session) {
-      router.replace(nextPath);
-      router.refresh();
-      return;
+    if (!configured || isUsingMock || isUsingDemoOwnerToken) return;
+
+    setBusy(true);
+    try {
+      const callbackUrl = new URL("/auth/callback", window.location.origin);
+      callbackUrl.searchParams.set("flow", "signup");
+      callbackUrl.searchParams.set("next", next);
+      const { data, error: authError } = await getSupabaseBrowserClient().auth.signUp({
+        email: email.trim(),
+        password,
+        options: { emailRedirectTo: callbackUrl.toString() },
+      });
+      if (authError) {
+        setError(getSignupErrorMessage(authError));
+        return;
+      }
+      if (data.session) {
+        router.replace(next);
+        router.refresh();
+        return;
+      }
+      setConfirmationSent(true);
+    } catch {
+      setError("인증 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
     }
-    setConfirmationSent(true);
-  }
+  };
+
+  const loginHref = params.has("next") ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
   return (
     <AuthShell>
-      <h1 className="text-[28px] font-black tracking-tight text-ink">단디계약 시작하기</h1>
-      <p className="mt-2.5 text-[15px] leading-relaxed text-neutral500">
-        사장님이 사용할 이메일과 비밀번호로 계정을 만듭니다.
+      <h2 className="text-[28px] font-black tracking-tight text-ink">단디계약 시작하기</h2>
+      <p className="mt-2.5 text-[15px] text-neutral500">
+        이메일과 비밀번호만 있으면 됩니다. 1분이면 끝납니다.
       </p>
 
       {isUsingMock || isUsingDemoOwnerToken ? (
         <div className="mt-8 rounded-xl bg-brand50 p-4 text-sm leading-relaxed text-brand900">
           현재는 {isUsingMock ? "목업 모드" : "로컬 API 인증 모드"}입니다. 회원가입 없이
           데모 화면을 확인할 수 있어요.
-          <Link href={nextPath} className="ml-1 font-bold underline">계속하기</Link>
+          <Link href={next} className="ml-1 font-bold underline">계속하기</Link>
         </div>
       ) : !configured ? (
         <div className="mt-8 rounded-xl bg-neutral100 p-4 text-sm leading-relaxed text-neutral700">
@@ -100,16 +113,17 @@ function SignupForm() {
           확인 메일을 보냈습니다. 이메일 주소를 확인하면 가입이 완료됩니다.
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="mt-8 grid gap-5">
+        <form onSubmit={submit} className="mt-8 grid gap-5">
           <Field
             id="email"
             label="이메일"
             type="email"
             value={email}
             onChange={setEmail}
-            placeholder="사용할 이메일을 입력하세요"
+            placeholder="sajang@example.com"
             autoComplete="email"
             required
+            help="비밀번호를 잊으셨을 때 이 주소로 안내를 보내드립니다."
           />
           <Field
             id="password"
@@ -121,32 +135,51 @@ function SignupForm() {
             autoComplete="new-password"
             minLength={PASSWORD_MIN_LENGTH}
             required
-            help={`비밀번호는 ${PASSWORD_MIN_LENGTH}자 이상으로 만들어 주세요.`}
-            error={passwordError ?? undefined}
+            help={`비밀번호는 ${PASSWORD_MIN_LENGTH}자 이상으로 만들어주세요.`}
+            error={passwordError || undefined}
           />
           <Field
-            id="confirm-password"
+            id="confirm"
             label="비밀번호 다시 입력"
             type="password"
-            value={confirmPassword}
-            onChange={setConfirmPassword}
-            placeholder="같은 비밀번호를 한 번 더 입력하세요"
+            value={confirm}
+            onChange={setConfirm}
+            placeholder="같은 비밀번호를 한 번 더"
             autoComplete="new-password"
             minLength={PASSWORD_MIN_LENGTH}
             required
-            error={confirmError ?? undefined}
+            error={confirmError || undefined}
           />
-          {formError && (
+
+          <label className="flex items-start gap-2.5 text-sm leading-relaxed text-neutral700">
+            <input
+              type="checkbox"
+              checked={agree}
+              onChange={(event) => setAgree(event.target.checked)}
+              className="mt-0.5 h-5 w-5 flex-none accent-brand700"
+            />
+            <span>
+              <Link href="#" className="text-brand700 underline">이용약관</Link>과{" "}
+              <Link href="#" className="text-brand700 underline">개인정보처리방침</Link>에
+              동의합니다.
+            </span>
+          </label>
+
+          {error && (
             <p className="text-[13px] font-bold text-brand800" aria-live="polite">
-              {formError}
+              {error}
             </p>
           )}
+
           <button
             type="submit"
-            disabled={submitting}
-            className="flex h-14 w-full items-center justify-center rounded-xl bg-brand800 text-[17px] font-bold text-white transition hover:bg-brand900 disabled:opacity-50"
+            disabled={busy}
+            className="flex h-14 w-full items-center justify-center rounded-xl bg-brand800 text-[17px] font-bold text-white transition hover:bg-brand900 disabled:cursor-wait disabled:opacity-50"
           >
-            {submitting ? "가입하는 중" : "회원가입"}
+            {busy && (
+              <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            )}
+            {busy ? "가입하는 중" : "가입하고 시작하기"}
           </button>
         </form>
       )}
@@ -157,17 +190,6 @@ function SignupForm() {
           로그인
         </Link>
       </p>
-      <p className="mt-4 text-center text-[13px] leading-relaxed text-neutral500">
-        회원가입은 계약 업로드나 요청 발송을 자동으로 실행하지 않습니다.
-      </p>
     </AuthShell>
-  );
-}
-
-export default function SignupPage() {
-  return (
-    <Suspense fallback={null}>
-      <SignupForm />
-    </Suspense>
   );
 }

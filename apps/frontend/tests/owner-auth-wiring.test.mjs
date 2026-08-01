@@ -15,16 +15,19 @@ test("owner requests resolve a current Supabase session token", async () => {
   assert.match(client, /auth\.getSession\(\)/);
   assert.match(client, /session\?\.access_token/);
   assert.match(apiAdapter, /await this\.ownerAccessTokenProvider\(\)/);
+  assert.match(apiAdapter, /this\.demoBearerToken \|\|/);
+  assert.doesNotMatch(apiAdapter, /this\.demoBearerToken \?\?/);
   assert.doesNotMatch(apiAdapter, /(?<!await )this\.ownerHeaders\(\)/);
   assert.match(apiAdapter, /Authorization: `Bearer \$\{accessToken\}`/);
 });
 
 test("owners sign up and log in with Supabase email and password", async () => {
-  const [signup, login, callback, passwordPolicy] = await Promise.all([
+  const [signup, login, callback, passwordPolicy, authErrors] = await Promise.all([
     source("src/app/signup/page.tsx"),
     source("src/app/login/page.tsx"),
     source("src/app/auth/callback/route.ts"),
     source("src/lib/authPassword.ts"),
+    source("src/lib/authErrors.ts"),
   ]);
 
   assert.match(signup, /auth\.signUp/);
@@ -37,6 +40,13 @@ test("owners sign up and log in with Supabase email and password", async () => {
   assert.match(login, /password,/);
   assert.doesNotMatch(`${signup}\n${login}`, /signInWithOtp|shouldCreateUser|localStorage/);
   assert.match(passwordPolicy, /PASSWORD_MIN_LENGTH = 8/);
+  assert.match(signup, /getSignupErrorMessage\(authError\)/);
+  assert.match(signup, /finally\s*\{\s*set(?:Submitting|Busy)\(false\)/);
+  assert.match(authErrors, /over_email_send_rate_limit/);
+  assert.match(authErrors, /user_already_exists/);
+  assert.match(authErrors, /weak_password/);
+  assert.match(authErrors, /error\?\.status === 429/);
+  assert.doesNotMatch(signup, /console\./);
   assert.match(callback, /exchangeCodeForSession\(code\)/);
   assert.match(callback, /value\.startsWith\("\/\/"\)/);
   assert.match(callback, /"\/signup\?error=callback"/);
@@ -78,14 +88,20 @@ test("dashboard authentication failures offer a login recovery path", async () =
 });
 
 test("owner route guard follows Supabase sessions without restoring mock password auth", async () => {
-  const [guard, demoAuth] = await Promise.all([
+  const [guard, useSession, demoAuth] = await Promise.all([
     source("src/components/RequireAuth.tsx"),
+    source("src/lib/useSession.ts"),
     source("src/lib/auth.ts"),
   ]);
 
-  assert.match(guard, /supabase\.auth\.getSession\(\)/);
-  assert.match(guard, /supabase\.auth\.onAuthStateChange/);
-  assert.match(guard, /isUsingMock \|\| isUsingDemoOwnerToken/);
+  assert.match(guard, /useSession\(\)/);
+  assert.match(guard, /useSyncExternalStore\(/);
+  assert.match(guard, /isPreviewBypass,/);
+  assert.match(guard, /getServerPreview/);
+  assert.match(useSession, /supabase\.auth\.getSession\(\)/);
+  assert.match(useSession, /supabase\.auth\.onAuthStateChange/);
+  assert.match(useSession, /isUsingMock/);
+  assert.match(useSession, /isUsingDemoOwnerToken/);
   assert.doesNotMatch(demoAuth, /password|dandi:users|signUp|signIn\(/i);
 });
 
@@ -95,7 +111,7 @@ test("login and public landing expose the real signup path", async () => {
     source("src/app/page.tsx"),
   ]);
 
-  assert.match(login, /`\/signup\?next=\$\{encodeURIComponent\(nextPath\)\}`/);
+  assert.match(login, /`\/signup\?next=\$\{encodeURIComponent\(next(?:Path)?\)\}`/);
   assert.match(login, /href=\{signupHref\}/);
   assert.match(landing, /href="\/signup"/);
 });

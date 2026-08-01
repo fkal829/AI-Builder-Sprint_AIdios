@@ -1,84 +1,104 @@
 "use client";
 
+import { FormEvent, Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useState } from "react";
 import { AuthShell, Field } from "@/components/AuthShell";
 import { isUsingDemoOwnerToken, isUsingMock } from "@/lib/adapter";
+import { signInAsGuest } from "@/lib/auth";
 import {
   getSupabaseBrowserClient,
   isSupabaseAuthConfigured,
 } from "@/lib/supabase/client";
 
-function safeNextPath(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/dashboard";
-  return value;
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
+  );
 }
 
-function LoginForm() {
+function safeNext(next: string | null): string {
+  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  return "/dashboard";
+}
+
+function LoginInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const nextPath = safeNextPath(searchParams.get("next"));
-  const signupHref = searchParams.has("next")
-    ? `/signup?next=${encodeURIComponent(nextPath)}`
-    : "/signup";
-  const forgotPasswordHref = searchParams.has("next")
-    ? `/forgot-password?next=${encodeURIComponent(nextPath)}`
-    : "/forgot-password";
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(
-    searchParams.get("error") ? "인증을 처리하지 못했습니다. 다시 로그인해 주세요." : null,
-  );
+  const params = useSearchParams();
+  const next = safeNext(params.get("next"));
+  const fromGuard = params.has("next");
   const configured = isSupabaseAuthConfigured();
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(
+    params.get("error") ? "인증을 처리하지 못했습니다. 다시 로그인해 주세요." : "",
+  );
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!email.trim() || !password || !configured) return;
-
-    setSubmitting(true);
-    setError(null);
-    const { error: authError } = await getSupabaseBrowserClient().auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-    setSubmitting(false);
-
-    if (authError) {
-      setError("이메일 또는 비밀번호를 확인해 주세요.");
-      return;
+    if (!configured || isUsingMock || isUsingDemoOwnerToken) return;
+    setError("");
+    setBusy(true);
+    try {
+      const { error: authError } = await getSupabaseBrowserClient().auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (authError) {
+        setError("이메일 또는 비밀번호가 맞지 않습니다. 다시 한 번 확인해주세요.");
+        return;
+      }
+      router.replace(next);
+      router.refresh();
+    } catch {
+      setError("로그인하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setBusy(false);
     }
-    router.replace(nextPath);
-    router.refresh();
-  }
+  };
+
+  const guest = () => {
+    if (isUsingMock) signInAsGuest();
+    router.replace(next);
+  };
+
+  const signupHref = fromGuard ? `/signup?next=${encodeURIComponent(next)}` : "/signup";
+  const forgotPasswordHref = fromGuard
+    ? `/forgot-password?next=${encodeURIComponent(next)}`
+    : "/forgot-password";
 
   return (
     <AuthShell>
-      <h1 className="text-[28px] font-black tracking-tight text-ink">사장님 로그인</h1>
-      <p className="mt-2.5 text-[15px] leading-relaxed text-neutral500">
-        가입할 때 등록한 이메일과 비밀번호를 입력해 주세요.
+      {fromGuard && (
+        <div className="mb-6 rounded-xl border border-brand200 bg-brand50 p-4 text-sm leading-relaxed text-brand800">
+          <b className="mb-0.5 block font-bold">로그인이 필요한 화면입니다</b>
+          로그인하시면 보시던 곳으로 바로 돌아갑니다. 작성 중이던 조정 요청 내용은 그대로
+          남아 있습니다.
+        </div>
+      )}
+
+      <h2 className="text-[28px] font-black tracking-tight text-ink">다시 오셨네요</h2>
+      <p className="mt-2.5 text-[15px] text-neutral500">
+        단디계약에 가입한 이메일로 로그인해주세요.
       </p>
 
-      {isUsingMock || isUsingDemoOwnerToken ? (
-        <div className="mt-8 rounded-xl bg-brand50 p-4 text-sm leading-relaxed text-brand900">
-          현재는 {isUsingMock ? "목업 모드" : "로컬 API 인증 모드"}입니다. 로그인 없이
-          데모 화면을 확인할 수 있어요.
-          <Link href={nextPath} className="ml-1 font-bold underline">계속하기</Link>
-        </div>
-      ) : !configured ? (
+      {!isUsingMock && !isUsingDemoOwnerToken && !configured ? (
         <div className="mt-8 rounded-xl bg-neutral100 p-4 text-sm leading-relaxed text-neutral700">
           운영 인증 설정이 없습니다. 배포 환경의 Supabase 공개 설정을 확인해 주세요.
         </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="mt-8 grid gap-5">
+      ) : !isUsingMock && !isUsingDemoOwnerToken ? (
+        <form onSubmit={submit} className="mt-8 grid gap-5">
           <Field
             id="email"
             label="이메일"
             type="email"
             value={email}
             onChange={setEmail}
-            placeholder="가입한 이메일을 입력하세요"
+            placeholder="sajang@example.com"
             autoComplete="email"
             required
           />
@@ -88,42 +108,53 @@ function LoginForm() {
             type="password"
             value={password}
             onChange={setPassword}
-            placeholder="비밀번호를 입력하세요"
+            placeholder="비밀번호를 입력해주세요"
             autoComplete="current-password"
             required
-            error={error ?? undefined}
+            error={error || undefined}
             right={(
-              <Link href={forgotPasswordHref} className="text-sm font-medium text-brand700 hover:underline">
-                비밀번호를 잊으셨나요?
+              <Link
+                href={forgotPasswordHref}
+                className="text-sm font-medium text-brand700 hover:underline"
+              >
+                비밀번호를 잊으셨나요
               </Link>
             )}
           />
           <button
             type="submit"
-            disabled={submitting}
-            className="flex h-14 w-full items-center justify-center rounded-xl bg-brand800 text-[17px] font-bold text-white transition hover:bg-brand900 disabled:opacity-50"
+            disabled={busy}
+            className="flex h-14 w-full items-center justify-center rounded-xl bg-brand800 text-[17px] font-bold text-white transition hover:bg-brand900 disabled:cursor-wait disabled:opacity-50"
           >
-            {submitting ? "로그인하는 중" : "로그인"}
+            {busy && (
+              <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            )}
+            {busy ? "확인하는 중" : "로그인"}
           </button>
         </form>
+      ) : null}
+
+      {(isUsingMock || isUsingDemoOwnerToken) && (
+        <>
+          <div className="my-7 flex items-center gap-3.5 text-[13px] text-neutral400">
+            <span className="h-px flex-1 bg-neutral200" />체험 모드<span className="h-px flex-1 bg-neutral200" />
+          </div>
+          <button
+            type="button"
+            onClick={guest}
+            className="flex h-14 w-full items-center justify-center rounded-xl border border-neutral300 bg-white text-[17px] font-bold text-ink transition hover:border-brand200 hover:bg-brand50"
+          >
+            가입 없이 둘러보기
+          </button>
+        </>
       )}
+
       <p className="mt-7 text-center text-[15px] text-neutral500">
         아직 계정이 없으신가요?{" "}
         <Link href={signupHref} className="font-bold text-brand700 hover:underline">
           회원가입
         </Link>
       </p>
-      <p className="mt-7 text-center text-[13px] leading-relaxed text-neutral500">
-        로그인은 계약이나 요청을 자동으로 실행하지 않습니다.
-      </p>
     </AuthShell>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense fallback={null}>
-      <LoginForm />
-    </Suspense>
   );
 }

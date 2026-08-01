@@ -1,63 +1,58 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import {
-  getSupabaseBrowserClient,
-  isSupabaseAuthConfigured,
-} from "@/lib/supabase/client";
+import { useState } from "react";
+import { useSession } from "@/lib/useSession";
+import { clearDemoSession } from "@/lib/auth";
 import { isUsingDemoOwnerToken, isUsingMock } from "@/lib/adapter";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export function AuthControl() {
-  const router = useRouter();
-  const [signedIn, setSignedIn] = useState(false);
+  const { session, loading } = useSession();
   const [signingOut, setSigningOut] = useState(false);
-  const configured = isSupabaseAuthConfigured();
 
-  useEffect(() => {
-    if (!configured || isUsingMock || isUsingDemoOwnerToken) return;
+  if (loading) return <span className="ml-1 w-16" aria-hidden="true" />;
 
-    const supabase = getSupabaseBrowserClient();
-    void supabase.auth.getUser().then(({ data }) => setSignedIn(Boolean(data.user)));
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSignedIn(Boolean(session));
-    });
-    return () => data.subscription.unsubscribe();
-  }, [configured]);
-
-  if (isUsingMock || isUsingDemoOwnerToken) {
+  if (session?.guest) {
     return (
-      <span className="px-2 text-xs font-bold text-neutral500">
-        {isUsingMock ? "데모 모드" : "로컬 인증"}
-      </span>
+      <Link
+        href="/signup"
+        className="ml-1 flex h-9 items-center rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-ink/90"
+      >
+        가입하기
+      </Link>
     );
   }
 
-  if (!configured || !signedIn) {
+  if (!session) {
     return (
       <Link
         href="/login"
-        className="ml-2 rounded-lg border border-neutral300 px-3 py-2 text-sm font-bold text-neutral700 hover:bg-neutral50"
+        className="ml-1 rounded-lg px-3 py-2 text-sm font-medium text-neutral500 transition hover:text-ink"
       >
         로그인
       </Link>
     );
   }
 
-  async function handleSignOut() {
-    setSigningOut(true);
-    await getSupabaseBrowserClient().auth.signOut();
-    router.replace("/login");
-    router.refresh();
+  if (isUsingDemoOwnerToken) {
+    return <span className="ml-1 px-3 py-2 text-sm font-medium text-neutral500">로컬 인증</span>;
   }
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    if (isUsingMock) clearDemoSession();
+    else await getSupabaseBrowserClient().auth.signOut();
+    window.location.assign("/");
+  };
 
   return (
     <button
       type="button"
       onClick={handleSignOut}
       disabled={signingOut}
-      className="ml-2 rounded-lg border border-neutral300 px-3 py-2 text-sm font-bold text-neutral700 hover:bg-neutral50 disabled:opacity-50"
+      className="ml-1 rounded-lg px-3 py-2 text-sm font-medium text-neutral500 transition hover:text-ink disabled:opacity-50"
     >
       {signingOut ? "로그아웃 중" : "로그아웃"}
     </button>

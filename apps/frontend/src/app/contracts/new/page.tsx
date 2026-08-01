@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ProgressDots } from "@/components/Bits";
@@ -23,6 +23,15 @@ export default function NewContractPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const uploaded = !!file;
+
+  // 소개 페이지의 설문 미리보기 진입 — ?phase=questions 이면 바로 문항 화면부터.
+  // URL을 마운트 시 한 번 반영하는 동기화라 초기값은 SSR/CSR 모두 upload로 같다.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("phase") === "questions") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPhase("questions");
+    }
+  }, []);
 
   // 특정 문항의 직접입력 칸에 채워둘 값(이전에 직접 입력한 값, 없으면 빈 문자열)
   const prefillFor = (i: number) => {

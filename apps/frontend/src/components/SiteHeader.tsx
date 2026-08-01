@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "./Logo";
+import { AuthControl } from "./AuthControl";
 import { DEMO_CONTRACT_ID } from "@/lib/mock";
 
 const NAV = [
@@ -12,6 +13,13 @@ const NAV = [
     key: "obligations",
     label: "이행 관리",
     href: `/contracts/${DEMO_CONTRACT_ID}/obligations`,
+  },
+  // 현재 광고효과 API는 계약 단위이므로 대표 계약 화면으로 연결한다.
+  // 성격이 이어지는 '이행 관리' 바로 옆에 둔다.
+  {
+    key: "performance",
+    label: "광고효과",
+    href: `/contracts/${DEMO_CONTRACT_ID}/performance`,
   },
   {
     key: "renewal",
@@ -22,6 +30,7 @@ const NAV = [
 
 function activeKey(pathname: string): string {
   if (pathname.includes("/obligations")) return "obligations";
+  if (pathname.includes("/performance")) return "performance";
   if (pathname.includes("/renewal")) return "renewal";
   if (pathname.startsWith("/dashboard") || pathname.startsWith("/contracts"))
     return "contracts";
@@ -56,6 +65,7 @@ export function SiteHeader() {
               </Link>
             );
           })}
+          <AuthControl />
         </nav>
       </div>
     </header>

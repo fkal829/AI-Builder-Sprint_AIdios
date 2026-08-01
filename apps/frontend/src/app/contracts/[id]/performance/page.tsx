@@ -1,79 +1,230 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
-import { StatTile } from "@/components/StatTile";
 import { LayerBlock } from "@/components/LayerBlock";
+import { StatTile } from "@/components/StatTile";
+import {
+  adapter,
+  isUsingMock,
+  type ContractPerformance,
+  type PerformanceConfirmedPayload,
+  type PerformanceFlag,
+  type PerformanceMetricKey,
+  type PerformanceReport,
+} from "@/lib/adapter";
 
-/* ⑪ 광고효과 관리 — 화면 목업(기능 미구현).
-   대행사에게 받은 리포트를 사장님이 올리면 → 지표를 뽑아 대시보드로 모으고 →
-   계약 조건과 어긋나는 부분을 짚어 문의 문안까지 만들어주는 흐름을 보여준다.
-   실제 추출은 백엔드(이행/증빙 API + 문서 추출) 연동 후 붙는다.
-   데모 전용 데이터라 mock.ts(실 API 응답 모델)와 분리해 이 파일에 둔다. */
+type MetricField = {
+  key: keyof PerformanceConfirmedPayload;
+  extractedKey?: PerformanceMetricKey;
+  label: string;
+  required?: boolean;
+  signed?: boolean;
+};
 
-const MONTHS = [
-  { label: "5월", impressions: 12400, reactions: 486, posts: 4, rate: 3.9 },
-  { label: "6월", impressions: 15200, reactions: 612, posts: 4, rate: 4.0 },
-  { label: "7월", impressions: 8300, reactions: 240, posts: 2, rate: 2.9 },
-];
-
-const TOTAL = { impressions: 35900, reactions: 1338, rate: 3.7, posts: 10 };
-
-const JULY_POSTS = [
+const METRIC_FIELDS: MetricField[] = [
+  { key: "impressions", extractedKey: "impressions", label: "노출", required: true },
+  { key: "likes", extractedKey: "likes", label: "좋아요", required: true },
+  { key: "comments", extractedKey: "comments", label: "댓글", required: true },
+  { key: "reach", extractedKey: "reach", label: "도달" },
+  { key: "saves", extractedKey: "saves", label: "저장" },
+  { key: "shares", extractedKey: "shares", label: "공유" },
   {
-    kind: "릴스",
-    title: "여름 신메뉴 자몽에이드",
-    date: "07-08",
-    impressions: 5100,
-    likes: 128,
-    comments: 14,
-    saves: 31,
+    key: "followerNetChange",
+    extractedKey: "followerNetChange",
+    label: "팔로워 순증",
+    signed: true,
   },
   {
-    kind: "피드",
-    title: "테라스 리뉴얼 안내",
-    date: "07-19",
-    impressions: 3200,
-    likes: 52,
-    comments: 6,
-    saves: 9,
+    key: "publishedContentCount",
+    extractedKey: "publishedContentCount",
+    label: "게시물 수",
   },
+  { key: "inquiries", label: "문의" },
+  { key: "reservations", label: "예약" },
+  { key: "purchases", label: "구매" },
 ];
 
-/** AI가 리포트에서 읽어낸 값 — 사장님이 확인·수정하는 대상 */
-const EXTRACTED = [
-  { label: "보고 기간", value: "2026년 7월", confidence: 98 },
-  { label: "게시물 수", value: "2건", confidence: 95 },
-  { label: "총 노출", value: "8,300", confidence: 92 },
-  { label: "총 반응(좋아요+댓글+저장)", value: "240", confidence: 90 },
-];
+type MetricForm = Record<keyof PerformanceConfirmedPayload, string>;
+type WorkingAction = "loading" | "uploading" | "extracting" | "saving" | null;
 
-const FINDINGS = [
-  {
-    title: "약속한 게시물 수보다 적어요",
-    body: "계약서 제3조(서비스의 범위)에는 월 4건 게시로 되어 있는데, 7월 리포트에는 2건만 담겨 있어요.",
-  },
-  {
-    title: "반응률이 눈에 띄게 떨어졌어요",
-    body: "6월 4.0% → 7월 2.9%로 낮아졌어요. 게시물이 줄어든 것과 관련이 있는지 확인해보면 좋아요.",
-  },
-];
+function emptyMetricForm(): MetricForm {
+  return Object.fromEntries(METRIC_FIELDS.map((field) => [field.key, ""])) as MetricForm;
+}
 
-const INQUIRY =
-  "안녕하세요, 7월 광고 리포트 잘 받았습니다. 계약서 제3조에 월 4건 게시로 되어 있는데 이번 달 리포트에는 2건으로 확인되어 문의드립니다. 남은 2건의 진행 일정을 알려주시면 감사하겠습니다.";
+function formFromReport(report: PerformanceReport): MetricForm {
+  if (report.currentRevision) {
+    return Object.fromEntries(
+      METRIC_FIELDS.map((field) => {
+        const value = report.currentRevision!.confirmedPayload[field.key];
+        return [field.key, value === null ? "" : String(value)];
+      }),
+    ) as MetricForm;
+  }
+  return Object.fromEntries(
+    METRIC_FIELDS.map((field) => {
+      const value = field.extractedKey
+        ? report.extractedPayload?.[field.extractedKey].value ?? null
+        : null;
+      return [field.key, value === null ? "" : String(value)];
+    }),
+  ) as MetricForm;
+}
 
-type Stage = "idle" | "parsing" | "done";
+function parseMetricForm(form: MetricForm): PerformanceConfirmedPayload {
+  const parsed = Object.fromEntries(
+    METRIC_FIELDS.map((field) => {
+      const raw = form[field.key].trim();
+      if (!raw) {
+        if (field.required) throw new Error(`${field.label} 값을 입력해주세요.`);
+        return [field.key, null];
+      }
+      if (!/^-?\d+$/.test(raw)) throw new Error(`${field.label}은 정수로 입력해주세요.`);
+      const value = Number(raw);
+      if (!Number.isSafeInteger(value)) throw new Error(`${field.label} 값이 너무 큽니다.`);
+      if (!field.signed && value < 0) throw new Error(`${field.label}은 0 이상이어야 합니다.`);
+      return [field.key, value];
+    }),
+  );
+  return parsed as PerformanceConfirmedPayload;
+}
+
+function defaultPeriod(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
 
 export default function PerformancePage() {
   const { id } = useParams<{ id: string }>();
-  const [stage, setStage] = useState<Stage>("idle");
+  const [performance, setPerformance] = useState<ContractPerformance | null>(null);
+  const [activeReport, setActiveReport] = useState<PerformanceReport | null>(null);
+  const [form, setForm] = useState<MetricForm>(emptyMetricForm);
+  const [period, setPeriod] = useState(defaultPeriod);
+  const [file, setFile] = useState<File | null>(null);
+  const [hasIssue, setHasIssue] = useState(false);
+  const [issueNote, setIssueNote] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [working, setWorking] = useState<WorkingAction>("loading");
+  const [error, setError] = useState<string | null>(null);
 
-  const runDemo = () => {
-    setStage("parsing");
-    window.setTimeout(() => setStage("done"), 900);
+  useEffect(() => {
+    let alive = true;
+    adapter.getContractPerformance(id)
+      .then((data) => {
+        if (!alive) return;
+        setPerformance(data);
+        const unfinished = [...data.reports]
+          .reverse()
+          .find((report) => report.status === "UPLOADED" || report.status === "EXTRACTED");
+        if (unfinished) {
+          setActiveReport(unfinished);
+          setForm(formFromReport(unfinished));
+        }
+      })
+      .catch((cause: unknown) => {
+        if (alive) setError(errorMessage(cause, "광고효과 기록을 불러오지 못했습니다."));
+      })
+      .finally(() => {
+        if (alive) setWorking(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const reload = async () => {
+    const data = await adapter.getContractPerformance(id);
+    setPerformance(data);
+    return data;
   };
+
+  const uploadAndExtract = async () => {
+    if (!file || working) {
+      if (!file) setError("분석할 PDF 또는 이미지 파일을 선택해주세요.");
+      return;
+    }
+    setError(null);
+    try {
+      setWorking("uploading");
+      const uploaded = await adapter.uploadPerformanceReport(id, period, file);
+      setActiveReport(uploaded);
+      await reload();
+      setWorking("extracting");
+      const extracted = await adapter.extractPerformanceReport(id, uploaded.id);
+      setActiveReport(extracted);
+      setForm(formFromReport(extracted));
+      await reload();
+    } catch (cause) {
+      setError(errorMessage(cause, "리포트를 분석하지 못했습니다."));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const retryExtraction = async () => {
+    if (!activeReport || activeReport.status !== "UPLOADED" || working) return;
+    setWorking("extracting");
+    setError(null);
+    try {
+      const extracted = await adapter.extractPerformanceReport(id, activeReport.id);
+      setActiveReport(extracted);
+      setForm(formFromReport(extracted));
+      await reload();
+    } catch (cause) {
+      setError(errorMessage(cause, "리포트 지표를 다시 추출하지 못했습니다."));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const saveConfirmation = async () => {
+    if (!activeReport || working) return;
+    setError(null);
+    try {
+      if (hasIssue && !issueNote.trim()) throw new Error("이상 있다고 기록할 내용을 적어주세요.");
+      if (activeReport.revisionCount > 0 && !correctionReason.trim()) {
+        throw new Error("정정 사유를 적어주세요.");
+      }
+      const confirmedPayload = parseMetricForm(form);
+      setWorking("saving");
+      await adapter.confirmPerformanceReport(id, activeReport.id, {
+        expectedRevision: activeReport.revisionCount,
+        confirmedPayload,
+        hasIssue,
+        issueNote: hasIssue ? issueNote.trim() : null,
+        correctionReason: activeReport.revisionCount > 0 ? correctionReason.trim() : null,
+      });
+      await reload();
+      setActiveReport(null);
+      setForm(emptyMetricForm());
+      setHasIssue(false);
+      setIssueNote("");
+      setCorrectionReason("");
+      setFile(null);
+    } catch (cause) {
+      setError(errorMessage(cause, "확인한 지표를 저장하지 못했습니다."));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const startCorrection = (report: PerformanceReport) => {
+    setActiveReport(report);
+    setForm(formFromReport(report));
+    setHasIssue(report.currentRevision?.flags.some(
+      (flag) => flag.flagType === "OWNER_REPORTED_ISSUE",
+    ) ?? false);
+    setIssueNote(report.currentRevision?.flags.find(
+      (flag) => flag.flagType === "OWNER_REPORTED_ISSUE",
+    )?.issueNote ?? "");
+    setCorrectionReason("");
+    setError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const latestConfirmedReportId = performance?.confirmedSeries.at(-1)?.reportId ?? null;
 
   return (
     <AppScreen
@@ -81,8 +232,8 @@ export default function PerformancePage() {
       size="wide"
       backHref={`/contracts/${id}/obligations`}
       right={
-        <span className="rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
-          화면 목업 · 개발 예정
+        <span className="rounded bg-brand100 px-2 py-1 text-[10px] font-bold text-brand800">
+          {isUsingMock ? "데모 데이터 모드" : "실 API 연결"}
         </span>
       }
       footer={
@@ -91,316 +242,483 @@ export default function PerformancePage() {
         </CTAButton>
       }
     >
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-6">
         <p className="text-[13px] leading-relaxed text-neutral700">
-          대행사에게 받은 광고 리포트를 올려두면, 계약에서 약속한 조건대로
-          진행되고 있는지 한눈에 확인할 수 있어요.
+          대행사 리포트의 숫자를 원문 근거와 함께 읽고, 사장님이 확인한 값만 계약 조건과
+          전월 기록에 대조합니다.
         </p>
 
-        {/* 계약 단계 ↔ 관리 단계 연결 — 무엇을 근거로 대조하는지 밝힌다 */}
-        <Card>
-          <p className="text-[12px] leading-relaxed text-neutral700">
-            <b className="text-ink">계약서를 기준으로 확인해요.</b> 제3조(서비스의
-            범위)에 적힌 <b className="text-ink">월 4건 게시</b> 약정과 리포트를
-            대조합니다.
-          </p>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-neutral500">
-            이 계약에는 성과 보고 조항이 따로 없어요. 조정 요청에 &lsquo;월 1회 성과
-            보고&rsquo;를 넣어두면, 다음부터는 받을 지표와 주기가 계약으로 정해져요.
-          </p>
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            <a
-              href={`/contracts/${id}`}
-              className="rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-ink hover:bg-subtle"
-            >
-              계약서에서 보기 →
-            </a>
-            <a
-              href={`/contracts/${id}#req`}
-              className="rounded-lg border border-brand400 bg-brand50 px-3 py-1.5 text-[12px] font-bold text-brand700 hover:bg-brand100"
-            >
-              성과 보고 조항 추가 요청 →
-            </a>
-          </div>
-        </Card>
+        <StepFlow activeReport={activeReport} hasConfirmed={Boolean(performance?.confirmedSeries.length)} />
 
-        <StepFlow stage={stage} />
-
-        {/* ① 리포트 올리기 */}
         <section className="flex flex-col gap-2">
-          <SectionTitle>① 대행사 리포트 올리기</SectionTitle>
+          <SectionTitle>① 월별 리포트 올리기</SectionTitle>
           <Card>
-            {stage === "idle" ? (
-              <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-neutral300 bg-subtle px-6 py-8 text-center">
-                <span className="text-3xl">📄</span>
-                <div>
-                  <div className="text-[13px] font-bold text-ink">
-                    월간 리포트나 인사이트 화면을 올려주세요
-                  </div>
-                  <div className="mt-1 text-[11px] text-neutral500">
-                    PDF · 이미지 캡처 모두 괜찮아요
-                  </div>
-                </div>
-                <button
-                  onClick={runDemo}
-                  className="h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white hover:bg-ink/90"
-                >
-                  샘플 리포트로 살펴보기
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-xl">📄</span>
-                  <div>
-                    <div className="text-[13px] font-bold text-ink">
-                      브릿지웨이브_7월_광고리포트.pdf
-                    </div>
-                    <div className="text-[11px] text-neutral500">
-                      2026-07-31 업로드 · 대행사 제공
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setStage("idle")}
-                  className="flex-none rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-neutral700 hover:bg-subtle"
-                >
-                  다시 올리기
-                </button>
-              </div>
-            )}
+            <div className="grid gap-3 sm:grid-cols-[160px_1fr_auto] sm:items-end">
+              <label className="text-[12px] font-bold text-neutral700">
+                대상 월
+                <input
+                  type="month"
+                  value={period}
+                  onChange={(event) => setPeriod(event.target.value)}
+                  disabled={Boolean(working)}
+                  className="mt-1 block h-10 w-full rounded-lg border border-neutral300 px-3 text-[13px] text-ink disabled:opacity-50"
+                />
+              </label>
+              <label className="text-[12px] font-bold text-neutral700">
+                PDF 또는 이미지
+                <input
+                  type="file"
+                  accept="application/pdf,image/png,image/jpeg"
+                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                  disabled={Boolean(working)}
+                  className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 py-2 text-[12px] text-neutral700 file:mr-3 file:border-0 file:bg-transparent file:font-bold"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={uploadAndExtract}
+                disabled={Boolean(working) || !period || !file}
+                className="h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white disabled:opacity-40"
+              >
+                {working === "uploading" ? "업로드 중…" : working === "extracting" ? "숫자 읽는 중…" : "업로드 후 분석"}
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-neutral500">
+              원본은 비공개로 저장되며 월마다 한 건만 등록할 수 있어요. 분석 시작은 버튼을
+              누른 뒤에만 실행됩니다.
+            </p>
           </Card>
         </section>
 
-        {stage === "parsing" && (
-          <p className="py-8 text-center text-sm text-neutral500">
-            리포트에서 숫자를 읽는 중…
+        {activeReport?.status === "UPLOADED" && (
+          <Card>
+            <p className="text-[13px] font-bold text-ink">
+              {activeReport.period} 리포트가 업로드됐지만 숫자 추출이 끝나지 않았어요.
+            </p>
+            <button
+              type="button"
+              onClick={retryExtraction}
+              disabled={Boolean(working)}
+              className="mt-3 h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white disabled:opacity-40"
+            >
+              {working === "extracting" ? "숫자 읽는 중…" : "지표 추출 다시 시도"}
+            </button>
+          </Card>
+        )}
+
+        {activeReport && activeReport.status !== "UPLOADED" && (
+          <MetricConfirmation
+            report={activeReport}
+            form={form}
+            setForm={setForm}
+            hasIssue={hasIssue}
+            setHasIssue={setHasIssue}
+            issueNote={issueNote}
+            setIssueNote={setIssueNote}
+            correctionReason={correctionReason}
+            setCorrectionReason={setCorrectionReason}
+            working={working === "saving"}
+            onSave={saveConfirmation}
+            onCancel={activeReport.revisionCount > 0 ? () => setActiveReport(null) : undefined}
+          />
+        )}
+
+        {working === "loading" && (
+          <p className="py-8 text-center text-sm text-neutral500">광고효과 기록을 불러오는 중…</p>
+        )}
+        {error && (
+          <p role="alert" className="rounded-lg border border-brand300 bg-brand50 px-4 py-3 text-[12px] font-bold text-brand800">
+            {error}
           </p>
         )}
 
-        {stage === "done" && (
-          <>
-            {/* ② 읽은 내용 확인 */}
-            <section className="flex flex-col gap-2">
-              <SectionTitle>② 이렇게 읽었어요 — 맞는지 확인해주세요</SectionTitle>
-              <Card>
-                <LayerBlock layer="ai" label="리포트에서 읽어낸 값 · 추정">
-                  <div className="flex flex-col gap-1.5">
-                    {EXTRACTED.map((f) => (
-                      <div
-                        key={f.label}
-                        className="flex items-center justify-between gap-3 text-[13px]"
-                      >
-                        <span className="text-neutral700">{f.label}</span>
-                        <span className="flex items-center gap-2">
-                          <b className="text-ink">{f.value}</b>
-                          <span className="text-[10px] font-bold text-brand700">
-                            확신도 {f.confidence}%
-                          </span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </LayerBlock>
-                <div className="mt-3 flex gap-2">
-                  <button className="h-10 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white">
-                    맞아요, 저장할게요
-                  </button>
-                  <button className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral700">
-                    숫자를 고칠게요
-                  </button>
-                </div>
-                <p className="mt-2 text-[11px] text-neutral500">
-                  잘못 읽은 숫자가 있으면 직접 고칠 수 있어요. 확인한 값만
-                  대시보드에 쌓여요.
-                </p>
-              </Card>
-            </section>
-
-            {/* ③ 대시보드 */}
-            <section className="flex flex-col gap-2">
-              <SectionTitle>③ 광고효과 한눈에 보기</SectionTitle>
-
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                <StatTile
-                  size="lg"
-                  value={TOTAL.impressions.toLocaleString()}
-                  label="총 노출"
-                />
-                <StatTile
-                  size="lg"
-                  value={TOTAL.reactions.toLocaleString()}
-                  label="총 반응"
-                />
-                <StatTile size="lg" value={`${TOTAL.rate}%`} label="평균 반응률" />
-                <StatTile size="lg" value={`${TOTAL.posts}건`} label="누적 게시물" />
-              </div>
-
-              <div className="mt-1 grid gap-2.5 lg:grid-cols-2">
-                <Card>
-                  <div className="mb-3 text-[12px] font-bold text-neutral700">
-                    월별 노출 추이
-                  </div>
-                  <MonthlyChart />
-                </Card>
-
-                <Card>
-                  <div className="mb-2.5 text-[12px] font-bold text-neutral700">
-                    7월 게시물별 성과
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[360px] text-[12px]">
-                      <thead>
-                        <tr className="border-b border-neutral200 text-left text-neutral500">
-                          <th className="pb-2 font-medium">게시물</th>
-                          <th className="pb-2 text-right font-medium">노출</th>
-                          <th className="pb-2 text-right font-medium">좋아요</th>
-                          <th className="pb-2 text-right font-medium">댓글</th>
-                          <th className="pb-2 text-right font-medium">저장</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {JULY_POSTS.map((p) => (
-                          <tr key={p.title} className="border-b border-neutral100">
-                            <td className="py-2.5">
-                              <span className="mr-1.5 rounded bg-neutral100 px-1.5 py-0.5 text-[10px] font-bold text-neutral700">
-                                {p.kind}
-                              </span>
-                              <span className="font-bold text-ink">{p.title}</span>
-                              <span className="ml-1.5 text-neutral500">{p.date}</span>
-                            </td>
-                            <td className="py-2.5 text-right font-bold text-ink">
-                              {p.impressions.toLocaleString()}
-                            </td>
-                            <td className="py-2.5 text-right text-neutral700">{p.likes}</td>
-                            <td className="py-2.5 text-right text-neutral700">
-                              {p.comments}
-                            </td>
-                            <td className="py-2.5 text-right text-neutral700">{p.saves}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              </div>
-            </section>
-
-            {/* ④ 짚어볼 점 + 문의 */}
-            <section className="flex flex-col gap-2">
-              <SectionTitle>④ 짚어볼 점 · 대행사에 문의하기</SectionTitle>
-              <InquiryPanel />
-            </section>
-          </>
+        {performance && (
+          <PerformanceDashboard
+            performance={performance}
+            latestConfirmedReportId={latestConfirmedReportId}
+            onCorrect={startCorrection}
+          />
         )}
 
         <Disclaimer>
-          지금은 화면 구성을 보여주는 목업이에요. 리포트에서 숫자를 읽어오는
-          기능은 준비 중이며, 확인한 숫자만 기록으로 남습니다. 문의 문안은
-          사장님이 직접 대행사에 보내는 참고 문구예요.
+          확인 신호는 법률 판단이나 광고 성과 보장이 아닙니다. 문의 문안은 자동 발송되지
+          않으며 사장님이 내용을 확인한 뒤 기존 메신저나 이메일로 직접 전달합니다.
         </Disclaimer>
       </div>
     </AppScreen>
   );
 }
 
-/** 상단 4단계 흐름 표시 */
-function StepFlow({ stage }: { stage: Stage }) {
+function MetricConfirmation({
+  report,
+  form,
+  setForm,
+  hasIssue,
+  setHasIssue,
+  issueNote,
+  setIssueNote,
+  correctionReason,
+  setCorrectionReason,
+  working,
+  onSave,
+  onCancel,
+}: {
+  report: PerformanceReport;
+  form: MetricForm;
+  setForm: (value: MetricForm) => void;
+  hasIssue: boolean;
+  setHasIssue: (value: boolean) => void;
+  issueNote: string;
+  setIssueNote: (value: string) => void;
+  correctionReason: string;
+  setCorrectionReason: (value: string) => void;
+  working: boolean;
+  onSave: () => void;
+  onCancel?: () => void;
+}) {
+  const correcting = report.revisionCount > 0;
+  return (
+    <section className="flex flex-col gap-2">
+      <SectionTitle>
+        ② {correcting ? `${report.period} 확정값 정정` : "읽은 숫자와 원문 확인"}
+      </SectionTitle>
+      <Card>
+        {report.extractedPayload && !correcting && (
+          <div className="mb-4 grid gap-2 lg:grid-cols-2">
+            {METRIC_FIELDS.filter((field) => field.extractedKey).map((field) => {
+              const candidate = report.extractedPayload![field.extractedKey!];
+              return (
+                <div key={field.key} className="rounded-lg border border-neutral200 bg-subtle p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <b className="text-[12px] text-ink">{field.label}</b>
+                    <span className="text-[10px] font-bold text-brand700">
+                      {candidate.verificationStatus === "NOT_FOUND"
+                        ? "근거를 찾지 못함"
+                        : `${candidate.verificationStatus === "NEEDS_CHECK" ? "확인 필요 · " : "근거 확인 · "}${Math.round(candidate.confidence * 100)}%`}
+                    </span>
+                  </div>
+                  {candidate.sourceText ? (
+                    <p className="mt-1 text-[11px] leading-relaxed text-neutral600">
+                      {candidate.sourcePage}쪽 “{candidate.sourceText}”
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-neutral500">리포트 원문에서 확인하지 못했어요.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {METRIC_FIELDS.map((field) => (
+            <label key={field.key} className="text-[11px] font-bold text-neutral700">
+              {field.label}{field.required ? " *" : ""}
+              <input
+                inputMode="numeric"
+                value={form[field.key]}
+                onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
+                placeholder={field.required ? "필수" : "없으면 비워두기"}
+                disabled={working}
+                className="mt-1 h-10 w-full rounded-lg border border-neutral300 px-3 text-[13px] font-bold text-ink disabled:opacity-50"
+              />
+            </label>
+          ))}
+        </div>
+
+        <label className="mt-4 flex items-center gap-2 text-[12px] font-bold text-neutral700">
+          <input
+            type="checkbox"
+            checked={hasIssue}
+            onChange={(event) => setHasIssue(event.target.checked)}
+            disabled={working}
+          />
+          숫자 외에도 대행사에 확인할 내용이 있어요
+        </label>
+        {hasIssue && (
+          <textarea
+            value={issueNote}
+            onChange={(event) => setIssueNote(event.target.value)}
+            maxLength={500}
+            rows={3}
+            placeholder="확인할 내용과 이유를 적어주세요."
+            disabled={working}
+            className="mt-2 w-full rounded-lg border border-neutral300 p-3 text-[12px] leading-relaxed text-ink disabled:opacity-50"
+          />
+        )}
+        {correcting && (
+          <label className="mt-4 block text-[11px] font-bold text-neutral700">
+            정정 사유 *
+            <input
+              value={correctionReason}
+              onChange={(event) => setCorrectionReason(event.target.value)}
+              maxLength={500}
+              placeholder="예: 리포트 원문을 다시 확인해 게시물 수를 바로잡음"
+              disabled={working}
+              className="mt-1 h-10 w-full rounded-lg border border-neutral300 px-3 text-[12px] text-ink disabled:opacity-50"
+            />
+          </label>
+        )}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={working}
+            className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
+          >
+            {working ? "저장 중…" : correcting ? "정정값 저장" : "확인한 값 저장"}
+          </button>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={working}
+              className="h-11 rounded-lg border border-neutral300 bg-white px-5 text-[13px] font-bold text-neutral700 disabled:opacity-40"
+            >
+              취소
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-[11px] text-neutral500">
+          AI가 읽은 값은 저장 전 자유롭게 고칠 수 있어요. 저장 후 정정은 기존 기록을
+          덮어쓰지 않고 새 버전으로 남습니다.
+        </p>
+      </Card>
+    </section>
+  );
+}
+
+function PerformanceDashboard({
+  performance,
+  latestConfirmedReportId,
+  onCorrect,
+}: {
+  performance: ContractPerformance;
+  latestConfirmedReportId: string | null;
+  onCorrect: (report: PerformanceReport) => void;
+}) {
+  const totals = useMemo(() => {
+    const result = performance.confirmedSeries.reduce(
+      (sum, point) => ({
+        impressions: sum.impressions + point.confirmedPayload.impressions,
+        reactions: sum.reactions
+          + point.confirmedPayload.likes
+          + point.confirmedPayload.comments
+          + (point.confirmedPayload.saves ?? 0)
+          + (point.confirmedPayload.shares ?? 0),
+        posts: sum.posts + (point.confirmedPayload.publishedContentCount ?? 0),
+      }),
+      { impressions: 0, reactions: 0, posts: 0 },
+    );
+    return {
+      ...result,
+      rate: result.impressions === 0 ? null : result.reactions / result.impressions,
+    };
+  }, [performance.confirmedSeries]);
+
+  return (
+    <>
+      <section className="flex flex-col gap-2">
+        <SectionTitle>③ 확인한 광고효과 한눈에 보기</SectionTitle>
+        {performance.confirmedSeries.length === 0 ? (
+          <Card>
+            <p className="text-center text-[12px] text-neutral500">
+              아직 확인해 저장한 월별 광고효과가 없어요.
+            </p>
+          </Card>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+              <StatTile size="lg" value={totals.impressions.toLocaleString()} label="누적 노출" />
+              <StatTile size="lg" value={totals.reactions.toLocaleString()} label="누적 반응" />
+              <StatTile
+                size="lg"
+                value={totals.rate === null ? "—" : `${(totals.rate * 100).toFixed(2)}%`}
+                label="전체 반응률"
+              />
+              <StatTile size="lg" value={`${totals.posts.toLocaleString()}건`} label="누적 게시물" />
+            </div>
+            <Card>
+              <div className="mb-3 text-[12px] font-bold text-neutral700">월별 노출 추이</div>
+              <MonthlyChart points={performance.confirmedSeries} />
+            </Card>
+          </>
+        )}
+
+        <Card>
+          <div className="mb-2 text-[12px] font-bold text-neutral700">월별 저장 기록</div>
+          <div className="divide-y divide-neutral100">
+            {[...performance.reports].reverse().map((report) => (
+              <div key={report.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <b className="text-[13px] text-ink">{report.period}</b>
+                  <span className="ml-2 text-[11px] text-neutral500">
+                    {reportStatusLabel(report.status)} · 버전 {report.revisionCount}
+                  </span>
+                  {report.currentRevision?.correctionReason && (
+                    <p className="mt-1 text-[10px] text-neutral500">
+                      최근 정정: {report.currentRevision.correctionReason}
+                    </p>
+                  )}
+                </div>
+                {report.id === latestConfirmedReportId && report.currentRevision && (
+                  <button
+                    type="button"
+                    onClick={() => onCorrect(report)}
+                    className="rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[11px] font-bold text-neutral700"
+                  >
+                    최신 값 정정
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <SectionTitle>④ 계약·전월 대조 결과와 문의 문안</SectionTitle>
+        {performance.flags.length === 0 ? (
+          <Card>
+            <p className="text-center text-[12px] text-neutral500">
+              현재 확정값에서 별도로 확인할 신호가 없어요.
+            </p>
+          </Card>
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {performance.flags.map((flag) => (
+              <FlagCard
+                key={flag.id}
+                flag={flag}
+                inquiry={performance.inquiryDrafts.find((draft) => draft.flagId === flag.id)?.text ?? null}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function MonthlyChart({ points }: { points: ContractPerformance["confirmedSeries"] }) {
+  const max = Math.max(...points.map((point) => point.confirmedPayload.impressions), 1);
+  return (
+    <div className="flex min-h-40 items-end gap-3 overflow-x-auto pb-1">
+      {points.map((point) => (
+        <div key={point.reportId} className="flex min-w-24 flex-1 flex-col items-center gap-1.5">
+          <span className="text-[11px] font-bold text-ink">
+            {point.confirmedPayload.impressions.toLocaleString()}
+          </span>
+          <div className="flex h-28 w-full items-end">
+            <div
+              className={`w-full rounded-t-lg ${point.status === "FLAGGED" ? "bg-brand400" : "bg-neutral200"}`}
+              style={{ height: `${Math.max((point.confirmedPayload.impressions / max) * 100, 2)}%` }}
+            />
+          </div>
+          <span className="text-[11px] font-medium text-neutral700">{point.period.slice(2)}</span>
+          <span className="text-[10px] text-neutral500">
+            게시 {point.confirmedPayload.publishedContentCount ?? "—"}건 · 반응률{
+              point.engagementRate === null ? " —" : ` ${(point.engagementRate * 100).toFixed(2)}%`
+            }
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FlagCard({ flag, inquiry }: { flag: PerformanceFlag; inquiry: string | null }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (!inquiry) return;
+    await navigator.clipboard?.writeText(inquiry);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <Card>
+      <div className="rounded-lg border border-brand300 bg-brand50 p-3">
+        <div className="text-[13px] font-bold text-brand800">{flagTitle(flag)}</div>
+        <p className="mt-1 text-[12px] leading-relaxed text-neutral700">{flagDescription(flag)}</p>
+      </div>
+      {flag.basisSnapshots.map((basis) => (
+        <p key={`${basis.sourcePage}-${basis.sourceText}`} className="mt-2 text-[10px] leading-relaxed text-neutral500">
+          계약서 {basis.sourcePage}쪽 “{basis.sourceText}” · 근거 확신도 {Math.round(basis.confidence * 100)}%
+        </p>
+      ))}
+      {inquiry && (
+        <div className="mt-3">
+          <LayerBlock layer="request" label="대행사에 보낼 문의 문안 · 미발송">
+            {inquiry}
+          </LayerBlock>
+          <button
+            type="button"
+            onClick={copy}
+            className="mt-2 h-9 w-full rounded-lg bg-ink text-[12px] font-bold text-white"
+          >
+            {copied ? "복사됐어요" : "문안 복사하기"}
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function StepFlow({
+  activeReport,
+  hasConfirmed,
+}: {
+  activeReport: PerformanceReport | null;
+  hasConfirmed: boolean;
+}) {
   const steps = ["리포트 올리기", "읽은 내용 확인", "대시보드", "문의하기"];
-  const reached = stage === "done" ? 4 : stage === "parsing" ? 1 : 0;
+  const reached = activeReport?.status === "EXTRACTED"
+    ? 2
+    : activeReport?.status === "UPLOADED"
+      ? 1
+      : hasConfirmed
+        ? 4
+        : 0;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {steps.map((s, i) => (
-        <span key={s} className="flex items-center gap-1.5">
-          <span
-            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${
-              i < reached
-                ? "bg-brand100 text-brand800"
-                : "bg-neutral100 text-neutral500"
-            }`}
-          >
-            {i + 1}. {s}
+      {steps.map((step, index) => (
+        <span key={step} className="flex items-center gap-1.5">
+          <span className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${index < reached ? "bg-brand100 text-brand800" : "bg-neutral100 text-neutral500"}`}>
+            {index + 1}. {step}
           </span>
-          {i < steps.length - 1 && <span className="text-neutral300">›</span>}
+          {index < steps.length - 1 && <span className="text-neutral300">›</span>}
         </span>
       ))}
     </div>
   );
 }
 
-/** 월별 노출 막대 — 라이브러리 없이 비율 막대로 표시 */
-function MonthlyChart() {
-  const max = Math.max(...MONTHS.map((m) => m.impressions));
-  return (
-    <div className="flex items-end gap-4">
-      {MONTHS.map((m, i) => {
-        const last = i === MONTHS.length - 1;
-        return (
-          <div key={m.label} className="flex flex-1 flex-col items-center gap-1.5">
-            <span className="text-[11px] font-bold text-ink">
-              {m.impressions.toLocaleString()}
-            </span>
-            <div className="flex h-28 w-full items-end">
-              <div
-                className={`w-full rounded-t-lg ${last ? "bg-brand400" : "bg-neutral200"}`}
-                style={{ height: `${(m.impressions / max) * 100}%` }}
-              />
-            </div>
-            <span className="text-[11px] font-medium text-neutral700">{m.label}</span>
-            <span className="text-[10px] text-neutral500">
-              게시 {m.posts}건 · 반응률 {m.rate.toFixed(1)}%
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
+function flagTitle(flag: PerformanceFlag): string {
+  if (flag.flagType === "DELIVERABLE_COUNT_SHORTFALL") return "계약보다 게시물 수가 적어요";
+  if (flag.flagType === "ENGAGEMENT_RATE_DROP") return "전월보다 반응률이 낮아졌어요";
+  return "사장님이 확인이 필요하다고 기록했어요";
 }
 
-/** 계약 조건과 어긋나는 점 + 보낼 문안 */
-function InquiryPanel() {
-  const [copied, setCopied] = useState(false);
+function flagDescription(flag: PerformanceFlag): string {
+  if (flag.flagType === "DELIVERABLE_COUNT_SHORTFALL") {
+    return `계약에서 확인한 월 ${flag.expectedContentCount}건과 리포트의 ${flag.actualContentCount}건이 다릅니다.`;
+  }
+  if (flag.flagType === "ENGAGEMENT_RATE_DROP") {
+    return `반응률이 ${((flag.previousEngagementRate ?? 0) * 100).toFixed(2)}%에서 ${((flag.currentEngagementRate ?? 0) * 100).toFixed(2)}%로 낮아졌습니다.`;
+  }
+  return flag.issueNote ?? "확인할 내용이 기록되어 있습니다.";
+}
 
-  const copy = () => {
-    navigator.clipboard?.writeText(INQUIRY);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  };
+function reportStatusLabel(status: PerformanceReport["status"]): string {
+  const labels = {
+    UPLOADED: "업로드됨",
+    EXTRACTED: "숫자 확인 필요",
+    CONFIRMED: "확인 완료",
+    FLAGGED: "확인 신호 있음",
+  } satisfies Record<PerformanceReport["status"], string>;
+  return labels[status];
+}
 
-  return (
-    <Card>
-      <div className="flex flex-col gap-2">
-        {FINDINGS.map((f) => (
-          <div
-            key={f.title}
-            className="rounded-lg border border-brand400 bg-brand50 px-3.5 py-2.5"
-          >
-            <div className="text-[13px] font-bold text-brand800">! {f.title}</div>
-            <p className="mt-1 text-[12px] leading-relaxed text-neutral700">{f.body}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-3">
-        <LayerBlock layer="request" label="대행사에 보낼 문의 문안 · 미발송">
-          {INQUIRY}
-        </LayerBlock>
-      </div>
-
-      <div className="mt-2.5 flex gap-2">
-        <button
-          onClick={copy}
-          className="h-10 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white hover:bg-ink/90"
-        >
-          {copied ? "복사됐어요" : "문안 복사하기"}
-        </button>
-        <button className="h-10 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral700">
-          이상 있음으로 기록
-        </button>
-      </div>
-      <p className="mt-2 text-[11px] text-neutral500">
-        기록해두면 날짜와 함께 남아, 나중에 재계약을 검토할 때 근거로 볼 수 있어요.
-      </p>
-    </Card>
-  );
+function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error ? cause.message : fallback;
 }

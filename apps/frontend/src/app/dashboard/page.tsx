@@ -37,6 +37,19 @@ export default function DashboardPage() {
         <p className="py-16 text-center text-sm text-neutral500">불러오는 중…</p>
       )}
 
+      {state.status === "error" && (
+        <div className="mx-auto max-w-md rounded-2xl border border-neutral200 p-6 text-center">
+          <p className="text-sm font-bold text-neutral700">대시보드를 불러오지 못했습니다.</p>
+          <p className="mt-2 text-sm text-neutral500">{state.error}</p>
+          <Link
+            href="/login"
+            className="mt-5 inline-flex rounded-lg bg-brand800 px-4 py-2.5 text-sm font-bold text-white"
+          >
+            로그인 다시 하기
+          </Link>
+        </div>
+      )}
+
       {state.status === "ready" && state.data.contracts.length === 0 && (
         <div className="mx-auto max-w-md rounded-2xl bg-white p-8 ring-1 ring-neutral200">
           <EmptyState

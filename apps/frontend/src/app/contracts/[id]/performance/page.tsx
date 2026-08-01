@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { AppScreen, CTAButton } from "@/components/AppScreen";
+import { AppScreen } from "@/components/AppScreen";
 import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
 import { LayerBlock } from "@/components/LayerBlock";
 import { PublicLinkCard } from "@/components/PublicLinkCard";
@@ -239,52 +239,82 @@ export default function PerformancePage() {
           {isUsingMock ? "데모 데이터 모드" : "실 API 연결"}
         </span>
       }
-      footer={
-        <CTAButton href={`/contracts/${id}/renewal`} variant="secondary">
-          만료·재계약 검토로
-        </CTAButton>
-      }
     >
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5">
         <p className="text-[13px] leading-relaxed text-neutral700">
-          대행사 리포트의 숫자를 원문 근거와 함께 읽고, 사장님이 확인한 값만 계약 조건과
-          전월 기록에 대조합니다.
+          대행사에게 받은 광고 리포트를 올려두면, 계약에서 약속한 조건대로 진행되고
+          있는지 한눈에 확인하고 산출물 증빙까지 마무리할 수 있어요.
         </p>
+
+        <Card>
+          <p className="text-[12px] leading-relaxed text-neutral700">
+            <b className="text-ink">계약서를 기준으로 확인해요.</b> 리포트에서 읽은 숫자는
+            사장님이 직접 확인한 뒤에만 계약 조건과 전월 기록에 대조합니다.
+          </p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-neutral500">
+            원문 근거를 찾지 못한 값은 자동으로 확정하지 않고 확인이 필요한 값으로
+            남겨둡니다.
+          </p>
+          <div className="mt-2.5">
+            <a
+              href={`/contracts/${id}`}
+              className="rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-ink hover:bg-subtle"
+            >
+              계약서에서 보기 →
+            </a>
+          </div>
+        </Card>
 
         <StepFlow activeReport={activeReport} hasConfirmed={Boolean(performance?.confirmedSeries.length)} />
 
         <section className="flex flex-col gap-2">
-          <SectionTitle>① 월별 리포트 올리기</SectionTitle>
+          <SectionTitle>① 대행사 리포트 올리기</SectionTitle>
           <Card>
-            <div className="grid gap-3 sm:grid-cols-[160px_1fr_auto] sm:items-end">
-              <label className="text-[12px] font-bold text-neutral700">
-                대상 월
-                <input
-                  type="month"
-                  value={period}
-                  onChange={(event) => setPeriod(event.target.value)}
-                  disabled={Boolean(working)}
-                  className="mt-1 block h-10 w-full rounded-lg border border-neutral300 px-3 text-[13px] text-ink disabled:opacity-50"
-                />
-              </label>
-              <label className="text-[12px] font-bold text-neutral700">
-                PDF 또는 이미지
-                <input
-                  type="file"
-                  accept="application/pdf,image/png,image/jpeg"
-                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                  disabled={Boolean(working)}
-                  className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 py-2 text-[12px] text-neutral700 file:mr-3 file:border-0 file:bg-transparent file:font-bold"
-                />
-              </label>
+            <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-neutral300 bg-subtle px-6 py-8 text-center">
+              <span className="text-3xl">📄</span>
+              <div>
+                <div className="text-[13px] font-bold text-ink">
+                  월간 리포트나 인사이트 화면을 올려주세요
+                </div>
+                <div className="mt-1 text-[11px] text-neutral500">
+                  PDF · 이미지 캡처 모두 괜찮아요
+                </div>
+              </div>
+              <div className="grid w-full max-w-xl gap-3 sm:grid-cols-[150px_1fr]">
+                <label className="text-left text-[11px] font-bold text-neutral700">
+                  대상 월
+                  <input
+                    type="month"
+                    value={period}
+                    onChange={(event) => setPeriod(event.target.value)}
+                    disabled={Boolean(working)}
+                    className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 text-[13px] text-ink disabled:opacity-50"
+                  />
+                </label>
+                <label className="text-left text-[11px] font-bold text-neutral700">
+                  PDF 또는 이미지
+                  <input
+                    type="file"
+                    accept="application/pdf,image/png,image/jpeg"
+                    onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                    disabled={Boolean(working)}
+                    className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 py-2 text-[12px] text-neutral700 file:mr-3 file:border-0 file:bg-transparent file:font-bold"
+                  />
+                </label>
+              </div>
               <button
                 type="button"
                 onClick={uploadAndExtract}
                 disabled={Boolean(working) || !period || !file}
-                className="h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white disabled:opacity-40"
+                className="h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white hover:bg-ink/90 disabled:opacity-40"
               >
-                {working === "uploading" ? "업로드 중…" : working === "extracting" ? "숫자 읽는 중…" : "업로드 후 분석"}
+                {working === "uploading"
+                  ? "업로드 중…"
+                  : working === "extracting"
+                    ? "숫자 읽는 중…"
+                    : "리포트 올리고 숫자 읽기"}
               </button>
+              {file && <p className="text-[11px] font-bold text-neutral700">선택됨 · {file.name}</p>}
             </div>
             <p className="mt-2 text-[11px] text-neutral500">
               원본은 비공개로 저장되며 월마다 한 건만 등록할 수 있어요. 분석 시작은 버튼을

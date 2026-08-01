@@ -48,6 +48,17 @@ export default function AllPerformancePage() {
   );
   const rate = totalImpressions === 0 ? null : totalReactions / totalImpressions;
   const reportedContracts = rows.filter((row) => row.performance.confirmedSeries.length > 0);
+  const months = Array.from(
+    points.reduce((totals, point) => {
+      totals.set(point.period, (totals.get(point.period) ?? 0) + point.confirmedPayload.impressions);
+      return totals;
+    }, new Map<string, number>()),
+    ([period, impressions]) => ({
+      period,
+      label: `${Number(period.slice(5, 7))}월`,
+      impressions,
+    }),
+  ).sort((left, right) => left.period.localeCompare(right.period));
   const findings = rows.flatMap((row) =>
     row.performance.flags.map((flag) => ({ row, flag })),
   );
@@ -65,8 +76,8 @@ export default function AllPerformancePage() {
     >
       <div className="flex flex-col gap-5">
         <p className="text-[13px] leading-relaxed text-neutral700">
-          계약별로 사장님이 확인한 월별 리포트만 모아 보여드립니다. 원문 근거와 확정·정정
-          이력은 각 계약의 이행·광고효과 관리 화면에서 확인할 수 있어요.
+          계약마다 받은 리포트에서 사장님이 확인한 숫자만 모았어요. 지금까지 집행한
+          광고가 계약에서 약속한 조건대로 진행되고 있는지 한눈에 볼 수 있어요.
         </p>
 
         {state.status === "loading" && (
@@ -96,7 +107,20 @@ export default function AllPerformancePage() {
             </div>
 
             <section className="flex flex-col gap-2">
-              <SectionTitle>계약별 광고효과</SectionTitle>
+              <SectionTitle>월별 노출 추이 — 전체 계약 합계</SectionTitle>
+              <Card>
+                {months.length === 0 ? (
+                  <p className="py-8 text-center text-[12px] text-neutral500">
+                    아직 확인해 저장한 월별 리포트가 없어요.
+                  </p>
+                ) : (
+                  <MonthlyChart months={months} />
+                )}
+              </Card>
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <SectionTitle>계약별 성과</SectionTitle>
               {rows.length === 0 ? (
                 <Card>
                   <p className="text-center text-[12px] text-neutral500">등록된 계약이 없어요.</p>
@@ -109,7 +133,7 @@ export default function AllPerformancePage() {
             </section>
 
             <section className="flex flex-col gap-2">
-              <SectionTitle>확인이 필요한 기록</SectionTitle>
+              <SectionTitle>짚어볼 점</SectionTitle>
               {findings.length === 0 ? (
                 <Card>
                   <p className="text-center text-[12px] text-neutral500">
@@ -197,6 +221,35 @@ function Metric({ value, label, emphasis = false }: { value: string; label: stri
     <div>
       <div className={`text-[13px] font-bold ${emphasis ? "text-brand700" : "text-ink"}`}>{value}</div>
       <div className="text-[10px] text-neutral500">{label}</div>
+    </div>
+  );
+}
+
+function MonthlyChart({
+  months,
+}: {
+  months: { period: string; label: string; impressions: number }[];
+}) {
+  const max = Math.max(...months.map((month) => month.impressions), 1);
+  return (
+    <div className="flex items-end gap-4 overflow-x-auto">
+      {months.map((month, index) => {
+        const last = index === months.length - 1;
+        return (
+          <div key={month.period} className="flex min-w-20 flex-1 flex-col items-center gap-1.5">
+            <span className="text-[11px] font-bold text-ink">
+              {month.impressions.toLocaleString()}
+            </span>
+            <div className="flex h-28 w-full items-end">
+              <div
+                className={`w-full rounded-t-lg ${last ? "bg-brand400" : "bg-neutral200"}`}
+                style={{ height: `${Math.max((month.impressions / max) * 100, 2)}%` }}
+              />
+            </div>
+            <span className="text-[11px] font-medium text-neutral700">{month.label}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }

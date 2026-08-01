@@ -1,28 +1,27 @@
 "use client";
 
-/* 데스크탑 웹 상단 네비게이션 바 — 전체 폭, 중앙 정렬 컨테이너. */
+/* 데스크탑 웹 상단 네비게이션 바 — develop의 정보 구조와 표현을 유지한다. */
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Logo } from "./Logo";
 import { AuthControl } from "./AuthControl";
 import { DEMO_CONTRACT_ID } from "@/lib/mock";
+import { useSession } from "@/lib/useSession";
+import { adapter, isUsingMock } from "@/lib/adapter";
 
-const NAV = [
+const navItems = (contractId: string | null) => [
   { key: "contracts", label: "내 계약", href: "/dashboard" },
   {
     key: "manage",
     label: "이행 관리",
-    href: `/contracts/${DEMO_CONTRACT_ID}/performance`,
+    href: contractId ? `/contracts/${contractId}/performance` : "/dashboard",
   },
-  {
-    key: "performance",
-    label: "광고효과",
-    href: "/performance",
-  },
+  { key: "performance", label: "광고효과", href: "/performance" },
   {
     key: "renewal",
     label: "재계약 검토",
-    href: `/contracts/${DEMO_CONTRACT_ID}/renewal`,
+    href: contractId ? `/contracts/${contractId}/renewal` : "/dashboard",
   },
 ];
 
@@ -30,42 +29,88 @@ function activeKey(pathname: string): string {
   if (pathname.startsWith("/performance")) return "performance";
   if (pathname.includes("/performance") || pathname.includes("/obligations")) return "manage";
   if (pathname.includes("/renewal")) return "renewal";
-  if (pathname.startsWith("/dashboard") || pathname.startsWith("/contracts"))
+  if (pathname.startsWith("/dashboard") || pathname.startsWith("/contracts")) {
     return "contracts";
+  }
   return "";
 }
 
 export function SiteHeader() {
   const pathname = usePathname() ?? "";
   const active = activeKey(pathname);
+  const { session } = useSession();
+  const isGuest = session?.guest ?? false;
+  const routeContractId = pathname.match(/^\/contracts\/([^/]+)/)?.[1] ?? null;
+  const [ownerContractId, setOwnerContractId] = useState<string | null>(
+    isUsingMock ? DEMO_CONTRACT_ID : null,
+  );
+
+  useEffect(() => {
+    if (isUsingMock || !session || routeContractId) return;
+    let alive = true;
+    void adapter.getDashboard()
+      .then((dashboard) => {
+        if (alive) setOwnerContractId(dashboard.contracts[0]?.id ?? null);
+      })
+      .catch(() => {
+        if (alive) setOwnerContractId(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [routeContractId, session]);
+
+  const contractId = routeContractId ?? ownerContractId;
 
   return (
-    <header className="sticky top-0 z-30 border-b border-neutral200 bg-white">
-      <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-6 lg:px-10">
-        <Link href="/dashboard" aria-label="Dandi 홈">
-          <Logo />
-        </Link>
+    <>
+      {isGuest && (
+        <div className="bg-brand800 px-6 py-2 text-center text-[13px] text-white">
+          체험 중이에요. 내 계약서를 올리려면{" "}
+          <Link href="/signup" className="font-bold underline underline-offset-2">
+            가입하세요
+          </Link>
+          . 체험 데이터는 저장되지 않습니다.
+        </div>
+      )}
 
-        <nav className="flex items-center gap-1">
-          {NAV.map((it) => {
-            const on = active === it.key;
-            return (
-              <Link
-                key={it.key}
-                href={it.href}
-                className={`rounded-lg px-3.5 py-2 text-sm transition ${
-                  on
-                    ? "bg-brand50 font-bold text-brand800"
-                    : "font-medium text-neutral500 hover:text-ink"
-                }`}
-              >
-                {it.label}
-              </Link>
-            );
-          })}
-          <AuthControl />
-        </nav>
-      </div>
-    </header>
+      <header className="sticky top-0 z-30 border-b border-neutral200 bg-white">
+        <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-6 lg:px-10">
+          <Link href={session ? "/dashboard" : "/"} aria-label="Dandi 홈">
+            <Logo />
+          </Link>
+
+          <div className="flex items-center gap-2">
+            <nav className="flex items-center gap-1">
+              {navItems(contractId).map((item) => {
+                const on = active === item.key;
+                return (
+                  <Link
+                    key={item.key}
+                    href={item.href}
+                    className={`rounded-lg px-3.5 py-2 text-sm transition ${
+                      on
+                        ? "bg-brand50 font-bold text-brand800"
+                        : "font-medium text-neutral500 hover:text-ink"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+
+            <span className="mx-1 h-5 w-px bg-neutral200" />
+            <Link
+              href="/"
+              className="rounded-lg px-3 py-2 text-sm font-medium text-neutral500 transition hover:text-ink"
+            >
+              소개
+            </Link>
+            <AuthControl />
+          </div>
+        </div>
+      </header>
+    </>
   );
 }

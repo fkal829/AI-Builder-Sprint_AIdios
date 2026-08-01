@@ -35,6 +35,9 @@ test("performance page uses evidence-backed API data and keeps inquiry delivery 
   assert.match(page, /candidate\.sourcePage/);
   assert.match(page, /candidate\.sourceText/);
   assert.match(page, /candidate\.confidence/);
+  assert.match(page, /계약서를 기준으로 확인해요/);
+  assert.match(page, /border-2 border-dashed border-neutral300/);
+  assert.match(page, /① 대행사 리포트 올리기/);
   assert.match(page, /setCorrectionReason/);
   assert.match(page, /기존 기록을\s*덮어쓰지 않고 새 버전으로 남습니다/);
   assert.match(page, /문의 문안은 자동 발송되지/);
@@ -50,6 +53,10 @@ test("aggregate performance and integrated obligation use live adapter data", as
 
   assert.match(aggregate, /adapter\.getDashboard/);
   assert.match(aggregate, /adapter\.getContractPerformance/);
+  assert.match(aggregate, /월별 노출 추이 — 전체 계약 합계/);
+  assert.match(aggregate, /<MonthlyChart months=\{months\}/);
+  assert.match(aggregate, /<SectionTitle>계약별 성과<\/SectionTitle>/);
+  assert.match(aggregate, /<SectionTitle>짚어볼 점<\/SectionTitle>/);
   assert.doesNotMatch(aggregate, /const CONTRACTS|화면 목업 · 개발 예정|reportDemo/);
   assert.match(contractPage, /adapter\.getObligation/);
   assert.match(contractPage, /adapter\.createObligationEvidenceLink/);

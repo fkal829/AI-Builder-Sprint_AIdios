@@ -21,8 +21,8 @@
 
 - 광고효과 기록과 대조(기획안 6.14)
 - 대행사 리포트 업로드 → 지표 확인 → 계약 조건 대조 → 문의 문안 생성
-- 리포트 업로드·영속 저장과 Upstage·Solar 지표 추출 API는 구현됨
-- 소상공인 확정값 저장·계약 조건 대조·문의 문안·계약별 조회 API는 아직 구현하지 않음
+- 리포트 업로드·영속 저장과 Upstage·Solar 지표 추출 API 구현됨
+- 소상공인 확정값 저장·append-only 정정·계약 조건 대조·문의 문안·계약별 조회 API 구현됨
 - 비식별 합성 PDF의 Upstage Document Parse·Solar Adapter live 연결은 검증됨
 - 배포 FastAPI·live Supabase를 포함한 수직 E2E는 별도 검증이 필요함
 

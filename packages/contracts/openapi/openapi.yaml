@@ -862,7 +862,6 @@ paths:
     patch:
       summary: 광고효과 추출값 최초 확정 또는 정정
       operationId: confirmPerformanceReport
-      x-implementation-status: planned
       tags: [performance]
       description: |
         EXTRACTED 리포트는 expected_revision=0으로 version 1을 확정한다. 이미 확정된
@@ -938,7 +937,6 @@ paths:
     get:
       summary: 계약별 월별 광고효과 조회
       operationId: getContractPerformance
-      x-implementation-status: planned
       tags: [performance]
       description: |
         report 원본 연결과 version 오름차순 revision 이력, 각 월의 최신 확정 revision만

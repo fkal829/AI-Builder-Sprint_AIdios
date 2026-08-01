@@ -23,7 +23,9 @@ from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.obligations import ObligationService
 from app.services.performance import PerformanceAccessGuard
+from app.services.performance_aggregation import PerformanceAggregationService
 from app.services.performance_ai import PerformanceReportAIExtractor
+from app.services.performance_confirmation import PerformanceConfirmationService
 from app.services.performance_extraction import PerformanceReportExtractionService
 from app.services.performance_upload import PerformanceReportUploadService
 from app.services.public_tokens import PublicTokenService
@@ -250,6 +252,26 @@ async def get_performance_report_extraction_service(
             parser=upstage,
             mapper=metric_mapper,
         ),
+    )
+
+
+async def get_performance_confirmation_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> PerformanceConfirmationService:
+    return PerformanceConfirmationService(
+        access_repository=supabase,
+        confirmation_repository=supabase,
+        analysis_repository=supabase,
+        idempotency=IdempotencyService(supabase),
+    )
+
+
+async def get_performance_aggregation_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> PerformanceAggregationService:
+    return PerformanceAggregationService(
+        access_repository=supabase,
+        report_repository=supabase,
     )
 
 

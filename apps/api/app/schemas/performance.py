@@ -4,7 +4,15 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 
 from app.core.enums import (
     ExtractedField,
@@ -14,7 +22,6 @@ from app.core.enums import (
     PerformanceReportStatus,
     VerificationStatus,
 )
-from app.schemas.common import ApiResponse
 
 PerformancePeriod = Annotated[
     str,
@@ -26,7 +33,15 @@ PerformanceConfirmedStatus = Literal[
 ]
 NonNegativeMetric = Annotated[int, Field(strict=True, ge=0)]
 SignedMetric = Annotated[int, Field(strict=True)]
-EngagementRate = Annotated[Decimal, Field(ge=0, decimal_places=6)]
+EngagementRate = Annotated[
+    Decimal,
+    Field(ge=0, decimal_places=6),
+    PlainSerializer(lambda value: float(value), return_type=float, when_used="json"),
+    WithJsonSchema(
+        {"type": "number", "minimum": 0, "x-decimal-places": 6},
+        mode="serialization",
+    ),
+]
 
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -484,8 +499,20 @@ class ContractPerformance(StrictPerformanceModel):
         return self
 
 
-PerformanceReportResponse = ApiResponse[PerformanceReport]
-PerformanceReportCreatedResponse = ApiResponse[PerformanceReportCreated]
+class PerformanceReportResponse(StrictPerformanceModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    data: PerformanceReport
+    error: None
+    request_id: str = Field(alias="requestId", pattern=r"^req_[a-f0-9]+$")
+
+
+class PerformanceReportCreatedResponse(StrictPerformanceModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    data: PerformanceReportCreated
+    error: None
+    request_id: str = Field(alias="requestId", pattern=r"^req_[a-f0-9]+$")
 
 
 class PerformanceReportExtractedResponse(StrictPerformanceModel):
@@ -498,5 +525,17 @@ class PerformanceReportExtractedResponse(StrictPerformanceModel):
     request_id: str = Field(alias="requestId", pattern=r"^req_[a-f0-9]+$")
 
 
-PerformanceReportConfirmedResponse = ApiResponse[PerformanceReportConfirmed]
-ContractPerformanceResponse = ApiResponse[ContractPerformance]
+class PerformanceReportConfirmedResponse(StrictPerformanceModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    data: PerformanceReportConfirmed
+    error: None
+    request_id: str = Field(alias="requestId", pattern=r"^req_[a-f0-9]+$")
+
+
+class ContractPerformanceResponse(StrictPerformanceModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    data: ContractPerformance
+    error: None
+    request_id: str = Field(alias="requestId", pattern=r"^req_[a-f0-9]+$")

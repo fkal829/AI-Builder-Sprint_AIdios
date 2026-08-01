@@ -87,6 +87,24 @@ class PerformanceReportExtractFailed(ApiException):
         )
 
 
+class PerformanceReportRevisionConflict(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=409,
+            code=ErrorCode.REPORT_REVISION_CONFLICT,
+            message="다른 요청이 먼저 이 리포트를 확정·정정했습니다. 최신 값을 다시 확인해 주세요.",
+        )
+
+
+class PerformanceReportCorrectionDependencyExists(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=409,
+            code=ErrorCode.REPORT_CORRECTION_DEPENDENCY_EXISTS,
+            message="더 뒤 월의 확정된 리포트가 있어 이 리포트는 정정할 수 없습니다.",
+        )
+
+
 class AnalysisStartUnavailable(ApiException):
     def __init__(self) -> None:
         super().__init__(

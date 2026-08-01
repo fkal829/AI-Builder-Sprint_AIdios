@@ -706,21 +706,15 @@ def test_pydantic_performance_properties_match_openapi() -> None:
         assert openapi_schema["additionalProperties"] is False
 
 
-def test_openapi_marks_two_unimplemented_performance_operations_as_planned() -> None:
+def test_openapi_marks_no_performance_operations_as_planned() -> None:
     canonical = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
     planned = {
         (method.upper(), path, operation["operationId"])
         for path, path_item in canonical["paths"].items()
         for method, operation in path_item.items()
         if method in {"get", "post", "put", "patch", "delete"}
+        and path.startswith("/contracts/{contract_id}/performance")
         and operation.get("x-implementation-status") == "planned"
     }
 
-    assert planned == {
-        (
-            "PATCH",
-            "/contracts/{contract_id}/performance-reports/{report_id}",
-            "confirmPerformanceReport",
-        ),
-        ("GET", "/contracts/{contract_id}/performance", "getContractPerformance"),
-    }
+    assert planned == set()

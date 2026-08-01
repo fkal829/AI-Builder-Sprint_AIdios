@@ -1,0 +1,67 @@
+{
+  "case_id": "explicit-zero",
+  "pages": [
+    {
+      "page": 1,
+      "text": "2026년 8월 광고 성과 리포트\n노출수: 0회\n좋아요: 0회\n댓글: 0건\n도달: 0명\n저장: 0회\n공유: 0회\n팔로워 순증: 0명\n게시물 수: 0건"
+    }
+  ],
+  "expected_payload": {
+    "impressions": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "노출수: 0회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "likes": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "좋아요: 0회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "comments": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "댓글: 0건",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "reach": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "도달: 0명",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "saves": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "저장: 0회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "shares": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "공유: 0회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "follower_net_change": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "팔로워 순증: 0명",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "published_content_count": {
+      "value": 0,
+      "source_page": 1,
+      "source_text": "게시물 수: 0건",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    }
+  }
+}

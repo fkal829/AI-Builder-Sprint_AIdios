@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import re
 import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -70,6 +71,7 @@ from app.repositories.performance import (
     PerformanceExtractionApplyResult,
     PerformanceExtractionClaim,
     PerformanceReportAccess,
+    PerformanceReportUploadResult,
 )
 from app.repositories.public_tokens import PublicTokenRecord
 from app.repositories.review_items import (
@@ -97,6 +99,7 @@ class MockAuditEvent:
     actor_type: str
     summary: str | None
     created_at: datetime
+    payload: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -668,6 +671,143 @@ class SupabaseAdapter:
             raise ExternalStorageFailure("광고효과 리포트 월 중복 조회에 실패했습니다.") from error
         return bool(response.data)
 
+    async def create_performance_report_upload_with_audit(
+        self,
+        *,
+        owner_id: UUID,
+        report_id: UUID,
+        period: str,
+        source_document: DocumentRecord,
+    ) -> PerformanceReportUploadResult:
+        """Atomically append upload metadata and its non-sensitive audit event."""
+
+        if source_document.type is not DocumentType.PERFORMANCE_REPORT:
+            raise ValueError("성과 리포트 원본은 PERFORMANCE_REPORT Document여야 합니다.")
+        if source_document.parse_status is not DocumentParseStatus.PENDING:
+            raise ValueError("새 성과 리포트 Document는 PENDING으로 시작해야 합니다.")
+        if source_document.created_at.tzinfo is None:
+            raise ValueError("성과 리포트 생성 시각은 시간대 정보를 포함해야 합니다.")
+        if re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", period) is None:
+            raise ValueError("성과 리포트 월은 YYYY-MM 형식이어야 합니다.")
+
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(source_document.contract_id)
+                if (
+                    (owner_id, source_document.contract_id) not in self._mock_owned_contracts
+                    or contract is None
+                    or contract.owner_id != owner_id
+                ):
+                    return PerformanceReportUploadResult(outcome="NOT_FOUND")
+
+                existing_report = self._mock_performance_reports.get(report_id)
+                if existing_report is not None:
+                    existing_document = self._mock_documents.get(
+                        existing_report.source_document_id
+                    )
+                    if _performance_upload_is_replay(
+                        report=existing_report,
+                        source_document=existing_document,
+                        report_id=report_id,
+                        period=period,
+                        requested_document=source_document,
+                    ):
+                        return PerformanceReportUploadResult(
+                            outcome="REPLAYED",
+                            report=existing_report,
+                            source_document=existing_document,
+                        )
+                    return PerformanceReportUploadResult(outcome="CONFLICT")
+
+                if source_document.id in self._mock_documents:
+                    return PerformanceReportUploadResult(outcome="CONFLICT")
+                if contract.status not in {
+                    ContractStatus.SIGNED,
+                    ContractStatus.IN_PROGRESS,
+                    ContractStatus.RENEWAL_DUE,
+                    ContractStatus.COMPLETED,
+                }:
+                    return PerformanceReportUploadResult(outcome="INVALID_STATUS")
+                if any(
+                    report.contract_id == source_document.contract_id
+                    and report.period == period
+                    for report in self._mock_performance_reports.values()
+                ):
+                    return PerformanceReportUploadResult(outcome="PERIOD_ALREADY_EXISTS")
+
+                report = PerformanceReportAccess(
+                    id=report_id,
+                    contract_id=source_document.contract_id,
+                    period=period,
+                    source_document_id=source_document.id,
+                    status=PerformanceReportStatus.UPLOADED,
+                    created_at=source_document.created_at,
+                    updated_at=source_document.created_at,
+                )
+                event = MockAuditEvent(
+                    id=uuid4(),
+                    contract_id=source_document.contract_id,
+                    event_type="PERFORMANCE_REPORT_UPLOADED",
+                    actor_type="OWNER",
+                    summary="광고효과 리포트를 업로드했습니다.",
+                    created_at=source_document.created_at,
+                    payload={},
+                )
+                self._mock_documents[source_document.id] = source_document
+                self._mock_performance_reports[report_id] = report
+                self._mock_audit_events.append(event)
+                return PerformanceReportUploadResult(
+                    outcome="CREATED",
+                    report=report,
+                    source_document=source_document,
+                )
+
+        client = self._require_live_client()
+        params = {
+            "p_owner_id": str(owner_id),
+            "p_document_id": str(source_document.id),
+            "p_report_id": str(report_id),
+            "p_contract_id": str(source_document.contract_id),
+            "p_period": period,
+            "p_storage_path": source_document.storage_path,
+            "p_content_type": source_document.content_type,
+            "p_size_bytes": source_document.size_bytes,
+            "p_page_count": source_document.page_count,
+            "p_created_at": source_document.created_at.isoformat(),
+        }
+        try:
+            response = await asyncio.to_thread(
+                lambda: client.rpc(
+                    "create_performance_report_upload_with_audit",
+                    params,
+                ).execute()
+            )
+            result = _performance_upload_result_from_payload(
+                _rpc_json_payload(response.data)
+            )
+        except ExternalStorageFailure:
+            raise
+        except Exception as error:
+            raise ExternalStorageFailure(
+                "성과 리포트 업로드 메타데이터 저장에 실패했습니다."
+            ) from error
+
+        if result.outcome in {"CREATED", "REPLAYED"}:
+            if (
+                result.report is None
+                or not _performance_upload_is_replay(
+                    report=result.report,
+                    source_document=result.source_document,
+                    report_id=report_id,
+                    period=period,
+                    requested_document=source_document,
+                )
+            ):
+                raise ExternalStorageFailure(
+                    "성과 리포트 업로드 저장 결과가 요청과 일치하지 않습니다."
+                )
+        return result
+
     async def claim_performance_report_extraction(
         self,
         *,
@@ -763,6 +903,11 @@ class SupabaseAdapter:
                                 "명시적으로 재시도했습니다."
                             ),
                             created_at=started_at,
+                            payload={
+                                "report_id": str(report_id),
+                                "previous_attempt_id": str(report.extraction_attempt_id),
+                                "attempt_id": str(attempt_id),
+                            },
                         )
                     )
 
@@ -882,6 +1027,10 @@ class SupabaseAdapter:
                         actor_type="SYSTEM",
                         summary="광고효과 리포트의 지표 후보와 근거를 추출했습니다.",
                         created_at=completed_at,
+                        payload={
+                            "report_id": str(report_id),
+                            "attempt_id": str(attempt_id),
+                        },
                     )
                 )
                 return PerformanceExtractionApplyResult(
@@ -4484,11 +4633,79 @@ def _performance_report_access_from_row(row: dict) -> PerformanceReportAccess:
     )
 
 
+def _performance_upload_is_replay(
+    *,
+    report: PerformanceReportAccess,
+    source_document: DocumentRecord | None,
+    report_id: UUID,
+    period: str,
+    requested_document: DocumentRecord,
+) -> bool:
+    """Compare only immutable upload identity; parse/report status may advance later."""
+
+    return bool(
+        source_document is not None
+        and report.id == report_id
+        and report.contract_id == requested_document.contract_id
+        and report.period == period
+        and report.source_document_id == requested_document.id
+        and report.created_at == requested_document.created_at
+        and source_document.id == requested_document.id
+        and source_document.contract_id == requested_document.contract_id
+        and source_document.type is DocumentType.PERFORMANCE_REPORT
+        and source_document.storage_path == requested_document.storage_path
+        and source_document.content_type == requested_document.content_type
+        and source_document.size_bytes == requested_document.size_bytes
+        and source_document.page_count == requested_document.page_count
+        and source_document.created_at == requested_document.created_at
+    )
+
+
 def _rpc_json_payload(data: object) -> dict:
     payload = data[0] if isinstance(data, list) and data else data
     if not isinstance(payload, dict):
         raise ExternalStorageFailure("DB RPC 결과가 올바르지 않습니다.")
     return payload
+
+
+def _performance_upload_result_from_payload(payload: dict) -> PerformanceReportUploadResult:
+    outcome = payload.get("outcome")
+    successful = outcome in {"CREATED", "REPLAYED"}
+    if outcome not in {
+        "CREATED",
+        "REPLAYED",
+        "PERIOD_ALREADY_EXISTS",
+        "INVALID_STATUS",
+        "NOT_FOUND",
+        "CONFLICT",
+    }:
+        raise ExternalStorageFailure("성과 리포트 업로드 저장 결과가 올바르지 않습니다.")
+
+    report_row = payload.get("report")
+    document_row = payload.get("source_document")
+    if successful != (isinstance(report_row, dict) and isinstance(document_row, dict)):
+        raise ExternalStorageFailure("성과 리포트 업로드 저장 결과가 완전하지 않습니다.")
+    if not successful and (report_row is not None or document_row is not None):
+        raise ExternalStorageFailure("성과 리포트 업로드 거부 결과에 자원이 포함됐습니다.")
+
+    try:
+        return PerformanceReportUploadResult(
+            outcome=outcome,
+            report=(
+                _performance_report_access_from_row(report_row)
+                if isinstance(report_row, dict)
+                else None
+            ),
+            source_document=(
+                SupabaseAdapter._document_record_from_row(document_row)
+                if isinstance(document_row, dict)
+                else None
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ExternalStorageFailure(
+            "성과 리포트 업로드 저장 결과가 올바르지 않습니다."
+        ) from error
 
 
 def _performance_extraction_claim_from_payload(

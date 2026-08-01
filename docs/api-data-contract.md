@@ -10,8 +10,9 @@ HTTP endpoint와 요청·응답 스키마의
 `/api/v1`이다. 이 문서의 파일 경로 표기는 모두 저장소 루트 기준이다.
 
 1~13절은 현재 P0 구현 계약이고 14절은 기획안 6.14의 P2-0 확정 설계다. 14절 중
-16.1 공통 접근 계층과 기반 migration은 구현됐지만 네 FastAPI endpoint와 후속 업무
-RPC는 아직 구현되지 않았다. 공통 기반 완료를 전체 P2 완료로 해석하지 않는다.
+16.1 공통 접근 계층, 업로드·추출 원자 RPC와 성과 지표 AI 경계는 구현됐지만
+네 FastAPI endpoint는 아직 등록되지 않았다. 내부 기반 완료를 전체 P2 완료로
+해석하지 않는다.
 
 기획안의 제품 기능과 P0 범위는 유지하되, 구현 담당만 최신 팀 결정에 따라 D의 백엔드
 항목을 B·C로 재배정한다.
@@ -856,8 +857,9 @@ PERFORMANCE_REPORT_CORRECTED, PERFORMANCE_REPORT_EXTRACTION_RECOVERED
 ```
 
 16.1 기반 migration에서 DB `audit_events.event_type` CHECK를 확장하고 위 6개를
-공통 코드와 OpenAPI의 기존 `AuditEventType`에 병합했다. 실제 이벤트 생성은 각
-16.2~16.4 원자 쓰기 RPC가 구현된 뒤에만 수행한다.
+공통 코드와 OpenAPI의 기존 `AuditEventType`에 병합했다. 업로드·추출 완료·stale
+복구 이벤트는 원자 RPC에서 생성하고 멱등 재생 시 중복 생성하지 않는다.
+확정·flag·정정 이벤트는 16.4 원자 RPC 구현 전까지 생성하지 않는다.
 
 업로드는 Document·report·감사 이벤트, 추출은 현재 attempt의 payload·상태·감사 이벤트,
 확정·정정은 revision·flag·문의 snapshot·현재 projection·감사 이벤트를 각각 원자적으로
@@ -875,9 +877,10 @@ GET은 상태·revision·flag·감사 이벤트를 변경하지 않고 AI나 문
 ### 14.8 구현 상태
 
 이 절은 P2-0 공개·영속 계약을 확정한다. 현재 16.1의 owner-scoped repository·접근
-guard·멱등 fingerprint·`no-store`와 `performance_reports` 기반 migration까지 구현됐다.
-16.2~16.5의 FastAPI endpoint, 원자 업무 RPC, 추출·revision·flag·집계 runtime은 아직
-구현되지 않았다. 다음을 모두 검증하기 전 전체 P2 완료로 표시하지 않는다.
+guard·멱등 fingerprint·`no-store`, `performance_reports` 기반, 업로드·추출 원자
+RPC와 비공개 AI 조합기까지 구현됐다. 16.2~16.5 FastAPI endpoint와 확정·집계
+영속 runtime은 아직 구현되지 않았다. 다음을 모두 검증하기 전 전체 P2 완료로
+표시하지 않는다.
 
 - 계약·월·source Document 고유성, 소유권과 private 접근
 - 업로드 응답 유실·롤백과 추출 claim·15분 stale 복구

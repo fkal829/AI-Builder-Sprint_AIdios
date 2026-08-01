@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -49,6 +50,28 @@ def test_claim_has_exact_stale_boundary_and_idempotent_response_loss_recovery() 
     assert "response_status is null" in body
     assert "PERFORMANCE_REPORT_EXTRACTION_RECOVERED" in body
 
+    recovery_audit = body.split("insert into public.audit_events", maxsplit=1)[1].split(
+        "v_recovered := true",
+        maxsplit=1,
+    )[0]
+    audit_payload = recovery_audit.split("jsonb_build_object(", maxsplit=1)[1].split(
+        ")",
+        maxsplit=1,
+    )[0]
+    assert re.findall(r"'([a-z_]+)'\s*,", audit_payload) == [
+        "report_id",
+        "previous_attempt_id",
+        "attempt_id",
+    ]
+    for sensitive_value in (
+        "p_extracted_payload",
+        "source_text",
+        "storage_path",
+        "file_name",
+        "signed_url",
+    ):
+        assert sensitive_value not in recovery_audit
+
 
 def test_completion_applies_only_the_current_attempt_atomically() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
@@ -65,6 +88,24 @@ def test_completion_applies_only_the_current_attempt_atomically() -> None:
     assert "and extraction_attempt_id = p_attempt_id" in body
     assert "PERFORMANCE_REPORT_EXTRACTED" in body
     assert "'outcome', 'APPLIED'" in body
+
+    completion_audit = body.split("insert into public.audit_events", maxsplit=1)[1].split(
+        "return jsonb_build_object",
+        maxsplit=1,
+    )[0]
+    audit_payload = completion_audit.split("jsonb_build_object(", maxsplit=1)[1].split(
+        ")",
+        maxsplit=1,
+    )[0]
+    assert re.findall(r"'([a-z_]+)'\s*,", audit_payload) == ["report_id", "attempt_id"]
+    for sensitive_value in (
+        "p_extracted_payload",
+        "source_text",
+        "storage_path",
+        "file_name",
+        "signed_url",
+    ):
+        assert sensitive_value not in completion_audit
 
 
 def test_failure_keeps_uploaded_and_distinguishes_parse_from_mapping() -> None:

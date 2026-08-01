@@ -122,6 +122,107 @@ mock 모드는 고정된 가상 계약 결과를 사용하며, 발견한 값에�
 mock Solar 문구는 항목별 필드와 신호를 반영하지만 실제 모델 응답이 아니며
 `model_limitations`에도 이 사실을 표시한다.
 
+## P2 성과 리포트 지표 매핑 기반
+
+17.5/P2-B-5 기반은 `apps/api/app/adapters/performance_metrics.py`의
+`SolarPerformanceMetricMapper`로 분리한다. Upstage Document Parse가 만든
+페이지별 원문을 입력받아 Solar가 아래 8개 지표 후보만
+`performance-report-metrics-v1` strict JSON Schema로 매핑한다.
+
+- `impressions`, `likes`, `comments`, `reach`, `saves`, `shares`
+- `follower_net_change`
+- `published_content_count`
+
+`mock`는 명시적인 `지표명: 정수`형 가상 원문만 결정적으로 읽고
+HTTP client를 생성하지 않는다. `live`는 Solar Chat에 strict structured output을
+요청한 뒤 Pydantic 스키마와 `source_page`/`source_text`의 실제 페이지
+포함 여부를 다시 검증한다. 인용문의 해당 지표 라벨과 그 라벨 구간의
+정수가 같은지도 검증해 페이지 전체에서 다른 지표 숫자를 고르는 결과를 거부한다.
+비율·기간·비용 문맥과 `%`·기간·금액 단위를 실적 건수로 인정하지 않는다.
+원문에 없는 지표는 `NOT_FOUND`/`null`/
+`confidence=0`이고, 원문의 명시적인 `0`은 누락으로 바꾸지 않는다.
+`게시물 수`가 없으면 행이나 URL 수로 `published_content_count`를 추정하지
+않는 두 경계는 `fixtures/evaluation/performance-metrics/`에 고정했다.
+
+로그는 prompt version, model, 시작 시각, 성공/실패, HTTP status, 페이지·
+지표 개수, 지연 시간, 스키마 검증 여부만 남긴다. 리포트 원문,
+요청·응답 payload, API key는 로그에 남기지 않고 model도 외부 응답이 아닌
+서버에 설정된 값만 기록한다. `apps/api/app/services/performance_ai.py`는 점유된
+private 원본을 다운로드하고 Upstage Parse 후 이 mapper를 호출하는 내부
+조합만 제공한다. 이 조합과 mapper는 아직 공개 추출 endpoint나 dependency에
+연결하지 않았다.
+
+2026-08-01 기준 아래 live 절차는 **아직 실행하지 않았다**. 실제 호출과
+비용 발생을 명시적으로 확인한 뒤에만 가상 fixture로 재현한다.
+`UPSTAGE_API_KEY`는 명령어나 shell history에 적지 말고 `apps/api/.env`
+또는 배포 환경의 서버 비밀 변수로 미리 주입한다.
+
+```bash
+cd apps/api
+CONFIRM_LIVE_PERFORMANCE_METRICS=1 UPSTAGE_MODE=live \
+.venv/bin/python - <<'PY'
+import asyncio
+import json
+import os
+from pathlib import Path
+
+from app.adapters.base import ParsedDocument, ParsedPage
+from app.adapters.performance_metrics import (
+    PERFORMANCE_METRIC_PROMPT_VERSION,
+    SolarPerformanceMetricMapper,
+)
+from app.core.config import get_settings
+
+if os.environ.get("CONFIRM_LIVE_PERFORMANCE_METRICS") != "1":
+    raise SystemExit("set CONFIRM_LIVE_PERFORMANCE_METRICS=1 to allow the paid live call")
+
+fixture_path = (
+    Path.cwd().parents[1]
+    / "fixtures/evaluation/performance-metrics/02-explicit-zero.json"
+)
+fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+parsed = ParsedDocument(
+    pages=tuple(ParsedPage(number=p["page"], text=p["text"]) for p in fixture["pages"]),
+    model="fixture-document-parse-v1",
+)
+settings = get_settings()
+mapper = SolarPerformanceMetricMapper(
+    mode="live",
+    api_key=settings.upstage_api_key,
+    base_url=settings.upstage_base_url,
+    timeout_seconds=settings.upstage_solar_timeout_seconds,
+    model=settings.upstage_solar_model,
+)
+try:
+    result = asyncio.run(mapper.map_metrics(parsed_document=parsed))
+except Exception as error:
+    cause = error.__cause__
+    response = getattr(cause, "response", None)
+    status_code = getattr(response, "status_code", None)
+    print(json.dumps({
+        "status": "failed",
+        "error_type": type(error).__name__,
+        "cause_type": type(cause).__name__ if cause is not None else None,
+        "http_status": status_code if isinstance(status_code, int) else None,
+    }, ensure_ascii=False, indent=2))
+    raise SystemExit(1) from None
+print(json.dumps({
+    "status": "completed",
+    "prompt_version": PERFORMANCE_METRIC_PROMPT_VERSION,
+    "model": settings.upstage_solar_model,
+    "schema_valid": True,
+    "verification_statuses": {
+        name: getattr(result, name).verification_status.value
+        for name in type(result).model_fields
+    },
+}, ensure_ascii=False, indent=2))
+PY
+```
+
+명령의 exit code와 안전한 메타데이터 요약을 확인하고, 모델·prompt version·
+실행일을 결과 문서에 추가한 뒤에만 live 성공을 기록한다. 실패하면
+성공으로 대체하지 않고 오류 유형·HTTP status만 민감한 본문 없이 남긴다.
+
 ## 비동기 작업 복구 경계
 
 HTTP 진입점의 FastAPI `BackgroundTasks`는 빠른 mock/demo 처리를 위한 보조 경로이며,

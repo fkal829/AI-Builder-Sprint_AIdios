@@ -243,6 +243,13 @@ async def test_claim_success_and_same_key_replay_without_network(monkeypatch) ->
     ]
     assert len(events) == 1
     assert events[0].actor_type == "SYSTEM"
+    assert events[0].payload == {
+        "report_id": str(REPORT_ID),
+        "attempt_id": str(key),
+    }
+    event_text = repr(events[0])
+    assert adapter.mock_documents[DOCUMENT_ID].storage_path not in event_text
+    assert payload.impressions.source_text not in event_text
     records = adapter.mock_idempotency_records
     assert len(records) == 1
     assert records[0].key == key
@@ -404,6 +411,28 @@ async def test_exact_fifteen_minutes_recovers_and_old_attempt_becomes_noop() -> 
     event_types = [event.event_type for event in adapter.mock_audit_events]
     assert event_types.count("PERFORMANCE_REPORT_EXTRACTION_RECOVERED") == 1
     assert event_types.count("PERFORMANCE_REPORT_EXTRACTED") == 1
+    recovered_event = next(
+        event
+        for event in adapter.mock_audit_events
+        if event.event_type == "PERFORMANCE_REPORT_EXTRACTION_RECOVERED"
+    )
+    extracted_event = next(
+        event
+        for event in adapter.mock_audit_events
+        if event.event_type == "PERFORMANCE_REPORT_EXTRACTED"
+    )
+    assert recovered_event.payload == {
+        "report_id": str(REPORT_ID),
+        "previous_attempt_id": str(old_attempt),
+        "attempt_id": str(new_key),
+    }
+    assert extracted_event.payload == {
+        "report_id": str(REPORT_ID),
+        "attempt_id": str(new_key),
+    }
+    audit_text = repr((recovered_event, extracted_event))
+    assert adapter.mock_documents[DOCUMENT_ID].storage_path not in audit_text
+    assert payload.impressions.source_text not in audit_text
 
 
 async def test_parse_failure_is_stored_as_502_and_replayed() -> None:

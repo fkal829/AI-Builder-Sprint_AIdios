@@ -103,6 +103,12 @@ DB 커밋 뒤 RPC 응답이 유실돼도 같은 키 재시도는 최초 token ID
 작업만 새 멱등 키로 재점유한다. 현재 attempt의 결과만 `EXTRACTED`와
 Document 기술 상태에 반영하며, 이전 작업의 늦은 응답은 저장하지 않는다.
 
+`20260801030000_add_performance_report_upload_audit.sql`은 16.2·17.5 업로드
+저장 기반으로 private `Document`, `PerformanceReport=UPLOADED`, 빈 payload의
+`PERFORMANCE_REPORT_UPLOADED` 감사 이벤트를 하나의 RPC 트랜잭션으로
+저장한다. 서버가 미리 만든 Document·report ID와 동일한 불변 메타데이터로
+재호출하면 기존 커밋을 재생하고 행과 감사 이벤트를 중복 생성하지 않는다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

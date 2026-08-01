@@ -6,8 +6,8 @@
 > Base URL: `/api/v1`<br>
 > 상세 기계 판독 명세: `packages/contracts/openapi/openapi.yaml`<br>
 > 적용 범위: 1~14절은 현재 P0 구현 계약, 15~19절은 6.14 P2-0 확정 설계<br>
-> P2 구현 상태: canonical OpenAPI 3/4 `planned`, runtime endpoint 1/4,
-> 16.1·16.2·17.2·17.5 구현
+> P2 구현 상태: canonical OpenAPI 0/4 `planned`, runtime endpoint 4/4,
+> 16.1~16.5·17.2·17.5 구현
 
 이 문서는 백엔드 API와 개발 순서를 사람이 읽을 수 있도록 정리한다. 1~14절의 P0 제품
 범위와 사용자 흐름은 `docs/기획안.md`, 15~19절의 6.14 P2 변경분은
@@ -18,10 +18,10 @@
 경로 표기는 모두 저장소 루트 기준이다.
 
 15~19절은 `docs/단디계약최종기획안.md` 6.14의 P2-0 확정 설계 구역이다. 현재
-신규 4개 operation 중 16.2 리포트 업로드는 canonical OpenAPI의 활성 operation과
-FastAPI runtime에 등록했고, 16.3~16.5 세 endpoint는 `planned`다. 16.1 공통
-접근 기반, 업로드 Document·report·감사 원자 RPC, 추출 attempt·완료·복구
-RPC와 비공개 AI Adapter 조합기는 구현됐다. 17.4의 확정값은 기획안, OpenAPI,
+신규 4개 operation은 모두 canonical OpenAPI의 활성 operation과 FastAPI runtime에
+등록했다. 16.1 공통 접근 기반, 업로드 Document·report·감사 원자 RPC, 추출
+attempt·완료·복구 RPC와 비공개 AI Adapter 조합기, append-only 확정·정정·계약별
+집계 기반을 구현했다. 17.4의 확정값은 기획안, OpenAPI,
 `docs/api-data-contract.md`, 공통 enum·오류에 같은 값으로 유지하고 구조 검증을
 통과시킨 뒤 runtime을 추가한다.
 
@@ -37,14 +37,12 @@ RPC와 비공개 AI Adapter 조합기는 구현됐다. 17.4의 확정값은 기�
 - **D — 배포·QA 검증:** 배포·환경변수 확인, E2E 실행, 데모 데이터와 테스트 증빙;
   백엔드 endpoint·service·repository 구현은 맡지 않음
 
-현재 활성 API 30개의 구현 주 담당은 B 11개, C 19개이며 D가 직접
+현재 활성 API 34개의 구현 주 담당은 B 13개, C 21개이며 D가 직접
 구현하는 API는 0개다. 이전 데이터 호환용 deprecated `/agreement` 2개는
 이 활성 개수에 포함하지 않는다. D는 모든 endpoint의 배포본 E2E와 데모
 검증 결과를 제공하지만 코드 구현 소유자는 아니다.
 
-15~19절의 P2 예정 API 4개는 위 현재 구현 개수와 기존 B·C 개발 번호에
-포함하지 않는다. P2를 구현하면 활성 API는 34개, 담당은 B 13개·C
-21개가 된다.
+15~19절의 P2 API 4개는 모두 위 현재 구현 개수에 포함했다.
 
 ### 1.1 현재 활성 API 담당표
 
@@ -79,6 +77,10 @@ RPC와 비공개 AI Adapter 조합기는 구현됐다. 17.4의 확정값은 기�
 | B | `POST` | `/contracts/{contract_id}/obligations/{obligation_id}/evidence-link` | 증빙 제출 링크 생성 |
 | B | `POST` | `/public/obligations/{token}/evidence` | 대행사 증빙 URL 제출 |
 | B | `PATCH` | `/contracts/{contract_id}/obligations/{obligation_id}` | 증빙 승인·이의 처리 |
+| B | `POST` | `/contracts/{contract_id}/performance-reports` | 광고효과 리포트 업로드 |
+| B | `POST` | `/contracts/{contract_id}/performance-reports/{report_id}/extract` | 광고효과 지표 추출 |
+| C | `PATCH` | `/contracts/{contract_id}/performance-reports/{report_id}` | 광고효과 확정값 최초 확인·정정 |
+| C | `GET` | `/contracts/{contract_id}/performance` | 계약별 월별 광고효과·계약 대조 조회 |
 | C | `GET` | `/dashboard` | 계약·분석·이행 집계 |
 
 ## 2. 공통 규칙
@@ -119,6 +121,8 @@ Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 - 수정 계약서 대조 생성·최종 확인
 - 모두싸인 임베디드 서명 초안 생성
 - 증빙 제출 링크 생성
+- 광고효과 리포트 업로드
+- 광고효과 지표 추출
 
 같은 키와 같은 요청은 최초 결과를 재생한다. 같은 키에 다른 요청을 사용하면
 `409 IDEMPOTENCY_CONFLICT`다.
@@ -1348,8 +1352,8 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 >
 > - 기준: `docs/단디계약최종기획안.md` 6.14·10장·11장·12장·13장
 > - 우선순위: P2 발표 로드맵
-> - 현재 상태: 프론트엔드 화면 목업과 16.1 공통 기반, 16.2 업로드 endpoint 구현
-> - 기계 계약: canonical OpenAPI 3/4 `planned`, runtime 1/4, 기반 DB migration 구현
+> - 현재 상태: 프론트엔드 화면 목업과 16.1 공통 기반, 16.2~16.5 endpoint 구현
+> - 기계 계약: canonical OpenAPI 0/4 `planned`, runtime 4/4, 기반 DB migration 구현
 > - 선행 의존성: 이행·증빙 API와 기존 대시보드 API는 현재 구현됨
 > - 신규 번호: `P2-B-*`, `P2-C-*`; 기존 B-1~B-16·C-1~C-10과 독립
 
@@ -1378,8 +1382,10 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
    revision·근거 snapshot·문의 문안 snapshot·집계 규칙과 테스트를 병렬 작성한다.
 4. B의 `PerformanceReport` 기반과 두 API가 merge된 뒤 C가 확인·집계 두 API를
    실제 repository에 연결한다.
-5. `업로드 → 추출 → 최초 확정 → append-only 정정 → 최신 revision 조회 → 저장된
-   문의 문안 복사` E2E와 기존 P0 회귀를 모두 통과한 뒤에만 P2 미구현 표시를 제거한다.
+5. 4개 operation의 runtime과 회귀 검증이 통과하면 canonical OpenAPI의
+   `planned` 표시를 제거한다. `업로드 → 추출 → 최초 확정 → append-only 정정
+   → 최신 revision 조회 → 저장된 문의 문안 복사` 배포본 E2E는 실제 자격증명으로
+   수행하는 별도 운영 검증으로 남긴다.
 
 ## 16. 6.14 광고효과 API 설계 — P2-0 확정값
 
@@ -1395,15 +1401,15 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 | 응답 헤더 | 민감한 계약·성과 자료이므로 성공·오류 모두 `Cache-Control: no-store` |
 | 멱등성 | 업로드·추출·확인 쓰기에 `Idempotency-Key` 필수 |
 | 원본 파일 | `Document.type=PERFORMANCE_REPORT`와 private Storage를 사용하고, 공개 URL·Storage 경로를 일반 응답에 포함하지 않음 |
-| 현재 등록 상태 | 16.2는 canonical OpenAPI·runtime 등록, 16.3~16.5는 `planned` |
+| 현재 등록 상태 | 16.2~16.5 모두 canonical OpenAPI·runtime 등록 |
 
 16.1 공통 기반은 구현됐다. Bearer 인증은 기존 공통 인증을 재사용하며, owner-scoped
 Contract·report·source Document 조회, 쓰기 허용 상태 guard, 월 중복 preflight와 DB
 고유 제약, multipart 멱등 fingerprint 구성요소, 성과 경로 `no-store`, private Document
 경계를 공통 service·repository·migration에서 제공한다. 업로드 원자 RPC와 16.2
-FastAPI endpoint는 runtime에 구현됐다. 추출 attempt RPC·service·AI 경계는 내부
-기반으로 구현됐지만, 16.3~16.5 세 endpoint는 `planned`이며 runtime operation
-수는 1/4이다.
+endpoint, 추출 attempt RPC·service·Upstage·Solar 경계와 16.3 endpoint,
+append-only 확정·정정과 결정적 신호·문의 문안 snapshot의 16.4 endpoint, 최신 revision
+기준 집계·계약 대조의 16.5 endpoint까지 runtime에 구현해 operation 수는 4/4이다.
 
 `period`는 API에서 `YYYY-MM`으로 받고 `(contract_id, period)`를 DB 고유 제약으로
 보호한다. 같은 `Idempotency-Key`와 같은 요청은 최초 응답을 재생하고, 다른 요청으로
@@ -1463,8 +1469,10 @@ Document·report UUID로 응답 유실과 멱등 응답 저장 실패를 복구�
 - 담당: P2-B
 - 필수 헤더: `Idempotency-Key`
 - 요청 body: 없음
-- 성공: `200 PerformanceReportResponse`
-- 오류: `401`, `404`, `409`, `422`, `502 REPORT_EXTRACT_FAILED`
+- 구현 상태: canonical OpenAPI·FastAPI runtime 등록 완료
+- 성공: `200 PerformanceReportExtractedResponse`
+- 오류: `401`, `404`, `409`, `422`, `502 REPORT_EXTRACT_FAILED`,
+  `503 EXTERNAL_SERVICE_UNAVAILABLE`
 
 `UPLOADED`에서만 시작한다. 원본 파일을 Upstage Document Parse로 읽고 Solar가
 지표명과 숫자 후보를 매핑한다. 외부 호출은 긴 DB 트랜잭션 밖에서 수행하고,
@@ -1495,6 +1503,14 @@ report=`EXTRACTED`, 추출 payload와 감사 이벤트를 원자 저장한다. P
 Document=`FAILED`, Solar만 실패하면 Document=`COMPLETED`를 보존한다. P2는 Parse
 결과를 별도 저장하지 않으므로 명시적 재시도에서는 Document Parse부터 다시 실행한다.
 
+같은 멱등 키의 성공·실패 응답은 최초 `requestId`까지 재생한다. 완료·실패 RPC의 응답이
+유실됐거나 멱등 응답 저장이 실패한 경우에는 owner-scoped report와 source Document를
+다시 확인해 이미 커밋된 결과만 복구하며, 커밋 여부가 불명확하면 AI를 다시 호출하지 않고
+`503 EXTERNAL_SERVICE_UNAVAILABLE`로 종료한다. 일반 자동화 검증은 mock·fake 경계다.
+2026-08-01 비식별 합성 PDF로 Upstage Document Parse → Solar Chat Adapter live 연결과
+8개 지표 strict 근거 검증은 통과했다. 배포 FastAPI·live Supabase까지 포함한 E2E는
+별도 배포 검증으로 남기며 상세 안전 메타데이터는 `AI_USAGE.md`에 기록한다.
+
 claim할 때 `extraction_attempt_id`와 `extraction_started_at`을 저장한다. 활성
 `PROCESSING`이 15분 미만이면 다른 키의 요청을 `409 REPORT_EXTRACTION_IN_PROGRESS`로
 거부한다. 15분 이상 지난 stale attempt만 새 `Idempotency-Key`로 원자 재점유할 수
@@ -1510,7 +1526,8 @@ claim할 때 `extraction_attempt_id`와 `extraction_started_at`을 저장한다.
 - 인증: Bearer
 - 담당: P2-C
 - 필수 헤더: `Idempotency-Key`
-- 성공: `200 PerformanceReportResponse`
+- 구현 상태: canonical OpenAPI·FastAPI runtime 등록 완료
+- 성공: `200 PerformanceReportConfirmedResponse`
 - 오류: `401`, `404`, `409`, `422`
 
 요청 예시:
@@ -1580,6 +1597,7 @@ report의 `current_revision_id`·현재 상태와 감사 이벤트를 같은 트
 
 - 인증: Bearer
 - 담당: P2-C
+- 구현 상태: canonical OpenAPI·FastAPI runtime 등록 완료
 - 성공: `200 ContractPerformanceResponse`
 - 오류: `401`, `404`, `422`
 
@@ -1735,14 +1753,15 @@ report revision은 flag에서 유도한다. 조회 시 다시 만들거나 외�
 
 ### 17.5 감사·보안·AI 경계
 
-- 계획 감사 이벤트:
+- 감사 이벤트:
   `PERFORMANCE_REPORT_UPLOADED`, `PERFORMANCE_REPORT_EXTRACTED`,
   `PERFORMANCE_REPORT_CONFIRMED`, `PERFORMANCE_REPORT_FLAGGED`,
   `PERFORMANCE_REPORT_CORRECTED`, `PERFORMANCE_REPORT_EXTRACTION_RECOVERED`
 - 16.1 기반 migration에서 DB CHECK를 확장하고 위 값을 기존 `AuditEventType`에
   병합했다. `PERFORMANCE_REPORT_UPLOADED`, `PERFORMANCE_REPORT_EXTRACTED`,
   `PERFORMANCE_REPORT_EXTRACTION_RECOVERED`는 각 원자 RPC에서 생성한다. 확정·flag·
-  정정 이벤트는 16.4 원자 RPC가 구현될 때까지 생성하지 않는다.
+  정정 이벤트는 16.4 `confirm_performance_report_with_audit` 원자 RPC에서
+  revision·flag·문의 문안과 함께 생성한다.
 - 업로드는 `Document` 메타데이터·report·감사 이벤트, 추출은
   `extracted_payload`·상태·감사 이벤트, 확정·정정은 revision·flag·문의 문안
   snapshot·현재 projection·감사 이벤트를 각각 원자 저장한다.

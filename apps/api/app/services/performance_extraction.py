@@ -16,6 +16,8 @@ from pydantic import ValidationError
 from app.core.enums import IdempotencyOperation, PerformanceReportStatus
 from app.core.errors import ErrorCode
 from app.core.exceptions import (
+    ExternalServiceUnavailable,
+    ExternalStorageFailure,
     PerformanceReportExtractFailed,
     PerformanceReportExtractionInProgress,
     ResourceNotFound,
@@ -28,11 +30,10 @@ from app.repositories.performance import (
     PerformanceReportAccess,
 )
 from app.schemas.documents import DocumentParseStatus, DocumentType
-from app.schemas.performance import PerformanceExtractedPayload
+from app.schemas.performance import PerformanceExtractedPayload, PerformanceReportExtracted
 from app.services.idempotency import (
     IdempotencyService,
     IdempotentOutcome,
-    IdempotentResult,
 )
 from app.services.state_machine import InvalidStatusTransition
 
@@ -50,10 +51,31 @@ class PerformanceMetricMappingError(RuntimeError):
     """Solar mapping failed before a strict metric payload was produced."""
 
 
+class _PerformanceExtractionRecoveryRequired(ExternalStorageFailure):
+    """The business commit is uncertain and the idempotency claim must survive."""
+
+
 @dataclass(frozen=True)
 class _StoredExtractionResponse:
     outcome: _StoredOutcome
-    report: PerformanceReportAccess | None
+    report: PerformanceReportExtracted | None
+    request_id: str
+
+
+@dataclass(frozen=True)
+class PerformanceReportExtractionExecution:
+    status_code: int
+    report: PerformanceReportExtracted | None
+    error_code: ErrorCode | None
+    error_message: str | None
+    request_id: str
+    replayed: bool
+
+    @property
+    def response(self) -> PerformanceReportExtracted | None:
+        """Backward-compatible alias used by the extraction foundation tests."""
+
+        return self.report
 
 
 class PerformanceReportExtractionService:
@@ -83,7 +105,8 @@ class PerformanceReportExtractionService:
         contract_id: UUID,
         report_id: UUID,
         idempotency_key: UUID,
-    ) -> IdempotentResult[PerformanceReportAccess]:
+        request_id: str | None = None,
+    ) -> PerformanceReportExtractionExecution:
         """Run at most one external extraction for the scoped idempotency key.
 
         A successful response and a terminal ``REPORT_EXTRACT_FAILED`` response are
@@ -91,19 +114,19 @@ class PerformanceReportExtractionService:
         caller to try again after the active attempt has finished or become stale.
         """
 
+        current_request_id = request_id or f"req_{idempotency_key.hex}"
+
         async def perform() -> IdempotentOutcome[_StoredExtractionResponse]:
-            report = await self._perform_extraction(
+            report_access = await self._perform_extraction(
                 owner_id=owner_id,
                 contract_id=contract_id,
                 report_id=report_id,
                 attempt_id=idempotency_key,
                 idempotency_key=idempotency_key,
             )
-            stored = _StoredExtractionResponse(outcome="SUCCESS", report=report)
-            return IdempotentOutcome(
-                status_code=200,
-                response=stored,
-                replay_payload=_stored_response_payload(stored),
+            return _success_outcome(
+                _extracted_snapshot(report_access),
+                request_id=current_request_id,
             )
 
         def persist_extract_failure(
@@ -111,33 +134,51 @@ class PerformanceReportExtractionService:
         ) -> IdempotentOutcome[_StoredExtractionResponse] | None:
             if not isinstance(error, PerformanceReportExtractFailed):
                 return None
-            stored = _StoredExtractionResponse(outcome="FAILED", report=None)
-            return IdempotentOutcome(
-                status_code=error.status_code,
-                response=stored,
-                replay_payload=_stored_response_payload(stored),
+            return _failure_outcome(request_id=current_request_id)
+
+        async def recover_pending() -> IdempotentOutcome[_StoredExtractionResponse] | None:
+            return await self._recover_pending_outcome(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+                attempt_id=idempotency_key,
+                request_id=current_request_id,
             )
 
-        result = await self._idempotency.execute(
-            owner_id=owner_id,
-            operation=IdempotencyOperation.PERFORMANCE_REPORT_EXTRACT,
-            resource_id=report_id,
-            key=idempotency_key,
-            request_payload={
-                "contract_id": contract_id,
-                "report_id": report_id,
-            },
-            perform=perform,
-            replay=_stored_response_from_payload,
-            exception_outcome=persist_extract_failure,
-        )
+        try:
+            result = await self._idempotency.execute(
+                owner_id=owner_id,
+                operation=IdempotencyOperation.PERFORMANCE_REPORT_EXTRACT,
+                resource_id=report_id,
+                key=idempotency_key,
+                request_payload={
+                    "contract_id": contract_id,
+                    "report_id": report_id,
+                },
+                perform=perform,
+                replay=_stored_response_from_payload,
+                exception_outcome=persist_extract_failure,
+                pending_recovery=recover_pending,
+                preserve_pending_exception=lambda error: isinstance(
+                    error,
+                    _PerformanceExtractionRecoveryRequired,
+                ),
+            )
+        except ExternalStorageFailure as error:
+            raise ExternalServiceUnavailable() from error
+
         if result.response.outcome == "FAILED":
-            raise PerformanceReportExtractFailed()
+            raise PerformanceReportExtractFailed(
+                request_id=result.response.request_id,
+            )
         if result.response.report is None:
             raise RuntimeError("Successful extraction replay is missing its report.")
-        return IdempotentResult(
+        return PerformanceReportExtractionExecution(
             status_code=result.status_code,
-            response=result.response.report,
+            report=result.response.report,
+            error_code=None,
+            error_message=None,
+            request_id=result.response.request_id,
             replayed=result.replayed,
         )
 
@@ -151,20 +192,48 @@ class PerformanceReportExtractionService:
         idempotency_key: UUID,
     ) -> PerformanceReportAccess:
         started_at = self._utc_now()
-        claim = await self._repository.claim_performance_report_extraction(
-            owner_id=owner_id,
-            contract_id=contract_id,
-            report_id=report_id,
-            attempt_id=attempt_id,
-            idempotency_key=idempotency_key,
-            started_at=started_at,
-            stale_before=started_at - self._stale_after,
-        )
+        try:
+            claim = await self._repository.claim_performance_report_extraction(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+                attempt_id=attempt_id,
+                idempotency_key=idempotency_key,
+                started_at=started_at,
+                stale_before=started_at - self._stale_after,
+            )
+        except ExternalStorageFailure as error:
+            report, source_document = await self._attempt_state(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+            )
+            if _is_completed_attempt(report, source_document, attempt_id=attempt_id):
+                assert report is not None
+                return report
+            if _is_processing_attempt(report, source_document, attempt_id=attempt_id):
+                assert report is not None and source_document is not None
+                claim = PerformanceExtractionClaim(
+                    outcome="CLAIMED",
+                    report=report,
+                    source_document=source_document,
+                )
+            else:
+                raise ExternalServiceUnavailable() from error
         report, source_document = _claimed_context(claim, attempt_id=attempt_id)
 
         try:
             extracted = await self._extractor(source_document)
             payload = PerformanceExtractedPayload.model_validate(extracted)
+        except ExternalStorageFailure as error:
+            await self._record_failure(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+                attempt_id=attempt_id,
+                document_parse_status=DocumentParseStatus.FAILED,
+            )
+            raise ExternalServiceUnavailable() from error
         except PerformanceDocumentParseError as error:
             await self._record_failure(
                 owner_id=owner_id,
@@ -207,11 +276,6 @@ class PerformanceReportExtractionService:
                 extracted_payload=payload,
                 completed_at=self._utc_now(),
             )
-        except Exception as error:
-            # External extraction already ran. Persist a replayable terminal
-            # response instead of abandoning the key and running AI again.
-            raise PerformanceReportExtractFailed() from error
-        try:
             completed_report = _applied_report(completed)
             if (
                 completed_report.status is not PerformanceReportStatus.EXTRACTED
@@ -223,12 +287,9 @@ class PerformanceReportExtractionService:
                 raise RuntimeError("Extraction repository returned an invalid completed report.")
             if (
                 completed.source_document is not None
-                and completed.source_document.parse_status
-                is not DocumentParseStatus.COMPLETED
+                and completed.source_document.parse_status is not DocumentParseStatus.COMPLETED
             ):
-                raise RuntimeError(
-                    "Completed extraction must mark its source document completed."
-                )
+                raise RuntimeError("Completed extraction must mark its source document completed.")
             # Claim context is validated before any external callback.
             if report.id != completed_report.id:
                 raise RuntimeError("Extraction completion returned a different report.")
@@ -239,7 +300,28 @@ class PerformanceReportExtractionService:
         ):
             raise
         except Exception as error:
-            raise PerformanceReportExtractFailed() from error
+            recovered_report, recovered_document = await self._attempt_state(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+            )
+            if _is_completed_attempt(
+                recovered_report,
+                recovered_document,
+                attempt_id=attempt_id,
+                expected_payload=payload,
+            ):
+                assert recovered_report is not None
+                return recovered_report
+            if _is_terminal_failed_attempt(
+                recovered_report,
+                recovered_document,
+                attempt_id=attempt_id,
+            ):
+                raise PerformanceReportExtractFailed() from error
+            raise _PerformanceExtractionRecoveryRequired(
+                "성과 추출 완료 저장 결과를 안전하게 확인할 수 없습니다."
+            ) from error
         return completed_report
 
     async def _record_failure(
@@ -260,9 +342,6 @@ class PerformanceReportExtractionService:
                 document_parse_status=document_parse_status,
                 failed_at=self._utc_now(),
             )
-        except Exception as error:
-            raise PerformanceReportExtractFailed() from error
-        try:
             failed_report = _applied_report(failed)
             if (
                 failed_report.status is not PerformanceReportStatus.UPLOADED
@@ -284,7 +363,73 @@ class PerformanceReportExtractionService:
         ):
             raise
         except Exception as error:
-            raise PerformanceReportExtractFailed() from error
+            recovered_report, recovered_document = await self._attempt_state(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+            )
+            if _is_failed_attempt(
+                recovered_report,
+                recovered_document,
+                attempt_id=attempt_id,
+                document_parse_status=document_parse_status,
+            ):
+                return
+            raise _PerformanceExtractionRecoveryRequired(
+                "성과 추출 실패 상태의 저장 결과를 안전하게 확인할 수 없습니다."
+            ) from error
+
+    async def _recover_pending_outcome(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+        attempt_id: UUID,
+        request_id: str,
+    ) -> IdempotentOutcome[_StoredExtractionResponse] | None:
+        report, source_document = await self._attempt_state(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            report_id=report_id,
+        )
+        if _is_completed_attempt(report, source_document, attempt_id=attempt_id):
+            assert report is not None
+            return _success_outcome(
+                _extracted_snapshot(report),
+                request_id=request_id,
+            )
+        if _is_terminal_failed_attempt(report, source_document, attempt_id=attempt_id):
+            return _failure_outcome(request_id=request_id)
+        # A PROCESSING attempt may still be executing in another request. Never
+        # re-run AI or overwrite it merely because the idempotency poll elapsed.
+        return None
+
+    async def _attempt_state(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        report_id: UUID,
+    ) -> tuple[PerformanceReportAccess | None, DocumentRecord | None]:
+        try:
+            report = await self._repository.get_owned_performance_report(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                report_id=report_id,
+            )
+            if report is None:
+                return None, None
+            source_document = await self._repository.get_owned_performance_source_document(
+                owner_id=owner_id,
+                contract_id=contract_id,
+                document_id=report.source_document_id,
+            )
+        except ExternalStorageFailure as error:
+            raise _PerformanceExtractionRecoveryRequired(
+                "성과 추출 상태를 안전하게 확인할 수 없습니다."
+            ) from error
+        return report, source_document
 
     def _utc_now(self) -> datetime:
         value = self._now()
@@ -344,99 +489,179 @@ def _applied_report(result: PerformanceExtractionApplyResult) -> PerformanceRepo
     return result.report
 
 
+def _is_completed_attempt(
+    report: PerformanceReportAccess | None,
+    source_document: DocumentRecord | None,
+    *,
+    attempt_id: UUID,
+    expected_payload: PerformanceExtractedPayload | None = None,
+) -> bool:
+    return bool(
+        report is not None
+        and source_document is not None
+        and report.status is PerformanceReportStatus.EXTRACTED
+        and report.extracted_payload is not None
+        and (expected_payload is None or report.extracted_payload == expected_payload)
+        and report.current_revision_id is None
+        and report.revision_count == 0
+        and report.extraction_attempt_id == attempt_id
+        and source_document.id == report.source_document_id
+        and source_document.contract_id == report.contract_id
+        and source_document.type is DocumentType.PERFORMANCE_REPORT
+        and source_document.parse_status is DocumentParseStatus.COMPLETED
+    )
+
+
+def _is_processing_attempt(
+    report: PerformanceReportAccess | None,
+    source_document: DocumentRecord | None,
+    *,
+    attempt_id: UUID,
+) -> bool:
+    return bool(
+        report is not None
+        and source_document is not None
+        and report.status is PerformanceReportStatus.UPLOADED
+        and report.extracted_payload is None
+        and report.current_revision_id is None
+        and report.revision_count == 0
+        and report.extraction_attempt_id == attempt_id
+        and source_document.id == report.source_document_id
+        and source_document.contract_id == report.contract_id
+        and source_document.type is DocumentType.PERFORMANCE_REPORT
+        and source_document.parse_status is DocumentParseStatus.PROCESSING
+    )
+
+
+def _is_failed_attempt(
+    report: PerformanceReportAccess | None,
+    source_document: DocumentRecord | None,
+    *,
+    attempt_id: UUID,
+    document_parse_status: DocumentParseStatus,
+) -> bool:
+    return bool(
+        report is not None
+        and source_document is not None
+        and report.status is PerformanceReportStatus.UPLOADED
+        and report.extracted_payload is None
+        and report.current_revision_id is None
+        and report.revision_count == 0
+        and report.extraction_attempt_id == attempt_id
+        and source_document.id == report.source_document_id
+        and source_document.contract_id == report.contract_id
+        and source_document.type is DocumentType.PERFORMANCE_REPORT
+        and source_document.parse_status is document_parse_status
+    )
+
+
+def _is_terminal_failed_attempt(
+    report: PerformanceReportAccess | None,
+    source_document: DocumentRecord | None,
+    *,
+    attempt_id: UUID,
+) -> bool:
+    return any(
+        _is_failed_attempt(
+            report,
+            source_document,
+            attempt_id=attempt_id,
+            document_parse_status=status,
+        )
+        for status in (DocumentParseStatus.FAILED, DocumentParseStatus.COMPLETED)
+    )
+
+
+def _extracted_snapshot(report: PerformanceReportAccess) -> PerformanceReportExtracted:
+    if (
+        report.status is not PerformanceReportStatus.EXTRACTED
+        or report.extracted_payload is None
+        or report.current_revision_id is not None
+        or report.revision_count != 0
+        or report.created_at is None
+        or report.updated_at is None
+    ):
+        raise _PerformanceExtractionRecoveryRequired(
+            "성과 추출 결과의 공개 snapshot이 완전하지 않습니다."
+        )
+    return PerformanceReportExtracted(
+        id=report.id,
+        contract_id=report.contract_id,
+        period=report.period,
+        source_document_id=report.source_document_id,
+        status=PerformanceReportStatus.EXTRACTED,
+        extracted_payload=report.extracted_payload,
+        current_revision=None,
+        revision_count=0,
+        revisions=[],
+        created_at=report.created_at,
+        updated_at=report.updated_at,
+    )
+
+
+def _success_outcome(
+    report: PerformanceReportExtracted,
+    *,
+    request_id: str,
+) -> IdempotentOutcome[_StoredExtractionResponse]:
+    stored = _StoredExtractionResponse(
+        outcome="SUCCESS",
+        report=report,
+        request_id=request_id,
+    )
+    return IdempotentOutcome(
+        status_code=200,
+        response=stored,
+        replay_payload=_stored_response_payload(stored),
+    )
+
+
+def _failure_outcome(*, request_id: str) -> IdempotentOutcome[_StoredExtractionResponse]:
+    stored = _StoredExtractionResponse(
+        outcome="FAILED",
+        report=None,
+        request_id=request_id,
+    )
+    return IdempotentOutcome(
+        status_code=502,
+        response=stored,
+        replay_payload=_stored_response_payload(stored),
+    )
+
+
 def _stored_response_payload(response: _StoredExtractionResponse) -> dict[str, Any]:
     if response.outcome == "FAILED":
         return {
             "outcome": "FAILED",
             "error_code": ErrorCode.REPORT_EXTRACT_FAILED.value,
+            "request_id": response.request_id,
         }
     if response.report is None:
         raise RuntimeError("Successful extraction is missing its report.")
     return {
         "outcome": "SUCCESS",
-        "report": _report_replay_payload(response.report),
+        "report": response.report.model_dump(mode="json"),
+        "request_id": response.request_id,
     }
 
 
 def _stored_response_from_payload(payload: dict[str, Any]) -> _StoredExtractionResponse:
     outcome = payload.get("outcome")
+    request_id = payload.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        raise ValueError("Stored extraction request ID is invalid.")
     if outcome == "FAILED":
         if payload.get("error_code") != ErrorCode.REPORT_EXTRACT_FAILED.value:
             raise ValueError("Stored extraction failure code is invalid.")
-        return _StoredExtractionResponse(outcome="FAILED", report=None)
+        return _StoredExtractionResponse(
+            outcome="FAILED",
+            report=None,
+            request_id=request_id,
+        )
     if outcome != "SUCCESS" or not isinstance(payload.get("report"), Mapping):
         raise ValueError("Stored extraction response is invalid.")
     return _StoredExtractionResponse(
         outcome="SUCCESS",
-        report=_report_from_replay_payload(payload["report"]),
+        report=PerformanceReportExtracted.model_validate(payload["report"]),
+        request_id=request_id,
     )
-
-
-def _report_replay_payload(report: PerformanceReportAccess) -> dict[str, Any]:
-    return {
-        "id": str(report.id),
-        "contract_id": str(report.contract_id),
-        "period": report.period,
-        "source_document_id": str(report.source_document_id),
-        "status": report.status.value,
-        "extracted_payload": (
-            report.extracted_payload.model_dump(mode="json")
-            if report.extracted_payload is not None
-            else None
-        ),
-        "current_revision_id": (
-            str(report.current_revision_id) if report.current_revision_id is not None else None
-        ),
-        "revision_count": report.revision_count,
-        "extraction_attempt_id": (
-            str(report.extraction_attempt_id)
-            if report.extraction_attempt_id is not None
-            else None
-        ),
-        "extraction_started_at": _datetime_payload(report.extraction_started_at),
-        "created_at": _datetime_payload(report.created_at),
-        "updated_at": _datetime_payload(report.updated_at),
-    }
-
-
-def _report_from_replay_payload(payload: Mapping[str, Any]) -> PerformanceReportAccess:
-    extracted = payload.get("extracted_payload")
-    return PerformanceReportAccess(
-        id=UUID(str(payload["id"])),
-        contract_id=UUID(str(payload["contract_id"])),
-        period=str(payload["period"]),
-        source_document_id=UUID(str(payload["source_document_id"])),
-        status=PerformanceReportStatus(str(payload["status"])),
-        extracted_payload=(
-            PerformanceExtractedPayload.model_validate(extracted)
-            if extracted is not None
-            else None
-        ),
-        current_revision_id=(
-            UUID(str(payload["current_revision_id"]))
-            if payload.get("current_revision_id") is not None
-            else None
-        ),
-        revision_count=int(payload["revision_count"]),
-        extraction_attempt_id=(
-            UUID(str(payload["extraction_attempt_id"]))
-            if payload.get("extraction_attempt_id") is not None
-            else None
-        ),
-        extraction_started_at=_datetime_from_payload(payload.get("extraction_started_at")),
-        created_at=_datetime_from_payload(payload.get("created_at")),
-        updated_at=_datetime_from_payload(payload.get("updated_at")),
-    )
-
-
-def _datetime_payload(value: datetime | None) -> str | None:
-    return value.isoformat() if value is not None else None
-
-
-def _datetime_from_payload(value: object) -> datetime | None:
-    if value is None:
-        return None
-    parsed = datetime.fromisoformat(str(value))
-    if parsed.tzinfo is None:
-        raise ValueError("Stored extraction timestamp must be timezone-aware.")
-    return parsed.astimezone(UTC)

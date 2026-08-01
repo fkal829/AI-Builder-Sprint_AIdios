@@ -212,7 +212,7 @@ class PerformanceReportUploadRepository(Protocol):
     ) -> PerformanceReportUploadResult: ...
 
 
-class PerformanceExtractionRepository(Protocol):
+class PerformanceExtractionRepository(PerformanceAccessRepository, Protocol):
     """Atomic boundary for one explicit performance-report extraction attempt."""
 
     async def claim_performance_report_extraction(

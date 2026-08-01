@@ -23,3 +23,15 @@ class ErrorCode(StrEnum):
     REPORT_EXTRACT_FAILED = "REPORT_EXTRACT_FAILED"
     NOT_FOUND = "NOT_FOUND"
     VALIDATION_ERROR = "VALIDATION_ERROR"
+
+
+INTERNAL_ONLY_ERROR_CODES = frozenset(
+    {
+        ErrorCode.WEBHOOK_DUPLICATED,
+        ErrorCode.ADJUSTMENT_TOKEN_SCOPE_INVALID,
+        ErrorCode.OBLIGATION_TOKEN_SCOPE_INVALID,
+    }
+)
+PUBLIC_ERROR_CODE_VALUES = tuple(
+    code.value for code in ErrorCode if code not in INTERNAL_ONLY_ERROR_CODES
+)

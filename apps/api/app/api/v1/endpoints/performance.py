@@ -11,20 +11,23 @@ from app.api.dependencies import (
     get_current_owner_id,
     get_performance_aggregation_service,
     get_performance_confirmation_service,
+    get_performance_report_extraction_service,
     get_performance_report_upload_service,
 )
-from app.core.exceptions import InvalidDocument
+from app.core.exceptions import InvalidDocument, PerformanceReportExtractFailed
 from app.core.http import request_id
-from app.schemas.common import ApiError, ApiResponse
+from app.schemas.common import ApiError, ErrorResponse
 from app.schemas.performance import (
-    ContractPerformance,
+    ContractPerformanceResponse,
     PerformanceReportConfirmation,
-    PerformanceReportConfirmed,
-    PerformanceReportCreated,
+    PerformanceReportConfirmedResponse,
+    PerformanceReportCreatedResponse,
+    PerformanceReportExtractedResponse,
 )
 from app.services.documents import read_upload_content
 from app.services.performance_aggregation import PerformanceAggregationService
 from app.services.performance_confirmation import PerformanceConfirmationService
+from app.services.performance_extraction import PerformanceReportExtractionService
 from app.services.performance_upload import PerformanceReportUploadService
 
 router = APIRouter()
@@ -69,7 +72,7 @@ PERFORMANCE_REPORT_UPLOAD_OPENAPI = {
 
 @router.post(
     "/{contract_id}/performance-reports",
-    response_model=ApiResponse[PerformanceReportCreated],
+    response_model=PerformanceReportCreatedResponse,
     status_code=201,
     openapi_extra=PERFORMANCE_REPORT_UPLOAD_OPENAPI,
     responses={
@@ -78,27 +81,27 @@ PERFORMANCE_REPORT_UPLOAD_OPENAPI = {
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         401: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "인증 실패",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         404: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "계약을 찾을 수 없음",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         409: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "멱등·월 중복 또는 계약 상태 충돌",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         422: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "리포트 파일 또는 요청 검증 실패",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         503: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "private Storage 또는 업로드 저장 기반 장애",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
@@ -115,7 +118,7 @@ async def create_performance_report(
         PerformanceReportUploadService,
         Depends(get_performance_report_upload_service),
     ],
-) -> ApiResponse[PerformanceReportCreated] | JSONResponse:
+) -> PerformanceReportCreatedResponse | JSONResponse:
     current_request_id = request_id(request)
     uploads_to_close: list[StarletteUploadFile] = [file]
     try:
@@ -148,7 +151,7 @@ async def create_performance_report(
     if result.replayed:
         request.state.request_id = result.request_id
     if result.error_code is not None:
-        envelope = ApiResponse[None](
+        envelope = ErrorResponse(
             data=None,
             error=ApiError(
                 code=result.error_code.value,
@@ -162,7 +165,81 @@ async def create_performance_report(
         )
     if result.report is None:
         raise RuntimeError("성과 리포트 업로드 응답이 없습니다.")
-    return ApiResponse(
+    return PerformanceReportCreatedResponse(
+        data=result.report,
+        error=None,
+        request_id=result.request_id,
+    )
+
+
+@router.post(
+    "/{contract_id}/performance-reports/{report_id}/extract",
+    response_model=PerformanceReportExtractedResponse,
+    summary="광고효과 리포트 지표 추출",
+    responses={
+        200: {
+            "description": "근거가 연결된 광고효과 지표 후보 추출 완료",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        401: {
+            "model": ErrorResponse,
+            "description": "인증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "계약 또는 리포트를 찾을 수 없음",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": "멱등·계약 상태·리포트 상태 또는 활성 추출 충돌",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "경로 또는 Idempotency-Key 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        502: {
+            "model": ErrorResponse,
+            "description": "Upstage Parse, Solar 또는 strict 결과 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "private Storage 또는 추출 저장 기반 장애",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+    },
+)
+async def extract_performance_report(
+    request: Request,
+    contract_id: UUID,
+    report_id: UUID,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[
+        PerformanceReportExtractionService,
+        Depends(get_performance_report_extraction_service),
+    ],
+) -> PerformanceReportExtractedResponse | JSONResponse:
+    try:
+        result = await service.extract(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            report_id=report_id,
+            idempotency_key=idempotency_key,
+            request_id=request_id(request),
+        )
+    except PerformanceReportExtractFailed as error:
+        if error.request_id is not None:
+            request.state.request_id = error.request_id
+        raise
+    request.state.request_id = result.request_id
+    if result.report is None:
+        raise RuntimeError("성과 리포트 추출 응답이 없습니다.")
+    return PerformanceReportExtractedResponse(
         data=result.report,
         error=None,
         request_id=result.request_id,
@@ -171,29 +248,29 @@ async def create_performance_report(
 
 @router.patch(
     "/{contract_id}/performance-reports/{report_id}",
-    response_model=ApiResponse[PerformanceReportConfirmed],
+    response_model=PerformanceReportConfirmedResponse,
     responses={
         200: {
             "description": "최초 확정 또는 정정된 광고효과 리포트",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         401: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "인증 실패",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         404: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "계약 또는 리포트를 찾을 수 없음",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         409: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "revision 충돌, 정정 의존성 또는 상태 충돌",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         422: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "요청 검증 실패",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
@@ -210,41 +287,43 @@ async def confirm_performance_report(
         PerformanceConfirmationService,
         Depends(get_performance_confirmation_service),
     ],
-) -> ApiResponse[PerformanceReportConfirmed]:
-    confirmed = await service.confirm(
+) -> PerformanceReportConfirmedResponse:
+    result = await service.confirm(
         owner_id=owner_id,
         contract_id=contract_id,
         report_id=report_id,
         idempotency_key=idempotency_key,
         payload=payload,
-    )
-    return ApiResponse(
-        data=confirmed,
-        error=None,
         request_id=request_id(request),
+    )
+    request.state.request_id = result.request_id
+    return PerformanceReportConfirmedResponse(
+        data=result.report,
+        error=None,
+        request_id=result.request_id,
     )
 
 
 @router.get(
     "/{contract_id}/performance",
-    response_model=ApiResponse[ContractPerformance],
+    response_model=ContractPerformanceResponse,
     responses={
         200: {
             "description": "최신 확정값 집계와 append-only 이력",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         401: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "인증 실패",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         404: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "계약을 찾을 수 없음",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
         422: {
-            "model": ApiResponse[None],
+            "model": ErrorResponse,
             "description": "요청 검증 실패",
             "headers": NO_STORE_RESPONSE_HEADERS,
         },
@@ -258,12 +337,12 @@ async def get_contract_performance(
         PerformanceAggregationService,
         Depends(get_performance_aggregation_service),
     ],
-) -> ApiResponse[ContractPerformance]:
+) -> ContractPerformanceResponse:
     performance = await service.get_contract_performance(
         owner_id=owner_id,
         contract_id=contract_id,
     )
-    return ApiResponse(
+    return ContractPerformanceResponse(
         data=performance,
         error=None,
         request_id=request_id(request),

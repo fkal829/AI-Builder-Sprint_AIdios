@@ -902,7 +902,6 @@ paths:
     post:
       summary: 광고효과 리포트 지표 추출
       operationId: extractPerformanceReport
-      x-implementation-status: planned
       tags: [performance]
       description: |
         UPLOADED 리포트 원본을 Upstage Document Parse로 읽고 Solar strict schema로
@@ -931,6 +930,7 @@ paths:
         "409": {$ref: "#/components/responses/PerformanceReportExtractConflict"}
         "422": {$ref: "#/components/responses/NoStoreValidationError"}
         "502": {$ref: "#/components/responses/NoStoreReportExtractFailed"}
+        "503": {$ref: "#/components/responses/NoStoreExternalServiceUnavailable"}
   /contracts/{contract_id}/performance:
     parameters:
       - $ref: "#/components/parameters/ContractId"
@@ -1166,7 +1166,7 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
     NoStoreExternalServiceUnavailable:
-      description: private Storage 또는 리포트 업로드 기반 서비스를 사용할 수 없음
+      description: private Storage 또는 성과 리포트 영속 기반 서비스를 사용할 수 없음
       headers:
         Cache-Control:
           $ref: "#/components/headers/NoStore"

@@ -63,9 +63,7 @@ async def performance_context():
         )
 
     app.dependency_overrides[get_supabase_adapter] = override_adapter
-    app.dependency_overrides[get_performance_confirmation_service] = (
-        override_confirmation_service
-    )
+    app.dependency_overrides[get_performance_confirmation_service] = override_confirmation_service
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
@@ -270,6 +268,11 @@ async def test_confirmed_report_appears_in_series_without_flags(performance_cont
     assert len(data["confirmed_series"]) == 1
     assert data["confirmed_series"][0]["period"] == "2026-07"
     assert data["confirmed_series"][0]["status"] == "CONFIRMED"
+    assert isinstance(data["confirmed_series"][0]["engagement_rate"], int | float)
+    assert isinstance(
+        data["reports"][0]["current_revision"]["engagement_rate"],
+        int | float,
+    )
     assert data["flags"] == []
     assert data["inquiry_drafts"] == []
 

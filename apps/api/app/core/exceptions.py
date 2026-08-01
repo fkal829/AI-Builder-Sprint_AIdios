@@ -76,7 +76,8 @@ class PerformanceReportExtractionInProgress(ApiException):
 
 
 class PerformanceReportExtractFailed(ApiException):
-    def __init__(self) -> None:
+    def __init__(self, *, request_id: str | None = None) -> None:
+        self.request_id = request_id
         super().__init__(
             status_code=502,
             code=ErrorCode.REPORT_EXTRACT_FAILED,

@@ -69,9 +69,7 @@ async def performance_context():
         )
 
     app.dependency_overrides[get_supabase_adapter] = override_adapter
-    app.dependency_overrides[get_performance_confirmation_service] = (
-        override_confirmation_service
-    )
+    app.dependency_overrides[get_performance_confirmation_service] = override_confirmation_service
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
@@ -277,6 +275,7 @@ async def test_first_confirmation_creates_version_one(performance_context) -> No
     assert data["status"] == "CONFIRMED"
     assert data["revision_count"] == 1
     assert data["current_revision"]["version"] == 1
+    assert isinstance(data["current_revision"]["engagement_rate"], int | float)
     assert data["current_revision"]["flags"] == []
 
 
@@ -507,6 +506,8 @@ async def test_engagement_rate_drop_detected_across_two_months(performance_conte
     flags = data["current_revision"]["flags"]
     assert len(flags) == 1
     assert flags[0]["flag_type"] == "ENGAGEMENT_RATE_DROP"
+    assert isinstance(flags[0]["previous_engagement_rate"], int | float)
+    assert isinstance(flags[0]["current_engagement_rate"], int | float)
     drafts = data["current_revision"]["inquiry_drafts"]
     assert "2026-07" in drafts[0]["text"]
     assert "2026-08" in drafts[0]["text"]
@@ -538,7 +539,9 @@ async def test_idempotent_replay_returns_identical_response_without_new_revision
 
     assert first.status_code == 200
     assert replay.status_code == 200
-    assert first.json()["data"] == replay.json()["data"]
+    assert first.json() == replay.json()
+    assert first.headers["X-Request-ID"] == replay.headers["X-Request-ID"]
+    assert first.headers["X-Request-ID"] == first.json()["requestId"]
     assert len(adapter.mock_performance_report_revisions[report_id]) == 1
 
 

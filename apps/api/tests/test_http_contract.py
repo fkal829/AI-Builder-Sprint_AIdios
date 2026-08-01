@@ -35,7 +35,7 @@ def _implemented_canonical_operations(canonical: dict):
             yield path, method, operation
 
 
-def test_canonical_openapi_marks_only_one_p2_operation_as_planned() -> None:
+def test_canonical_openapi_marks_no_operations_as_planned() -> None:
     canonical = yaml.safe_load(
         (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
             encoding="utf-8"
@@ -56,12 +56,152 @@ def test_canonical_openapi_marks_only_one_p2_operation_as_planned() -> None:
     }
 
     assert declared_statuses <= {None, "planned"}
-    assert planned == {
-        (
-            "POST",
-            "/contracts/{contract_id}/performance-reports/{report_id}/extract",
-        ): "extractPerformanceReport",
+    assert planned == {}
+
+
+def test_performance_extraction_runtime_contract_matches_canonical() -> None:
+    canonical = yaml.safe_load(
+        (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    path = "/contracts/{contract_id}/performance-reports/{report_id}/extract"
+    canonical_operation = canonical["paths"][path]["post"]
+    runtime_operation = app.openapi()["paths"][f"/api/v1{path}"]["post"]
+
+    assert runtime_operation["operationId"] == canonical_operation["operationId"]
+    assert runtime_operation["summary"] == canonical_operation["summary"]
+    assert set(runtime_operation["responses"]) == set(canonical_operation["responses"])
+    assert "requestBody" not in runtime_operation
+
+    runtime_schemas = app.openapi()["components"]["schemas"]
+    assert runtime_operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/PerformanceReportExtractedResponse"
     }
+    success_schema = runtime_schemas["PerformanceReportExtractedResponse"]
+    assert success_schema["properties"]["data"] == {
+        "$ref": "#/components/schemas/PerformanceReportExtracted"
+    }
+    assert success_schema["properties"]["error"]["type"] == "null"
+
+    for status in {"401", "404", "409", "422", "502", "503"}:
+        assert runtime_operation["responses"][status]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ErrorResponse"
+        }
+    error_schema = runtime_schemas["ErrorResponse"]
+    assert error_schema["properties"]["data"]["type"] == "null"
+    assert error_schema["properties"]["error"] == {"$ref": "#/components/schemas/ApiError"}
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "success_status", "success_schema", "data_schema"),
+    [
+        (
+            "/contracts/{contract_id}/performance-reports",
+            "post",
+            "201",
+            "PerformanceReportCreatedResponse",
+            "PerformanceReportCreated",
+        ),
+        (
+            "/contracts/{contract_id}/performance-reports/{report_id}/extract",
+            "post",
+            "200",
+            "PerformanceReportExtractedResponse",
+            "PerformanceReportExtracted",
+        ),
+        (
+            "/contracts/{contract_id}/performance-reports/{report_id}",
+            "patch",
+            "200",
+            "PerformanceReportConfirmedResponse",
+            "PerformanceReportConfirmed",
+        ),
+        (
+            "/contracts/{contract_id}/performance",
+            "get",
+            "200",
+            "ContractPerformanceResponse",
+            "ContractPerformance",
+        ),
+    ],
+)
+def test_performance_runtime_response_schemas_match_canonical(
+    path: str,
+    method: str,
+    success_status: str,
+    success_schema: str,
+    data_schema: str,
+) -> None:
+    canonical = yaml.safe_load(
+        (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    runtime = app.openapi()
+    canonical_operation = canonical["paths"][path][method]
+    runtime_operation = runtime["paths"][f"/api/v1{path}"][method]
+
+    for status, canonical_response in canonical_operation["responses"].items():
+        if "$ref" in canonical_response:
+            response_name = canonical_response["$ref"].rsplit("/", 1)[1]
+            canonical_response = canonical["components"]["responses"][response_name]
+        expected_schema = canonical_response["content"]["application/json"]["schema"]
+        actual_schema = runtime_operation["responses"][status]["content"]["application/json"][
+            "schema"
+        ]
+        assert actual_schema == expected_schema, (method, path, status)
+
+    assert runtime_operation["responses"][success_status]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": f"#/components/schemas/{success_schema}"}
+    generated_success = runtime["components"]["schemas"][success_schema]
+    assert set(generated_success["required"]) == {"data", "error", "requestId"}
+    assert generated_success["properties"]["data"] == {
+        "$ref": f"#/components/schemas/{data_schema}"
+    }
+    assert generated_success["properties"]["error"]["type"] == "null"
+
+    generated_error = runtime["components"]["schemas"]["ErrorResponse"]
+    assert set(generated_error["required"]) == {"data", "error", "requestId"}
+    assert generated_error["properties"]["data"]["type"] == "null"
+    assert generated_error["properties"]["error"] == {"$ref": "#/components/schemas/ApiError"}
+
+
+def test_runtime_api_error_codes_match_canonical_public_enum() -> None:
+    canonical = yaml.safe_load(
+        (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    canonical_codes = canonical["components"]["schemas"]["ApiError"]["properties"]["code"]["enum"]
+    runtime_codes = app.openapi()["components"]["schemas"]["ApiError"]["properties"]["code"]["enum"]
+
+    assert runtime_codes == canonical_codes
+    with pytest.raises(ValidationError):
+        ApiError(code="INVALID", message="허용되지 않는 공개 오류 코드")
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "field_name"),
+    [
+        ("PerformanceReportRevision", "engagement_rate"),
+        ("PerformanceConfirmedSeriesPoint", "engagement_rate"),
+        ("PerformanceFlag", "previous_engagement_rate"),
+        ("PerformanceFlag", "current_engagement_rate"),
+    ],
+)
+def test_runtime_engagement_rates_are_numeric_in_response_schema(
+    schema_name: str,
+    field_name: str,
+) -> None:
+    field_schema = app.openapi()["components"]["schemas"][schema_name]["properties"][field_name]
+    variants = field_schema["anyOf"]
+
+    assert {variant["type"] for variant in variants} == {"number", "null"}
+    numeric_schema = next(variant for variant in variants if variant["type"] == "number")
+    assert numeric_schema["minimum"] == 0
+    assert numeric_schema["x-decimal-places"] == 6
 
 
 def test_performance_upload_runtime_multipart_schema_matches_canonical_constraints() -> None:
@@ -203,7 +343,7 @@ def test_api_response_accepts_success_and_error_envelopes() -> None:
     ("data", "error"),
     [
         (None, None),
-        ({"ok": True}, ApiError(code="INVALID", message="잘못된 응답")),
+        ({"ok": True}, ApiError(code="VALIDATION_ERROR", message="잘못된 응답")),
     ],
 )
 def test_api_response_rejects_ambiguous_envelopes(data, error) -> None:

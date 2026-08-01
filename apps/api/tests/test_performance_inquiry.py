@@ -118,9 +118,7 @@ def test_engagement_rate_drop_template_is_an_exact_match() -> None:
         current_rate=Decimal("0.030000"),
     )
 
-    text = render_inquiry_draft_text(
-        flag=flag, current_period="2026-08", previous_period="2026-07"
-    )
+    text = render_inquiry_draft_text(flag=flag, current_period="2026-08", previous_period="2026-07")
 
     assert text == (
         "2026-07 반응률 4.00%에서 2026-08 3.00%로 낮아진 것으로 계산됩니다. "
@@ -157,9 +155,7 @@ def test_engagement_rate_percent_formatting_and_rounding_boundary(
     # side is being exercised.
     flag = make_drop_flag(previous_rate=Decimal("0.500000"), current_rate=rate)
 
-    text = render_inquiry_draft_text(
-        flag=flag, current_period="2026-08", previous_period="2026-07"
-    )
+    text = render_inquiry_draft_text(flag=flag, current_period="2026-08", previous_period="2026-07")
 
     assert f"{expected_percent}%" in text
 

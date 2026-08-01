@@ -54,11 +54,18 @@ class PerformanceReportAIExtractor:
 
         try:
             content = await self._storage.download_private_object(path=source_document.storage_path)
+        except ExternalStorageFailure:
+            # Storage availability is an infrastructure failure, not evidence that
+            # Upstage failed to parse the document. Keep the boundary distinct so
+            # the public orchestration can return a retryable 503.
+            raise
+
+        try:
             parsed_document = await self._parser.parse_document(
                 content=content,
                 content_type=source_document.content_type,
             )
-        except (ExternalStorageFailure, UpstageDocumentParseError) as error:
+        except UpstageDocumentParseError as error:
             raise PerformanceDocumentParseError(
                 "광고효과 리포트 원본 구조 분석에 실패했습니다."
             ) from error

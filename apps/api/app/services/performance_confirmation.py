@@ -10,6 +10,7 @@ prior read — a stale read here is exactly the race the lock exists to catch.
 """
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -20,6 +21,7 @@ from app.core.enums import (
     PerformanceReportStatus,
 )
 from app.core.exceptions import (
+    IdempotencyConflict,
     PerformanceReportCorrectionDependencyExists,
     PerformanceReportRevisionConflict,
     ResourceNotFound,
@@ -46,6 +48,20 @@ from app.services.performance import PerformanceAccessGuard
 from app.services.state_machine import InvalidStatusTransition
 
 _SHORTFALL_BASIS_FIELDS = (ExtractedField.CONTENT_QUANTITY, ExtractedField.POSTING_FREQUENCY)
+
+
+@dataclass(frozen=True)
+class _StoredConfirmationResponse:
+    report: PerformanceReportConfirmed
+    request_id: str
+
+
+@dataclass(frozen=True)
+class PerformanceConfirmationExecution:
+    status_code: int
+    report: PerformanceReportConfirmed
+    request_id: str
+    replayed: bool
 
 
 class PerformanceConfirmationService:
@@ -75,18 +91,25 @@ class PerformanceConfirmationService:
         report_id: UUID,
         idempotency_key: UUID,
         payload: PerformanceReportConfirmation,
-    ) -> PerformanceReportConfirmed:
-        async def perform() -> IdempotentOutcome[PerformanceReportConfirmed]:
+        request_id: str | None = None,
+    ) -> PerformanceConfirmationExecution:
+        current_request_id = request_id or f"req_{idempotency_key.hex}"
+
+        async def perform() -> IdempotentOutcome[_StoredConfirmationResponse]:
             confirmed = await self._perform_confirm(
                 owner_id=owner_id,
                 contract_id=contract_id,
                 report_id=report_id,
                 payload=payload,
             )
+            stored = _StoredConfirmationResponse(
+                report=confirmed,
+                request_id=current_request_id,
+            )
             return IdempotentOutcome(
                 status_code=200,
-                response=confirmed,
-                replay_payload=confirmed.model_dump(mode="json"),
+                response=stored,
+                replay_payload=_stored_confirmation_response_payload(stored),
             )
 
         result = await self._idempotency.execute(
@@ -96,9 +119,14 @@ class PerformanceConfirmationService:
             key=idempotency_key,
             request_payload=payload,
             perform=perform,
-            replay=lambda stored: PerformanceReportConfirmed.model_validate(stored),
+            replay=_stored_confirmation_response_from_payload,
         )
-        return result.response
+        return PerformanceConfirmationExecution(
+            status_code=result.status_code,
+            report=result.response.report,
+            request_id=result.response.request_id,
+            replayed=result.replayed,
+        )
 
     async def _perform_confirm(
         self,
@@ -263,6 +291,32 @@ class PerformanceConfirmationService:
         if value.tzinfo is None:
             raise ValueError("광고효과 리포트 확정 시각은 시간대 정보가 필요합니다.")
         return value.astimezone(UTC)
+
+
+def _stored_confirmation_response_payload(
+    response: _StoredConfirmationResponse,
+) -> dict[str, object]:
+    return {
+        "report": response.report.model_dump(mode="json"),
+        "requestId": response.request_id,
+    }
+
+
+def _stored_confirmation_response_from_payload(
+    payload: dict[str, object],
+) -> _StoredConfirmationResponse:
+    raw_report = payload.get("report")
+    stored_request_id = payload.get("requestId")
+    if (
+        not isinstance(raw_report, dict)
+        or not isinstance(stored_request_id, str)
+        or not stored_request_id.startswith("req_")
+    ):
+        raise IdempotencyConflict("저장된 광고효과 리포트 확정 응답이 올바르지 않습니다.")
+    return _StoredConfirmationResponse(
+        report=PerformanceReportConfirmed.model_validate(raw_report),
+        request_id=stored_request_id,
+    )
 
 
 def _immediately_preceding_month(period: str) -> str:

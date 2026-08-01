@@ -9,10 +9,12 @@ HTTP endpoint와 요청·응답 스키마의
 기준은 `packages/contracts/openapi/openapi.yaml`이다. 모든 endpoint의 Base path는
 `/api/v1`이다. 이 문서의 파일 경로 표기는 모두 저장소 루트 기준이다.
 
-1~13절은 현재 P0 구현 계약이고 14절은 기획안 6.14의 P2-0 확정 설계다. 14절 중
-16.1 공통 접근 계층, 업로드·추출 원자 RPC와 성과 지표 AI 경계, 16.2 리포트 업로드
-FastAPI endpoint는 구현됐다. 16.3~16.5 세 endpoint는 아직 `planned`이며, 현재 상태를
-전체 P2 완료로 해석하지 않는다.
+1~13절은 현재 P0 구현 계약이고 14절은 기획안 6.14의 P2-0 확정 설계다. 14절의
+16.1 공통 접근 계층과 영속 기반, 16.2 리포트 업로드, 16.3 Upstage·Solar 지표
+추출, 16.4 최초 확정·정정, 16.5 월별 집계·계약 대조 FastAPI endpoint와 영속
+runtime은 모두 구현됐다. Upstage·Solar live Adapter 호출은 비식별 합성 PDF로
+검증했으며, 배포된 FastAPI와 live Supabase를 함께 거치는 E2E는 별도 운영
+검증으로 남긴다.
 
 기획안의 제품 기능과 P0 범위는 유지하되, 구현 담당만 최신 팀 결정에 따라 D의 백엔드
 항목을 B·C로 재배정한다.
@@ -666,10 +668,10 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 ## 14. 6.14 광고효과 P2-0 확정 데이터 계약
 
 이 절은 `docs/api-명세서.md` 16~17절의 확정값을 영속성·보안·상태 관점에서
-고정한다. 광고효과 기능은 P2이며 16.1 공통 접근 계층, 기반 migration, 16.2 업로드
-endpoint, 16.4 최초 확정·정정 endpoint(revision·flag·문의 문안 원자 저장 포함)와
-16.5 월별 기록·집계·계약 대조 조회 endpoint는 구현됐다. 16.3 추출 endpoint는 아직
-미구현이다. 기존 P0 API, 전역 `/dashboard` 응답과 계약 상태 머신은 변경하지 않는다.
+고정한다. 광고효과 기능은 P2이며 16.1 공통 접근 계층과 기반 migration, 16.2 업로드,
+16.3 Upstage·Solar 지표 추출, 16.4 최초 확정·정정(revision·flag·문의 문안 원자 저장
+포함), 16.5 월별 기록·집계·계약 대조 조회 endpoint와 영속 runtime은 모두
+구현됐다. 기존 P0 API, 전역 `/dashboard` 응답과 계약 상태 머신은 변경하지 않는다.
 
 ### 14.1 소유권·업무 범위
 
@@ -751,7 +753,9 @@ Document를 `FAILED`, report를 `UPLOADED`로 유지한다. Solar 매핑만 실�
 않으므로 명시적 재시도는 Document Parse부터 다시 실행한다.
 
 timeout·HTTP·Parse·AI 스키마 실패를 고정 샘플로 대체하지 않고
-`502 REPORT_EXTRACT_FAILED`를 반환한다. 추출 후보 각 필드는 `value`, `source_page`,
+`502 REPORT_EXTRACT_FAILED`를 반환한다. private Storage·DB·멱등 저장 기반을
+사용할 수 없으면 `503 EXTERNAL_SERVICE_UNAVAILABLE`을 반환하고 raw 예외를
+노출하지 않는다. 추출 후보 각 필드는 `value`, `source_page`,
 `source_text`, `confidence`, `verification_status`를 가진다. 원문에서 찾지 못한
 `published_content_count`나 다른 지표를 행·URL 수로 추정하지 않고 `NOT_FOUND`로 둔다.
 
@@ -816,12 +820,12 @@ terminal 값을 전이하거나 덮어쓰지 않고 새 revision을 추가한다
 각 월의 최신 non-superseded revision만 한 번 포함하고 과거 revision은 감사 이력으로
 보존한다.
 
-공통 코드에는 `PerformanceReportStatus`와 별도 계획값
-`PerformanceStateEntityType.PERFORMANCE_REPORT`를 선언하지만 16.4 revision runtime·
-migration 전에는 기존 `StateEntityType`과 `packages/contracts/state-machines.json`에
-report 전이를 병합하지 않는다. 현재 state transition RPC가 지원하지 않는 값을 실행
-가능 enum처럼 노출하지 않기 위함이며, revision의 terminal 상태와 report 현재
-projection 갱신을 분리한 저장 규칙을 구현할 때 함께 추가한다.
+공통 코드는 `PerformanceReportStatus`와
+`PerformanceStateEntityType.PERFORMANCE_REPORT`를 별도로 선언한다. 16.4는 범용
+`StateEntityType`·`packages/contracts/state-machines.json`의 전이를 우회하지 않고, 전용
+`confirm_performance_report_with_audit` RPC에서 append-only revision과 report의 현재
+projection을 함께 갱신한다. 이 분리는 과거 revision의 terminal 불변성과 현재
+projection의 `CONFIRMED`·`FLAGGED` 변경을 동시에 보존한다.
 
 ### 14.6 revision별 flag·계약 근거·문의 snapshot
 
@@ -862,8 +866,9 @@ PERFORMANCE_REPORT_CORRECTED, PERFORMANCE_REPORT_EXTRACTION_RECOVERED
 
 16.1 기반 migration에서 DB `audit_events.event_type` CHECK를 확장하고 위 6개를
 공통 코드와 OpenAPI의 기존 `AuditEventType`에 병합했다. 업로드·추출 완료·stale
-복구 이벤트는 원자 RPC에서 생성하고 멱등 재생 시 중복 생성하지 않는다.
-확정·flag·정정 이벤트는 16.4 원자 RPC 구현 전까지 생성하지 않는다.
+복구 이벤트는 각 원자 RPC에서 생성하고, 확정·flag·정정 이벤트는
+16.4 `confirm_performance_report_with_audit` RPC에서 revision·flag·문의 문안과 함께
+원자적으로 생성한다. 멱등 재생은 어떤 이벤트도 중복 생성하지 않는다.
 
 업로드는 Document·report·감사 이벤트, 추출은 현재 attempt의 payload·상태·감사 이벤트,
 확정·정정은 revision·flag·문의 snapshot·현재 projection·감사 이벤트를 각각 원자적으로
@@ -881,11 +886,11 @@ GET은 상태·revision·flag·감사 이벤트를 변경하지 않고 AI나 문
 ### 14.8 구현 상태
 
 이 절은 P2-0 공개·영속 계약을 확정한다. 현재 16.1의 owner-scoped repository·접근
-guard·멱등 fingerprint·`no-store`, `performance_reports` 기반, 업로드·추출 원자
-RPC와 비공개 AI 조합기, 16.2 FastAPI 업로드 endpoint까지 구현됐다.
-16.3~16.5 FastAPI endpoint와 확정·집계 영속 runtime은 아직 구현되지 않았다. 다음을
-모두 검증하기 전 전체 P2 완료로
-표시하지 않는다.
+guard·멱등 fingerprint·`no-store`, `performance_reports` 기반과 추출·확정 migration,
+비공개 AI 조합기, 16.2~16.5 네 개 FastAPI endpoint와 영속 runtime은 모두 구현됐다.
+canonical OpenAPI에 `planned` 광고효과 operation은 남아 있지 않다. 아래 항목은 계속
+유지해야 할 회귀 검증이다. Upstage·Solar live Adapter 호출은 검증했고,
+배포된 FastAPI·live Supabase 통합 E2E만 별도 운영 검증으로 남는다.
 
 - 계약·월·source Document 고유성, 소유권과 private 접근
 - 업로드 응답 유실·명시적 거부 롤백·불명확 커밋 보존과 추출 claim·15분 stale 복구

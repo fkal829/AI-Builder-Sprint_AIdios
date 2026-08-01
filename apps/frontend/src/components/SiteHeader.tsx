@@ -9,9 +9,9 @@ import { DEMO_CONTRACT_ID } from "@/lib/mock";
 const NAV = [
   { key: "contracts", label: "내 계약", href: "/dashboard" },
   {
-    key: "obligations",
+    key: "manage",
     label: "이행 관리",
-    href: `/contracts/${DEMO_CONTRACT_ID}/obligations`,
+    href: `/contracts/${DEMO_CONTRACT_ID}/performance`,
   },
   {
     key: "renewal",
@@ -24,7 +24,8 @@ const NAV = [
 
 function activeKey(pathname: string): string {
   if (pathname.startsWith("/performance")) return "performance";
-  if (pathname.includes("/obligations")) return "obligations";
+  // 계약별 관리 화면(/contracts/{id}/performance)은 '이행 관리'로 표시
+  if (pathname.includes("/performance")) return "manage";
   if (pathname.includes("/renewal")) return "renewal";
   if (pathname.startsWith("/dashboard") || pathname.startsWith("/contracts"))
     return "contracts";

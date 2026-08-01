@@ -163,7 +163,7 @@ function contractHref(contract: ContractSummary): string {
     return `/contracts/${contract.id}/signature`;
   }
   if (contract.status === "SIGNED" || contract.status === "IN_PROGRESS") {
-    return `/contracts/${contract.id}/obligations`;
+    return `/contracts/${contract.id}/performance`;
   }
   if (contract.status === "COMPLETED" || contract.status === "RENEWAL_DUE") {
     return `/contracts/${contract.id}/renewal`;

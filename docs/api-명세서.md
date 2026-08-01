@@ -561,6 +561,18 @@ strict JSON Schema와 Pydantic으로 검증하며 Solar가 신호, 근거, 계�
     "error_code": null,
     "result": {
       "contract_id": "contract_uuid",
+      "document_clauses": [
+        {
+          "id": "clause_uuid",
+          "document_id": "document_uuid",
+          "ordinal": 1,
+          "heading": "제1조",
+          "title": "목적",
+          "source_page": 1,
+          "source_text": "제1조(목적) ...",
+          "confidence": null
+        }
+      ],
       "extracted_terms": [],
       "review_items": []
     },
@@ -571,6 +583,13 @@ strict JSON Schema와 Pydantic으로 검증하며 Solar가 신호, 근거, 계�
   "requestId": "req_123abc"
 }
 ```
+
+`document_clauses`는 주 계약 문서의 비어 있지 않은 원문을 원래 순서대로 모두 담는다.
+`제N조` 표제가 인식되면 조항 단위로 나누고, 표제 앞 머리말·페이지를 넘어 이어지는 문장·
+표제가 없는 페이지도 별도의 원문 구간으로 남겨 누락하지 않는다. `id`는 같은 문서와 같은
+원문 구간에 대해 결정적으로 생성한다. 문서 파서가 조항 단위 신뢰도를 제공하지 않으므로
+현재 `confidence`는 `null`이며, 이를 임의의 AI 확신도로 대체하지 않는다. 기존에 저장된
+분석 결과에는 이 필드가 없을 수 있으므로 클라이언트는 `review_items` 근거를 폴백으로 쓴다.
 
 각 `ExtractedTerm`은 `id`, `contract_id`, `document_id`, `source_type`, `field`,
 `value_type`, `value`, `source_page`, `source_text`, `confidence`,
@@ -668,12 +687,28 @@ AI 재실행은 사용자가 확정한 선택을 덮어쓰지 않는다. 선택 
     "review_item_uuid_1",
     "review_item_uuid_2"
   ],
+  "request_text_overrides": {
+    "review_item_uuid_1": "계약기간을 1년으로 조정해 주시기를 요청드립니다."
+  },
+  "manual_items": [
+    {
+      "document_clause_id": "document_clause_uuid_1",
+      "request_text": "결과물 승인 기한을 5영업일로 명확히 적어 주세요."
+    }
+  ],
   "expires_in_hours": 72
 }
 ```
 
-- 항목은 중복 없이 1~4개이며 `SELECTED` 상태인 `COMPROMISE`·`REQUEST`만 허용한다.
+- `review_item_ids`와 `manual_items`를 합해 중복 없이 1~4개다.
+- `review_item_ids`는 `SELECTED` 상태인 `COMPROMISE`·`REQUEST`만 허용한다.
   원안 수용인 `ACCEPT` 항목은 발송하지 않는다.
+- `request_text_overrides`는 선택 사항이며 키는 `review_item_ids`의 부분집합이어야 한다.
+  값은 사용자가 미리보기에서 직접 확인·수정한 1~1200자 문구로, 초안에 그대로 저장한다.
+- `manual_items`는 최신 완료 분석의 `document_clauses`에 실제로 존재하는 조항 ID와
+  1~1200자 요청 문구만 받는다. 제목·원문·페이지는 요청에서 받지 않고 서버의 분석
+  결과에서 다시 연결한다. 서버는 이를 `USER_SELECTED` 출처의 내부 조정 항목으로
+  저장하며, 원문 근거와 AI 검토 결과를 혼동하지 않는다.
 - 응답 `items`에는 `review_item_id`, `user_choice`, 실제 `request_text`가 들어간다.
 - 초안에는 `public_url`이 없으며 사용자가 발송 전 문구를 확인한다.
 - `expires_in_hours`는 유효기간 정책값이다. `DRAFT`의 `sent_at`, `expires_at`,

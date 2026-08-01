@@ -1,13 +1,14 @@
+import logging
 import re
 from calendar import monthrange
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import ValidationError
 
 from app.adapters.base import ContractReviewAdapter, DocumentAnalysisAdapter, ParsedDocument
-from app.adapters.solar import SOLAR_CONFIDENCE_LIMITATION
+from app.adapters.solar import SOLAR_CONFIDENCE_LIMITATION, SolarReviewError
 from app.adapters.upstage import UpstageDocumentParseError, UpstageExtractionError
 from app.core.enums import (
     AnalysisStatus,
@@ -42,6 +43,7 @@ from app.schemas.analysis import (
     Analysis,
     AnalysisStartRequest,
     AnalysisTask,
+    DocumentClause,
     ExtractedTerm,
     ExtractedTermCandidate,
     ReviewItem,
@@ -152,6 +154,14 @@ SAFETY_RESPONSIBILITY_FIELDS = {
     ExtractedField.FACILITY_DAMAGE_LIABILITY,
     ExtractedField.FALSE_ADVERTISING_LIABILITY,
 }
+
+logger = logging.getLogger(__name__)
+
+CLAUSE_HEADING_PATTERN = re.compile(
+    r"(?m)^[ \t]*(?:#{1,6}[ \t]*)?"
+    r"(?P<heading>제[ \t]*\d+[ \t]*조(?:의[ \t]*\d+)?)"
+    r"(?:[ \t]*[（(](?P<title>[^)）\n]{1,80})[)）])?"
+)
 
 
 class AnalysisPipelineFailure(RuntimeError):
@@ -308,9 +318,11 @@ class AnalysisService:
             if contract is None:
                 raise ResourceNotFound()
             documents = await self._load_task_documents(owner_id=owner_id, task=task)
-            candidates_by_document, attempt_count = await self._extract_documents_with_evaluator(
-                documents=documents
-            )
+            (
+                candidates_by_document,
+                parsed_documents,
+                attempt_count,
+            ) = await self._extract_documents_with_evaluator(documents=documents)
             all_terms: list[ExtractedTerm] = []
             for document in documents:
                 source_type = (
@@ -344,16 +356,30 @@ class AnalysisService:
                 understood=understood,
                 contract=contract,
             )
-            solar_outputs = await self.reviewer.generate_review_content(
-                items=solar_inputs,
-            )
-            result = Analysis(
-                contract_id=task.contract_id,
-                extracted_terms=all_terms,
-                review_items=_apply_solar_review_content(
+            try:
+                solar_outputs = await self.reviewer.generate_review_content(
+                    items=solar_inputs,
+                )
+                final_review_items = _apply_solar_review_content(
                     reviews=review_items,
                     outputs=solar_outputs,
+                )
+            except SolarReviewError as error:
+                logger.warning(
+                    "analysis_solar_fallback task_id=%s item_count=%d error_type=%s",
+                    task.id,
+                    len(solar_inputs),
+                    type(error).__name__,
+                )
+                final_review_items = review_items
+            result = Analysis(
+                contract_id=task.contract_id,
+                document_clauses=_build_document_clauses(
+                    document_id=task.document_id,
+                    parsed_document=parsed_documents[task.document_id],
                 ),
+                extracted_terms=all_terms,
+                review_items=final_review_items,
             )
             completed = await self.analyses.complete_analysis_with_audit(
                 task_id=task.id,
@@ -403,7 +429,11 @@ class AnalysisService:
         self,
         *,
         documents: list[DocumentRecord],
-    ) -> tuple[dict[UUID, list[ExtractedTermCandidate]], int]:
+    ) -> tuple[
+        dict[UUID, list[ExtractedTermCandidate]],
+        dict[UUID, ParsedDocument],
+        int,
+    ]:
         contents: dict[UUID, bytes] = {}
         parsed_documents: dict[UUID, ParsedDocument] = {}
         candidates_by_document: dict[UUID, dict[ExtractedField, ExtractedTermCandidate]] = {
@@ -479,6 +509,7 @@ class AnalysisService:
                 document.id: list(candidates_by_document[document.id].values())
                 for document in documents
             },
+            parsed_documents,
             used_rounds,
         )
 
@@ -496,6 +527,88 @@ def _task_from_record(record: AnalysisTaskRecord) -> AnalysisTask:
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
+
+
+def _build_document_clauses(
+    *,
+    document_id: UUID,
+    parsed_document: ParsedDocument,
+) -> list[DocumentClause]:
+    """Split the primary document deterministically without dropping non-empty source text."""
+    clauses: list[DocumentClause] = []
+
+    def append_clause(
+        *,
+        page_number: int,
+        page_index: int,
+        heading: str,
+        title: str,
+        source_text: str,
+    ) -> None:
+        cleaned_text = source_text.strip()
+        if not cleaned_text:
+            return
+        ordinal = len(clauses) + 1
+        clauses.append(
+            DocumentClause(
+                id=uuid5(
+                    NAMESPACE_URL,
+                    (
+                        "https://dandi-contract.local/documents/"
+                        f"{document_id}/clauses/{page_number}/{page_index}"
+                    ),
+                ),
+                document_id=document_id,
+                ordinal=ordinal,
+                heading=heading,
+                title=title,
+                source_page=page_number,
+                source_text=cleaned_text,
+                confidence=None,
+            )
+        )
+
+    for page in parsed_document.pages:
+        page_text = page.text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not page_text:
+            continue
+        matches = list(CLAUSE_HEADING_PATTERN.finditer(page_text))
+        page_index = 0
+        if not matches:
+            append_clause(
+                page_number=page.number,
+                page_index=page_index,
+                heading=f"{page.number}쪽 원문",
+                title="원문",
+                source_text=page_text,
+            )
+            continue
+
+        leading_text = page_text[: matches[0].start()]
+        if leading_text.strip():
+            append_clause(
+                page_number=page.number,
+                page_index=page_index,
+                heading=f"{page.number}쪽 원문",
+                title="머리말" if not clauses else "이어지는 원문",
+                source_text=leading_text,
+            )
+            page_index += 1
+
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(page_text)
+            heading = re.sub(r"[ \t]+", "", match.group("heading"))
+            title = (match.group("title") or "계약 조항").strip()
+            append_clause(
+                page_number=page.number,
+                page_index=page_index,
+                heading=heading,
+                title=title,
+                source_text=page_text[match.start() : end],
+            )
+            page_index += 1
+
+    return clauses
 
 
 def _validate_unique_fields(candidates: list[ExtractedTermCandidate]) -> None:

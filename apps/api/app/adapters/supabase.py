@@ -43,7 +43,9 @@ from app.repositories.adjustments import (
     AdjustmentRequestItemRecord,
     AdjustmentRequestRecord,
     AdjustmentResponseRecord,
+    DocumentClauseForAdjustment,
     FinalClauseRecord,
+    ManualReviewItemRecord,
     PublicAdjustmentRecord,
     ReviewItemForAdjustment,
 )
@@ -3407,16 +3409,59 @@ class SupabaseAdapter:
             raise ExternalStorageFailure("검토 항목 조회에 실패했습니다.") from error
         return [_review_item_for_adjustment_from_row(row) for row in response.data or []]
 
+    async def list_document_clauses_for_adjustment(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        document_clause_ids: Sequence[UUID],
+    ) -> Sequence[DocumentClauseForAdjustment] | None:
+        if not document_clause_ids:
+            return []
+        task = await self.get_latest_analysis_task(
+            owner_id=owner_id,
+            contract_id=contract_id,
+        )
+        if task is None:
+            return None
+        if task.status != AnalysisStatus.COMPLETED or task.result is None:
+            return []
+        requested = set(document_clause_ids)
+        return [
+            DocumentClauseForAdjustment(
+                id=clause.id,
+                analysis_task_id=task.id,
+                document_id=clause.document_id,
+                source_page=clause.source_page,
+                source_text=clause.source_text,
+                source_confidence=clause.confidence,
+            )
+            for clause in task.result.document_clauses
+            if clause.id in requested
+        ]
+
     async def create_adjustment_draft_with_audit(
         self,
         *,
         owner_id: UUID,
         record: AdjustmentRequestRecord,
+        manual_review_items: tuple[ManualReviewItemRecord, ...],
     ) -> AdjustmentRequestRecord | None:
         if self.mode == "mock":
             async with self._mock_lock:
                 if (owner_id, record.contract_id) not in self._mock_owned_contracts:
                     return None
+                for item in manual_review_items:
+                    self._mock_review_items[item.id] = ReviewItemForAdjustment(
+                        id=item.id,
+                        contract_id=item.contract_id,
+                        status=ReviewItemStatus.SELECTED,
+                        user_choice=SuggestionChoice.REQUEST,
+                        suggestion_compromise=item.request_text,
+                        suggestion_request=item.request_text,
+                        category=AgreementClauseCategory.OTHER,
+                        original_text=item.source_text,
+                    )
                 self._mock_adjustment_requests[record.id] = record
                 self._mock_audit_events.append(
                     MockAuditEvent(
@@ -3436,7 +3481,21 @@ class SupabaseAdapter:
             "p_adjustment_request_id": str(record.id),
             "p_contract_id": str(record.contract_id),
             "p_expires_in_hours": record.expires_in_hours,
-            "p_review_item_ids": [str(item.review_item_id) for item in record.items],
+            "p_items": [
+                {
+                    "review_item_id": str(item.review_item_id),
+                    "user_choice": item.user_choice.value,
+                    "request_text": item.request_text,
+                }
+                for item in record.items
+            ],
+            "p_manual_items": [
+                {
+                    "review_item_id": str(item.id),
+                    "document_clause_id": str(item.document_clause_id),
+                }
+                for item in manual_review_items
+            ],
             "p_created_at": record.created_at.isoformat(),
         }
         try:
@@ -4717,6 +4776,7 @@ class SupabaseAdapter:
                 continue
             mirrored_result = Analysis(
                 contract_id=task.result.contract_id,
+                document_clauses=task.result.document_clauses,
                 extracted_terms=task.result.extracted_terms,
                 review_items=[
                     item if review_item.id == item.id else review_item

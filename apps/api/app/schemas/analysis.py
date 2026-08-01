@@ -308,13 +308,39 @@ class SolarReviewBatchOutput(StrictModel):
         return self
 
 
+class DocumentClause(StrictModel):
+    id: UUID
+    document_id: UUID
+    ordinal: int = Field(ge=1)
+    heading: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    source_page: int = Field(ge=1)
+    source_text: str = Field(min_length=1)
+    confidence: float | None = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_visible_text(self) -> "DocumentClause":
+        if not self.heading.strip() or not self.title.strip() or not self.source_text.strip():
+            raise ValueError("문서 조항의 표제·제목·원문은 비어 있을 수 없습니다.")
+        return self
+
+
 class Analysis(StrictModel):
     contract_id: UUID
+    document_clauses: list[DocumentClause] = Field(default_factory=list)
     extracted_terms: list[ExtractedTerm]
     review_items: list[ReviewItem]
 
     @model_validator(mode="after")
     def validate_evidence_links(self) -> "Analysis":
+        clause_ids = [clause.id for clause in self.document_clauses]
+        if len(clause_ids) != len(set(clause_ids)):
+            raise ValueError("분석 결과의 문서 조항 ID는 중복될 수 없습니다.")
+        if [clause.ordinal for clause in self.document_clauses] != list(
+            range(1, len(self.document_clauses) + 1)
+        ):
+            raise ValueError("문서 조항 순번은 1부터 빠짐없이 이어져야 합니다.")
+
         term_ids = [term.id for term in self.extracted_terms]
         if len(term_ids) != len(set(term_ids)):
             raise ValueError("분석 결과의 추출값 ID는 중복될 수 없습니다.")
@@ -403,6 +429,11 @@ class AnalysisTask(StrictModel):
                 raise ValueError("완료된 분석 작업에는 결과만 필요합니다.")
             if self.result.contract_id != self.contract_id:
                 raise ValueError("분석 결과는 작업과 같은 계약에 속해야 합니다.")
+            if any(
+                clause.document_id != self.document_id
+                for clause in self.result.document_clauses
+            ):
+                raise ValueError("문서 조항은 분석 작업의 주 문서에 속해야 합니다.")
             for term in self.result.extracted_terms:
                 if (
                     term.source_type == ExtractedSourceType.CONTRACT_DOCUMENT

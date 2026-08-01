@@ -14,6 +14,7 @@ from app.core.enums import (
     ObligationStatus,
     PerformanceMetricVerificationStatus,
 )
+from app.schemas.analysis import DocumentClause
 from app.schemas.performance import PerformanceExtractedPayload
 from app.services.state_machine import (
     ALLOWED_ADJUSTMENT_REQUEST_TRANSITIONS,
@@ -82,6 +83,36 @@ def test_evidence_schemas_use_api_snake_case() -> None:
         assert "source_text" in properties
         assert "sourcePage" not in properties
         assert "sourceText" not in properties
+
+
+def test_document_clause_schema_matches_runtime_and_openapi() -> None:
+    schema = json.loads(
+        (SHARED_CONTRACTS / "schemas" / "document-clause.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    runtime_schema = DocumentClause.model_json_schema()
+    openapi = yaml.safe_load(
+        (SHARED_CONTRACTS / "openapi" / "openapi.yaml").read_text(encoding="utf-8")
+    )["components"]["schemas"]["DocumentClause"]
+
+    expected_fields = {
+        "id",
+        "document_id",
+        "ordinal",
+        "heading",
+        "title",
+        "source_page",
+        "source_text",
+        "confidence",
+    }
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == expected_fields
+    assert set(schema["required"]) == expected_fields
+    assert set(runtime_schema["properties"]) == expected_fields
+    assert set(runtime_schema["required"]) == expected_fields
+    assert set(openapi["properties"]) == expected_fields
+    assert set(openapi["required"]) == expected_fields
 
 
 def test_extracted_term_schema_has_structured_fields_and_values() -> None:

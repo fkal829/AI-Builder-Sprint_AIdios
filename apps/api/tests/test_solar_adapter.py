@@ -232,8 +232,12 @@ async def test_live_review_uses_safe_chunks_and_preserves_full_input_order(
 ) -> None:
     FakeAsyncClient.calls = []
     FakeAsyncClient.responses = [
-        response_with_items([make_output(item_id=FIRST_ID)]),
-        response_with_items([make_output(item_id=SECOND_ID)]),
+        response_with_items(
+            [
+                make_output(item_id=FIRST_ID),
+                make_output(item_id=SECOND_ID),
+            ]
+        ),
     ]
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
     adapter = SolarReviewAdapter(
@@ -249,16 +253,16 @@ async def test_live_review_uses_safe_chunks_and_preserves_full_input_order(
         ]
     )
 
-    assert adapter.review_chunk_size == 1
-    assert len(FakeAsyncClient.calls) == 2
+    assert adapter.review_chunk_size == 4
+    assert len(FakeAsyncClient.calls) == 1
     requested_batches = [
         json.loads(body["messages"][1]["content"])["items"] for _path, body in FakeAsyncClient.calls
     ]
-    assert [UUID(batch[0]["review_item_id"]) for batch in requested_batches] == [
+    assert [UUID(item["review_item_id"]) for item in requested_batches[0]] == [
         FIRST_ID,
         SECOND_ID,
     ]
-    assert all(len(batch) == 1 for batch in requested_batches)
+    assert len(requested_batches[0]) == 2
     assert [output.review_item_id for output in outputs] == [FIRST_ID, SECOND_ID]
 
 
@@ -278,6 +282,7 @@ async def test_live_review_stops_after_failed_chunk_without_partial_result(
         api_key="test-key",
         base_url="https://api.upstage.ai",
         retry_delay_seconds=0,
+        review_chunk_size=1,
     )
 
     with pytest.raises(SolarReviewError):

@@ -344,9 +344,15 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 
 ## 7. 조정·수정 계약서 대조
 
-- 조정 요청 초안은 1~4개의 `review_item_id`로 생성한다.
+- 조정 요청 초안은 AI 검토 `review_item_id`와 사용자가 직접 고른 원문
+  `document_clause_id`를 합해 1~4개로 생성한다.
 - 초안 항목은 모두 `ReviewItem.status=SELECTED`이고 `user_choice`가 `COMPROMISE`
   또는 `REQUEST`여야 한다. 원안 수용인 `ACCEPT` 항목은 외부 요청으로 발송하지 않는다.
+- 직접 고른 원문 조항은 최신 완료 분석의 `document_clauses`에서 서버가 ID를 다시
+  확인한다. 원문·페이지·문서 ID는 서버 결과에서 복사하고, `origin=USER_SELECTED`,
+  `type=NEEDS_CHECK`, `detection_method=DETERMINISTIC`, `user_choice=REQUEST`인 내부
+  조정 항목으로 저장한다. 비교 근거가 아니므로 `related_extracted_term_ids`는 비어 있고,
+  파서가 조항 신뢰도를 제공하지 않으면 `source_confidence=null`을 그대로 보존한다.
 - 초안 응답의 `items`에는 `review_item_id`, `user_choice`, 실제 `request_text`를 포함해
   사용자가 발송 전에 확인할 수 있어야 한다.
 - 초안은 `expires_in_hours` 정책값만 가지며 `sent_at`, `expires_at`은 `null`이다.

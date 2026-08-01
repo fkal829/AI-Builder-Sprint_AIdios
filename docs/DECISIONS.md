@@ -143,8 +143,8 @@
   `NEEDS_CHECK` 후보로 만든다. 명시적 원문 표현을 찾은 후보만 원문 근거를 연결한다.
 - live 호출은 설정 가능한 `UPSTAGE_SOLAR_MODEL`과
   `POST /v1/chat/completions`를 사용한다. 기본 alias는 `solar-pro3`, 프롬프트 버전은
-  `contract-review-copy-v1`이다. live 검증된 기본값은 요청당 검토 항목 1건이며,
-  Adapter가 허용하는 chunk 상한은 4건이다. 모든 chunk가 성공하고 전체 입력
+  `contract-review-copy-v1`이다. 기본값과 Adapter 상한은 요청당 검토 항목 4건이다.
+  모든 chunk가 성공하고 전체 입력
   UUID의 개수·중복·순서가 일치한 뒤에만 결과를 반환한다. 모든 객체는 추가 필드를
   거부하는 strict JSON Schema와 Pydantic으로 검증한다.
 - 입력과 출력 UUID 집합 불일치, 중복, 빈 문구, 같은 3종 문구, 금지된 단정 표현,
@@ -154,9 +154,11 @@
   Solar의 비보정 자기평가값을 `model_confidence`에 저장하되
   `model_limitations`에 법적 판단 정확도와 `source_confidence`가 아니라는 점을
   항상 덧붙인다.
-- timeout, HTTP 오류, 잘못된 JSON, 스키마 오류는 고정 문구로 대체하지 않고
-  `FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다. 멱등한 문구 생성 호출 중 `429`,
-  전송 오류, `5xx`만 한 번 재시도하며 추출 `attempt_count`에는 포함하지 않는다.
+- timeout, HTTP 오류, 잘못된 JSON, 스키마 오류가 발생하면 Solar 문구 전체를 버리고
+  서버가 먼저 만든 결정 규칙 기반 검토 항목으로 완료한다. 이 경우 항목은
+  `detection_method=DETERMINISTIC`이며 모델 자기평가와 한계를 저장하지 않는다.
+  멱등한 문구 생성 호출 중 `429`, 전송 오류, `5xx`만 한 번 재시도하며 추출
+  `attempt_count`에는 포함하지 않는다.
 - 프롬프트·원문·원시 응답은 로그에 남기지 않는다. 프롬프트 버전, 모델 ID, 시작 시각,
   성공·실패, 항목 수, 지연시간, 스키마 검증 결과만 구조화 로그로 추적한다. 별도의
   영속 AI 실행 이력 테이블은 현재 P0 범위에 추가하지 않는다.
@@ -213,3 +215,19 @@
 - 호환성: 이미 추가된 `agreements`, `agreement_files`와 관련 migration은 append-only
   원칙에 따라 삭제·수정하지 않는다. 기존 API는 deprecated 이력 호환 경로로 남기고 새
   정상 흐름에서 호출하지 않는다.
+
+## ADR-016 사용자가 직접 고른 원문 조항의 조정 요청
+
+- 상태: 2026-08-02 확정
+- 결정: AI 검토 신호가 없는 원문 조항도 사용자가 직접 골라 1~1200자 요청 문구를
+  작성할 수 있다. 클라이언트는 `document_clause_id`와 요청 문구만 보내며 제목, 원문,
+  페이지와 확신도를 보내거나 덮어쓰지 않는다.
+- 근거: 서버는 최신 완료 분석의 `document_clauses`에서 조항 ID를 다시 확인하고 문서 ID,
+  페이지, 원문과 nullable 파서 확신도를 연결한다. 존재하지 않거나 이전 분석에만 있는
+  조항은 `422`로 거부한다.
+- 영속 호환: 기존 공개 응답·역제안·수정 계약서 대조가 사용하는 항목 키 흐름을 유지하기
+  위해 `origin=USER_SELECTED`인 내부 review item을 결정적 UUID로 만든다. 이는 AI가 만든
+  검토 결과가 아니며 `type=NEEDS_CHECK`, `severity=INFO`,
+  `detection_method=DETERMINISTIC`, 빈 `related_extracted_term_ids`로 구분한다.
+- 발송 경계: AI 검토 항목과 직접 고른 원문 조항을 합해 요청서당 최대 4건이다. 초안과
+  공개 링크는 자동 발송하지 않으며 사용자가 명시적으로 `/send`를 실행해야 한다.

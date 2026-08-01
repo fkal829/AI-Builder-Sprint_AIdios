@@ -27,6 +27,29 @@ class ReviewItemForAdjustment:
 
 
 @dataclass(frozen=True)
+class DocumentClauseForAdjustment:
+    id: UUID
+    analysis_task_id: UUID
+    document_id: UUID
+    source_page: int
+    source_text: str
+    source_confidence: float | None
+
+
+@dataclass(frozen=True)
+class ManualReviewItemRecord:
+    id: UUID
+    document_clause_id: UUID
+    analysis_task_id: UUID
+    contract_id: UUID
+    document_id: UUID
+    source_page: int
+    source_text: str
+    source_confidence: float | None
+    request_text: str
+
+
+@dataclass(frozen=True)
 class AdjustmentRequestItemRecord:
     review_item_id: UUID
     user_choice: SuggestionChoice
@@ -91,11 +114,20 @@ class AdjustmentRepository(Protocol):
         review_item_ids: list[UUID],
     ) -> list[ReviewItemForAdjustment] | None: ...
 
+    async def list_document_clauses_for_adjustment(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+        document_clause_ids: list[UUID],
+    ) -> list[DocumentClauseForAdjustment] | None: ...
+
     async def create_adjustment_draft_with_audit(
         self,
         *,
         owner_id: UUID,
         record: AdjustmentRequestRecord,
+        manual_review_items: tuple[ManualReviewItemRecord, ...],
     ) -> AdjustmentRequestRecord | None: ...
 
     async def get_owned_adjustment_request(

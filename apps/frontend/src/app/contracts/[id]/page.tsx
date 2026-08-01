@@ -1,16 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { AppScreen } from "@/components/AppScreen";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { LayerBlock } from "@/components/LayerBlock";
 import { useAsync } from "@/lib/hooks";
-import { adapter, isUsingMock, type ClauseExplanation } from "@/lib/adapter";
+import { adapter, isUsingMock } from "@/lib/adapter";
+import {
+  liveReviewToDashboard,
+  type ReviewDashboardData,
+} from "@/lib/reviewViewModel";
 import { SIGNAL_META } from "@/lib/status";
 import {
   loadUnderstood,
   summarizeUnderstood,
+  UNDERSTOOD_LABELS,
+  UNKNOWN_ANSWER,
   type UnderstoodKey,
 } from "@/lib/understood";
 import {
@@ -23,7 +29,6 @@ import { politen } from "@/lib/tone";
 import type {
   ClauseCard as ClauseData,
   ClauseRisk,
-  ContractDetail,
   DocClause,
   SuggestionChoice,
   UnderstoodTerm,
@@ -73,7 +78,7 @@ const RISK: Record<ClauseRisk, { label: string; badge: string; tile: string; num
   },
   // 조용함 — 중립
   low: {
-    label: "저위험",
+    label: "추가 신호 없음",
     badge: "bg-neutral100 text-neutral700",
     tile: "bg-white ring-1 ring-neutral200",
     num: "text-neutral700",
@@ -131,48 +136,58 @@ function MockViewer({ contractId }: { contractId: string }) {
 
 function LiveViewer({ contractId }: { contractId: string }) {
   const state = useAsync(() => adapter.getLiveContractReview(contractId), [contractId]);
-  const [choices, setChoices] = useState<Record<string, SuggestionChoice>>({});
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
 
-  if (state.status === "loading") return <p className="py-10 text-center text-sm text-neutral500">분석 결과를 불러오는 중…</p>;
-  if (state.status === "error") return <p className="py-10 text-center text-sm text-brand800">⚠ {state.error}</p>;
-  const data = { ...state.data, items: state.data.items.map((item) => ({ ...item, userChoice: choices[item.id] ?? item.userChoice })) };
-  const requestCount = data.items.filter(
-    (item) => item.userChoice === "REQUEST" || item.userChoice === "COMPROMISE",
-  ).length;
+  if (state.status === "loading") {
+    return <p className="py-10 text-center text-sm text-neutral500">분석 결과를 불러오는 중…</p>;
+  }
+  if (state.status === "error") {
+    return <p className="py-10 text-center text-sm text-brand800">⚠ {state.error}</p>;
+  }
 
   const select = async (itemId: string, choice: SuggestionChoice) => {
-    setSavingId(itemId);
+    setSelectionError(null);
     try {
       await adapter.selectReviewItem(contractId, itemId, choice);
-      setChoices((current) => ({ ...current, [itemId]: choice }));
-    } finally {
-      setSavingId(null);
+    } catch (cause) {
+      setSelectionError(
+        cause instanceof Error ? cause.message : "조정안 선택을 저장하지 못했습니다.",
+      );
     }
   };
 
-  return <div className="mx-auto flex max-w-3xl flex-col gap-5">
-    <header className="rounded-2xl bg-ink px-6 py-5 text-white"><h1 className="text-xl font-black">{data.title}</h1><p className="mt-1 text-sm text-white/70">{data.counterpartyName} · 원문 근거와 함께 확인해요</p></header>
-    {data.understood && <LayerBlock layer="understood" label="내가 이해한 조건"><div className="grid gap-1 text-sm"><span>기간 · {data.understood.durationText}</span><span>월 금액 · {data.understood.monthlyAmount?.toLocaleString() ?? "기억 안 남"}원</span><span>총액 · {data.understood.totalAmount?.toLocaleString() ?? "기억 안 남"}원</span></div></LayerBlock>}
-    {data.items.length === 0 ? <p className="rounded-xl bg-white p-6 text-center text-sm text-neutral500">현재 표시할 확인 항목이 없어요.</p> : data.items.map((item) => <article key={item.id} className="rounded-2xl bg-white p-5 ring-1 ring-neutral200"><div className="mb-3 flex items-center justify-between"><b className="text-sm text-ink">{SIGNAL_META[item.type]}</b>{item.sourceConfidence != null && <span className="text-xs text-neutral500">근거 확신도 {Math.round(item.sourceConfidence * 100)}%</span>}</div><LayerBlock layer="original" label={item.sourcePage ? `계약서 원문 · ${item.sourcePage}쪽` : "원문 근거를 찾지 못함"}>{item.sourceText ?? "원문 근거가 없어 확인이 필요합니다."}</LayerBlock><div className="mt-3"><LayerBlock layer="ai" label="AI가 본 차이 · 추정">{item.plainExplanation}</LayerBlock></div><div className="mt-3"><LayerBlock layer="official" label="확인 기준">{item.basisText}</LayerBlock></div><div className="mt-3 grid gap-2">{([['ACCEPT','원안 수용',item.suggestionAccept],['COMPROMISE','절충안',item.suggestionCompromise],['REQUEST','요청안',item.suggestionRequest]] as const).map(([choice,label,text]) => <button key={choice} type="button" disabled={savingId === item.id} onClick={() => void select(item.id, choice)} className={`rounded-lg border p-3 text-left text-sm ${item.userChoice === choice ? 'border-brand700 bg-brand100 font-bold' : 'border-neutral300 bg-white'}`}><span className="text-xs text-neutral500">{label}</span><br />{text}</button>)}</div></article>)}
-    <a
-      href={`/contracts/${contractId}/request`}
-      aria-disabled={requestCount === 0}
-      className={`flex h-12 items-center justify-center rounded-lg text-sm font-bold ${
-        requestCount > 0 ? "bg-ink text-white" : "pointer-events-none bg-neutral200 text-neutral500"
-      }`}
-    >
-      조정 요청 {requestCount}건 확인하기
-    </a>
-  </div>;
+  return (
+    <div className="flex flex-col gap-3">
+      {selectionError && (
+        <p className="rounded-lg bg-brand50 px-4 py-3 text-xs font-bold text-brand800">
+          ⚠ {selectionError}
+        </p>
+      )}
+      <ViewerBody
+        data={liveReviewToDashboard(state.data)}
+        contractId={contractId}
+        onSelectReviewItem={select}
+      />
+    </div>
+  );
 }
 
-function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: string }) {
+function ViewerBody({
+  data,
+  contractId,
+  onSelectReviewItem,
+}: {
+  data: ReviewDashboardData;
+  contractId: string;
+  onSelectReviewItem?: (
+    itemId: string,
+    choice: SuggestionChoice,
+  ) => void | Promise<void>;
+}) {
   const router = useRouter();
   const { document: doc } = data;
   const [selected, setSelected] = useState<string | null>(null);
   const [activeReq, setActiveReq] = useState<string | null>(null);
-  // 좌(원문)·우(조정 요청 작성) 글자 크기는 각각 따로 조절한다
   const [fontScale, setFontScale] = useState(1);
   const [reqFontScale, setReqFontScale] = useState(1);
 
@@ -231,9 +246,20 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
   }, [pendingConfirm, data.clauses.length]);
 
   const [confirmSendWithPending, setConfirmSendWithPending] = useState(false);
+  const selectionQueue = useRef<Promise<void>>(Promise.resolve());
 
-  const confirmAutoClause = (c: ClauseData) =>
-    setDrafts((prev) => ({ ...prev, [c.id]: defaultAutoDraft(c) }));
+  const persistReviewSelection = (itemId: string, choice: SuggestionChoice) => {
+    if (!onSelectReviewItem) return;
+    selectionQueue.current = selectionQueue.current.then(async () => {
+      await onSelectReviewItem(itemId, choice);
+    });
+  };
+
+  const confirmAutoClause = (c: ClauseData) => {
+    const draft = defaultAutoDraft(c);
+    setDrafts((prev) => ({ ...prev, [c.id]: draft }));
+    persistReviewSelection(c.id, draft.choice);
+  };
   const addManualClause = (dc: DocClause) => {
     setDrafts((prev) => ({
       ...prev,
@@ -241,14 +267,18 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
     }));
   };
   // 확인 필요(auto) 조항이든 직접 추가(manual) 조항이든 초안에서 완전히 제거
-  const removeDraft = (clauseId: string) =>
+  const removeDraft = (clauseId: string) => {
+    if (data.clauses.some((clause) => clause.id === clauseId)) {
+      persistReviewSelection(clauseId, "ACCEPT");
+    }
     setDrafts((prev) => {
       const next = { ...prev };
       delete next[clauseId];
       return next;
     });
+  };
 
-  // 좌측 원문의 해당 조항으로 스크롤
+  // 오른쪽 요청 카드에서 왼쪽 원문 조항으로 이동
   const goToClause = (cid: string) => {
     setSelected(cid);
     window.document.getElementById(`clause-${cid}`)?.scrollIntoView({ block: "center" });
@@ -280,18 +310,21 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
     const clause = data.clauses.find((c) => c.id === clauseId)!;
     const sug = clause.suggestions.find((s) => s.choice === choice)!;
     setDrafts((prev) => ({ ...prev, [clauseId]: { ...prev[clauseId], choice, text: sug.text } }));
+    persistReviewSelection(clauseId, choice);
   };
   const setText = (clauseId: string, text: string) =>
     setDrafts((prev) => ({ ...prev, [clauseId]: { ...prev[clauseId], text } }));
 
-  const createRequest = () => {
+  const createRequest = async () => {
     saveRequestDraft(contractId, drafts);
+    await selectionQueue.current;
     router.push(`/contracts/${contractId}/request`);
   };
   // 확인 필요 조항이 남아있으면 한 번 더 확인받고, 없으면 바로 진행
   const handleSendClick = () => {
+    if (requestCount > 4) return;
     if (pendingConfirm > 0) setConfirmSendWithPending(true);
-    else createRequest();
+    else void createRequest();
   };
 
   return (
@@ -335,7 +368,7 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
           />
           <StatCard label="고위험 조항" value={counts.high} tile={RISK.high.tile} num={RISK.high.num} />
           <StatCard label="중위험 조항" value={counts.mid} tile={RISK.mid.tile} num={RISK.mid.num} />
-          <StatCard label="저위험 조항" value={counts.low} tile={RISK.low.tile} num={RISK.low.num} />
+          <StatCard label="추가 신호 없음" value={counts.low} tile={RISK.low.tile} num={RISK.low.num} />
         </div>
       </div>
 
@@ -345,11 +378,21 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
         <span className="rounded-md bg-neutral200 px-2 py-1 text-xs font-medium text-neutral700">
           {doc.parties}
         </span>
+        {doc.pdfUrl && (
+          <a
+            href={doc.pdfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 rounded-md border border-brand300 bg-white px-2.5 py-1 text-xs font-bold text-brand800 transition hover:bg-brand50"
+          >
+            PDF 원본 보기 <span aria-hidden="true">↗</span>
+          </a>
+        )}
       </div>
 
-      {/* 좌: 원문 / 우: 분석·작성 */}
+      {/* develop 기준: 좌측 전체 원문 조항 → 우측에 선택한 수정 요청 카드 추가 */}
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* ── 좌: 계약서 원문 ── */}
+        {/* ── 좌: 파싱한 계약서 전체 조항 ── */}
         <section className="flex flex-col rounded-2xl bg-white ring-1 ring-neutral200">
           <header className="flex items-center justify-between border-b border-neutral200 px-5 py-3">
             <h2 className="text-sm font-black text-ink">계약서 원문</h2>
@@ -362,35 +405,52 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
               <div className="mt-1 text-[0.72em] text-neutral500">{doc.parties}</div>
             </div>
 
+            {data.hasCompleteDocumentClauses === false && (
+              <div className="mb-4 rounded-xl border border-brand300 bg-brand50 px-4 py-3 text-[0.75em] leading-relaxed text-brand800">
+                이 계약은 전체 조항 저장 기능을 넣기 전에 분석된 결과예요. 현재는 AI 근거와
+                연결된 조항만 표시되며, 새로 분석한 계약부터 원문의 모든 조항이 표시됩니다.
+              </div>
+            )}
+
             <div className="flex flex-col gap-4">
               {doc.clauses.map((cl) => {
-                const related = signalsByDoc[cl.id];
-                const status: "unconfirmed" | "confirmed" | "none" =
-                  !related || related.length === 0
-                    ? "none"
-                    : related.every((c) => drafts[c.id])
-                      ? "confirmed"
-                      : "unconfirmed";
+                const related = signalsByDoc[cl.id] ?? [];
+                const status: "unconfirmed" | "confirmed" | "none" = related.length === 0
+                  ? "none"
+                  : related.every((c) => drafts[c.id])
+                    ? "confirmed"
+                    : "unconfirmed";
                 return (
                   <ClauseOriginal
                     key={cl.id}
                     clause={cl}
                     active={selected === cl.id}
                     status={status}
+                    relatedSignals={related}
+                    understoodAnswers={answers}
                     onAction={() => handleClauseAction(cl)}
-                    contractId={contractId}
                   />
                 );
               })}
+
+              {data.clauses.filter((clause) => !clause.docClauseId).map((clause) => (
+                <UnlinkedClauseSourceCard
+                  key={clause.id}
+                  clause={clause}
+                  confirmed={Boolean(drafts[clause.id])}
+                  onAction={() => {
+                    if (!drafts[clause.id]) confirmAutoClause(clause);
+                    scrollToRequestCard(clause.id);
+                  }}
+                />
+              ))}
             </div>
           </div>
         </section>
 
-        {/* ── 우: 분석 결과 + 조정요청 작성 ── */}
+        {/* ── 우: 선택한 조항의 수정 요청 카드 ── */}
         <section className="flex flex-col gap-4">
-          {/* 조정 요청 작성 — 확인이 필요한 조항별 문구 선택·수정 */}
           <div className="rounded-2xl bg-white ring-1 ring-neutral200">
-            {/* 좌측 원문 헤더와 같은 구조 — 헤더 높이가 픽셀 단위로 일치한다 */}
             <header className="flex items-center justify-between border-b border-neutral200 px-5 py-3">
               <h2 className="text-sm font-black text-ink">조정 요청 작성</h2>
               <FontScaleButtons onChange={setReqFontScale} label="조정 요청" />
@@ -403,54 +463,44 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
                 <div className="mx-1 my-3 rounded-xl border border-dashed border-brand300 bg-brand50 px-5 py-8 text-center">
                   <div className="text-[1.875em]">👈</div>
                   <p className="mt-2 text-[0.9375em] font-black text-brand800">
-                    왼쪽 원문에서 조항을 확인해주세요
+                    왼쪽 원문에서 조항을 선택해주세요
                   </p>
                   <p className="mt-2 text-[0.75em] leading-relaxed text-neutral700">
-                    조항 제목 옆의{" "}
-                    {/* 안내가 가리키는 대상이므로 좌측 원문의 미확인 "!" 버튼과 같은 색을 쓴다.
-                        글자 크기의 em은 부모(0.75em = 12px) 기준이라 10px를 유지하려면 10/12. */}
-                    <span
-                      className="mx-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border align-middle text-[0.8333em] font-black"
-                      style={{
-                        backgroundColor: CLAUSE_MENU_STYLE.unconfirmed.bg,
-                        color: CLAUSE_MENU_STYLE.unconfirmed.fg,
-                        borderColor: CLAUSE_MENU_STYLE.unconfirmed.fg,
-                      }}
-                    >
-                      {CLAUSE_MENU_STYLE.unconfirmed.icon}
-                    </span>{" "}
-                    버튼을 <b>눌러야</b> 확인돼요. 확인한 조항이 이곳에 요청서 카드로 나타나요.
+                    조항 오른쪽의 상태 버튼을 눌러 확인하거나 수정 요청에 추가하면 이곳에
+                    요청 카드가 나타나요.
                   </p>
                 </div>
               )}
 
-              {data.clauses
-                .filter((c) => drafts[c.id])
-                .map((c) => (
-                  <RequestCard
-                    key={c.id}
-                    clause={c}
-                    choice={drafts[c.id].choice}
-                    text={drafts[c.id].text}
-                    active={activeReq === c.id}
-                    onChoice={(ch) => setChoice(c.id, ch)}
-                    onText={(t) => setText(c.id, t)}
-                    onViewOriginal={c.docClauseId ? () => goToClause(c.docClauseId!) : undefined}
-                    onDelete={() => removeDraft(c.id)}
-                  />
-                ))}
+              {data.clauses.filter((clause) => drafts[clause.id]).map((clause) => (
+                <RequestCard
+                  key={clause.id}
+                  clause={clause}
+                  choice={drafts[clause.id].choice}
+                  text={drafts[clause.id].text}
+                  active={activeReq === clause.id}
+                  onChoice={(choice) => setChoice(clause.id, choice)}
+                  onText={(text) => setText(clause.id, text)}
+                  onViewOriginal={clause.docClauseId
+                    ? () => goToClause(clause.docClauseId!)
+                    : undefined}
+                  onDelete={() => removeDraft(clause.id)}
+                />
+              ))}
 
               {Object.entries(drafts)
-                .filter(([, d]) => d.origin === "manual")
-                .map(([cid, d]) => (
+                .filter(([, draft]) => draft.origin === "manual")
+                .map(([clauseId, draft]) => (
                   <ManualRequestCard
-                    key={cid}
-                    draftId={cid}
-                    draft={d}
-                    sourceBody={doc.clauses.find((dc) => dc.id === d.docClauseId)?.body ?? ""}
-                    onText={(t) => setText(cid, t)}
-                    onRemove={() => removeDraft(cid)}
-                    onViewOriginal={d.docClauseId ? () => goToClause(d.docClauseId!) : undefined}
+                    key={clauseId}
+                    draftId={clauseId}
+                    draft={draft}
+                    sourceBody={doc.clauses.find((clause) => clause.id === draft.docClauseId)?.body ?? ""}
+                    onText={(text) => setText(clauseId, text)}
+                    onRemove={() => removeDraft(clauseId)}
+                    onViewOriginal={draft.docClauseId
+                      ? () => goToClause(draft.docClauseId!)
+                      : undefined}
                   />
                 ))}
             </div>
@@ -483,10 +533,13 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
                 )}
               </>
             )}
+            {requestCount > 4 && (
+              <span className="ml-1 font-bold">· 한 요청서에는 최대 4건만 담을 수 있어요</span>
+            )}
           </div>
           <button
             onClick={handleSendClick}
-            disabled={requestCount === 0}
+            disabled={requestCount === 0 || requestCount > 4}
             className="flex-none rounded-lg bg-white px-4 py-2 text-[13px] font-bold transition hover:bg-white/90 disabled:opacity-40"
             style={{ color: barColor }}
           >
@@ -509,7 +562,7 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
         onCancel={() => setConfirmSendWithPending(false)}
         onConfirm={() => {
           setConfirmSendWithPending(false);
-          createRequest();
+          void createRequest();
         }}
       />
     </div>
@@ -546,11 +599,7 @@ function FontScaleButtons({
   );
 }
 
-/** 상태별 트리거 버튼 색.
-    bg = 옅은 채움(작은 버튼·메뉴 헤더 배경), fg = 진한 색(아이콘·테두리·액션 버튼 배경).
-    확인됨·일반은 하늘/중립을 쓰고, 미확인 "!" 버튼만 예외로 빨강을 쓴다.
-    화면에서 유일한 빨강이라 "지금 눌러야 하는 것"이 한눈에 잡힌다.
-    위험도 배지·집계 타일에는 빨강을 쓰지 않는다(기존 설계 원칙 유지). */
+/** 통합 조항 카드의 검토·작성 상태 색 */
 const CLAUSE_MENU_STYLE: Record<
   "unconfirmed" | "confirmed" | "none",
   { bg: string; fg: string; icon: string; label: string; actionLabel: string }
@@ -582,49 +631,47 @@ function ClauseOriginal({
   clause,
   active,
   status,
+  relatedSignals,
+  understoodAnswers,
   onAction,
-  contractId,
 }: {
   clause: DocClause;
   active: boolean;
   status: "unconfirmed" | "confirmed" | "none";
+  relatedSignals: ClauseData[];
+  understoodAnswers: Partial<Record<UnderstoodKey, string>> | null;
   onAction: () => void;
-  contractId: string;
 }) {
-  // "단디 설명"은 버튼을 눌러야만 불러온다. 한 번 불러오면 재요청하지 않고 캐싱.
-  const [detail, setDetail] = useState<ClauseExplanation | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [showExplanation, setShowExplanation] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-
-  const handleExplain = async () => {
-    if (detail || loading) return;
-    setLoading(true);
-    try {
-      setDetail(await adapter.explainClause(contractId, clause.id));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const menu = CLAUSE_MENU_STYLE[status];
+  const meaning = explainClauseMeaning(clause);
 
   return (
-    <div
+    <article
       id={`clause-${clause.id}`}
       className={`scroll-mt-4 rounded-xl border px-4 py-3.5 transition ${
         active ? "border-brand400 bg-brand50" : "border-neutral200 bg-white"
       }`}
     >
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <h3 className="text-[0.95em] font-black text-ink">
-          {clause.no} ({clause.title})
-        </h3>
+      <div className="mb-1.5 flex items-start justify-between gap-2">
+        <div>
+          <h3 className="text-[0.95em] font-black text-ink">
+            {clause.no} {clause.title !== "계약 조항" && `(${clause.title})`}
+          </h3>
+          {clause.sourcePage && (
+            <span className="mt-0.5 block text-[0.68em] text-neutral500">
+              원본 {clause.sourcePage}쪽부터
+            </span>
+          )}
+        </div>
         <div className="relative flex flex-none items-center gap-1.5">
           <RiskBadge risk={clause.risk} />
           <button
             type="button"
-            onClick={() => setMenuOpen((v) => !v)}
+            onClick={() => setMenuOpen((current) => !current)}
             aria-label="조항 메뉴 열기"
+            aria-expanded={menuOpen}
             className="flex h-6 w-6 flex-none items-center justify-center rounded-full border text-[12px] font-black shadow-sm transition hover:opacity-75 hover:shadow active:scale-95"
             style={{ backgroundColor: menu.bg, color: menu.fg, borderColor: menu.fg }}
           >
@@ -633,15 +680,15 @@ function ClauseOriginal({
 
           {menuOpen && (
             <>
-              {/* z-40: 사이트 헤더(z-30)보다 위에 있어야 헤더 위 클릭도 바깥클릭으로 닫힘 */}
-              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-              {/* right-0 기준점이 카드 안쪽이라 좁은 화면에서는 왼쪽으로 넘친다.
-                  페이지·카드 좌우 여백(약 5rem)을 뺀 폭을 쓰고, sm 이상에서만 380px. */}
+              <div
+                className="fixed inset-0 z-40"
+                aria-hidden="true"
+                onClick={() => setMenuOpen(false)}
+              />
               <div
                 className="absolute right-0 bottom-full z-50 mb-1.5 w-[calc(100vw-5rem)] overflow-hidden rounded-xl border border-neutral200 bg-white text-left shadow-lg sm:w-[380px]"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
               >
-                {/* 헤더 — 상태 라벨 + 닫기 */}
                 <div
                   className="flex items-center justify-between gap-2 px-3 py-2"
                   style={{ backgroundColor: menu.bg }}
@@ -660,31 +707,93 @@ function ClauseOriginal({
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-2.5 p-3">
-                  {!detail ? (
+                <div className="flex max-h-[70vh] flex-col gap-2.5 overflow-y-auto p-3">
+                  {!showExplanation ? (
                     <button
                       type="button"
-                      onClick={handleExplain}
-                      disabled={loading}
-                      className="flex w-full items-center gap-1.5 rounded-lg border border-brand300 bg-brand50 px-2.5 py-2 text-[12px] font-bold text-brand800 transition hover:bg-brand100 disabled:opacity-70"
+                      onClick={() => setShowExplanation(true)}
+                      className="flex w-full items-center gap-1.5 rounded-lg border border-brand300 bg-brand50 px-2.5 py-2 text-[12px] font-bold text-brand800 transition hover:bg-brand100"
                     >
-                      {loading ? (
-                        <span className="animate-pulse">🤖 단디가 조항을 분석하고 있어요…</span>
-                      ) : (
-                        "🤖 단디 설명 더 보기"
-                      )}
+                      🤖 단디 설명 더 보기
                     </button>
                   ) : (
-                    <div className="rounded-lg bg-brand50 px-2.5 py-2 text-[12px] leading-relaxed text-brand800">
-                      <p>{detail.summary}</p>
-                      {detail.officialBasis && (
-                        <p className="mt-1.5 text-[0.9em] text-brand700">근거 · {detail.officialBasis}</p>
+                    <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
+                      <section className="rounded-lg bg-brand50 px-2.5 py-2 text-brand800">
+                        <p className="font-black">이 조항의 의미</p>
+                        <p className="mt-1 text-neutral700">{meaning}</p>
+                      </section>
+
+                      {relatedSignals.length > 0 ? (
+                        relatedSignals.map((signal) => {
+                          const comparison = understoodComparisonFor(
+                            clause,
+                            signal,
+                            understoodAnswers,
+                          );
+                          return (
+                            <section
+                              key={signal.id}
+                              className="rounded-lg border border-brand200 bg-white px-2.5 py-2"
+                            >
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="rounded-full bg-brand100 px-2 py-0.5 text-[10px] font-bold text-brand800">
+                                  {SIGNAL_META[signal.signal]}
+                                </span>
+                                <span className="text-[10px] font-bold text-neutral500">
+                                  확인 수준 · {RISK[clause.risk].label}
+                                </span>
+                                {signal.confidence > 0 && (
+                                  <span className="text-[10px] text-neutral500">
+                                    근거 확신도 {Math.round(signal.confidence * 100)}%
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="mt-2 font-black text-ink">
+                                {comparison
+                                  ? "내가 알고 있던 내용과 무엇이 다른가"
+                                  : "왜 확인이 필요한가"}
+                              </p>
+
+                              {comparison && (
+                                <div className="mt-1.5 grid gap-1.5">
+                                  <div className="rounded-md bg-neutral100 px-2 py-1.5 text-neutral700">
+                                    <b>내가 답한 {comparison.label}</b>
+                                    <span className="mt-0.5 block">{comparison.value}</span>
+                                  </div>
+                                  <div className="rounded-md bg-brand50 px-2 py-1.5 text-neutral700">
+                                    <b className="text-brand800">계약서 원문</b>
+                                    <span className="mt-0.5 block">{signal.original.text}</span>
+                                  </div>
+                                </div>
+                              )}
+
+                              <p className="mt-1.5 text-neutral700">{signal.aiExplanation}</p>
+                              {signal.officialBasis && (
+                                <p className="mt-1.5 border-t border-neutral200 pt-1.5 text-[10px] text-neutral500">
+                                  확인 기준 · {signal.officialBasis}
+                                </p>
+                              )}
+                            </section>
+                          );
+                        })
+                      ) : (
+                        <section className="rounded-lg bg-neutral100 px-2.5 py-2 text-neutral700">
+                          <p className="font-black text-ink">추가 확인 신호 없음</p>
+                          <p className="mt-1">
+                            현재 분석에서는 이 조항에 별도의 위험·차이 신호가 연결되지 않았어요.
+                            다만 계약의 적법성이나 유효성을 확정했다는 뜻은 아니에요.
+                          </p>
+                        </section>
                       )}
-                      {detail.confidence != null && (
-                        <p className="mt-1 text-[0.85em] text-brand700/80">
-                          확신도 {Math.round(detail.confidence * 100)}%
-                        </p>
-                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setShowExplanation(false)}
+                        className="mt-1.5 text-[11px] font-bold text-brand700 underline underline-offset-2"
+                      >
+                        설명 접기
+                      </button>
                     </div>
                   )}
 
@@ -708,8 +817,99 @@ function ClauseOriginal({
       <p className="whitespace-pre-line text-[0.85em] leading-relaxed text-neutral700">
         {clause.body}
       </p>
-    </div>
+    </article>
   );
+}
+
+type UnderstoodComparison = { label: string; value: string };
+
+/** 5문항 답변 중 해당 조항·확인 신호와 직접 관련된 답만 원문과 나란히 보여준다. */
+function understoodComparisonFor(
+  clause: DocClause,
+  signal: ClauseData,
+  answers: Partial<Record<UnderstoodKey, string>> | null,
+): UnderstoodComparison | null {
+  const context = `${signal.title} ${signal.aiExplanation} ${clause.title} ${clause.body}`;
+  const candidates: Array<[UnderstoodKey, RegExp]> = [
+    ["refundText", /환불|반환|환급/],
+    ["terminationText", /중도.{0,3}(해지|해약)|해지 가능|해지 조건/],
+    ["monthlyAmount", /월 납부|월 금액|매달|월별|월 광고|월 이용/],
+    ["totalAmount", /총 계약금액|총액|전체 금액|총 부담/],
+    ["durationText", /계약.{0,4}기간|시작일|종료일|자동.{0,3}(갱신|연장)/],
+  ];
+  const matchedKey = candidates.find(([, pattern]) => pattern.test(context))?.[0];
+
+  if (matchedKey && answers) {
+    const answer = answers[matchedKey];
+    if (answer !== undefined) {
+      const value = answer.trim();
+      if (!value || value === UNKNOWN_ANSWER) return null;
+      return { label: UNDERSTOOD_LABELS[matchedKey], value };
+    }
+  }
+
+  if (signal.understood?.trim()) {
+    return { label: "내용", value: signal.understood.trim() };
+  }
+  return null;
+}
+
+/** 검토 결과와 섞지 않고, 원문 조항 자체를 읽는 관점을 쉬운 말로 안내한다. */
+function explainClauseMeaning(clause: DocClause): string {
+  const text = `${clause.title} ${clause.body}`;
+  const explanations: Array<[RegExp, string]> = [
+    [
+      /자동.{0,3}(갱신|연장)|갱신|연장/,
+      "이 조항은 계약 기간이 끝날 때 자동으로 이어지는지와, 연장을 원하지 않을 때 언제까지 알려야 하는지를 정한 내용이에요. 통보 방법과 마감일을 확인하면 돼요.",
+    ],
+    [
+      /계약.{0,4}(기간|유효)|시작일|종료일/,
+      "이 조항은 계약이 언제 시작되고 끝나는지, 정해진 기간 뒤에도 효력이 이어지는지를 정한 내용이에요. 시작일·종료일과 기간이 늘어나는 조건을 함께 확인하면 돼요.",
+    ],
+    [
+      /대금|금액|보수|수수료|지급|납부|비용/,
+      "이 조항은 누가 얼마를, 언제, 어떤 방식으로 지급하는지를 정한 내용이에요. 금액에 세금이나 추가 비용이 포함되는지와 지급 기한을 함께 확인하면 돼요.",
+    ],
+    [
+      /해지|해제|종료|중도.{0,3}해약/,
+      "이 조항은 계약을 중간에 끝낼 수 있는 경우와 그때 거쳐야 할 절차를 정한 내용이에요. 해지 사유, 사전 통보 기간, 이미 낸 돈의 처리를 확인하면 돼요.",
+    ],
+    [
+      /환불|반환|환급/,
+      "이 조항은 계약이 취소되거나 끝났을 때 이미 지급한 돈을 돌려받을 수 있는 조건과 범위를 정한 내용이에요. 환불이 가능한 경우, 공제되는 비용, 반환 시점을 확인하면 돼요.",
+    ],
+    [
+      /위약|손해.{0,2}배상|배상|책임/,
+      "이 조항은 약속을 지키지 않거나 손해가 생겼을 때 누가 어느 범위까지 책임지는지를 정한 내용이에요. 책임이 생기는 조건과 금액·범위의 제한을 확인하면 돼요.",
+    ],
+    [
+      /업무|서비스|용역|과업|수행|의무/,
+      "이 조항은 계약 당사자가 맡은 일과 지켜야 할 의무를 정한 내용이에요. 누가 무엇을 언제까지 해야 하는지, 결과물의 기준과 예외가 무엇인지 확인하면 돼요.",
+    ],
+    [
+      /승인|검수|수정|시안|결과물/,
+      "이 조항은 작업 결과를 확인하고 승인하거나 수정을 요청하는 절차를 정한 내용이에요. 답변 기한, 수정 가능한 횟수, 답변하지 않았을 때의 처리를 확인하면 돼요.",
+    ],
+    [
+      /저작권|지식.{0,2}재산|소유권|사용권/,
+      "이 조항은 만든 결과물을 누가 소유하고 어디까지 사용할 수 있는지를 정한 내용이에요. 권리가 넘어가는 시점과 사용 가능한 매체·기간·범위를 확인하면 돼요.",
+    ],
+    [
+      /비밀|기밀|개인정보|보안/,
+      "이 조항은 계약 과정에서 알게 된 정보나 개인정보를 어떻게 보호하고 사용할지를 정한 내용이에요. 보호 대상, 이용 가능한 목적, 보관·폐기 기간을 확인하면 돼요.",
+    ],
+    [
+      /분쟁|관할|소송|준거/,
+      "이 조항은 다툼이 생겼을 때 어떤 절차와 기준으로 해결하고 어느 법원에서 다룰지를 정한 내용이에요. 협의 절차와 관할 법원을 확인하면 돼요.",
+    ],
+  ];
+  const matched = explanations.find(([pattern]) => pattern.test(text));
+  if (matched) return matched[1];
+
+  const subject = clause.title && clause.title !== "계약 조항"
+    ? `‘${clause.title}’에 관한`
+    : "계약 당사자가 따라야 할";
+  return `이 조항은 ${subject} 기준과 조건을 정한 내용이에요. 누가 무엇을 해야 하는지, 적용되는 시점과 예외가 있는지를 중심으로 읽으면 이해하기 쉬워요.`;
 }
 
 const CHOICE_HINT: Record<SuggestionChoice, string> = {
@@ -717,6 +917,37 @@ const CHOICE_HINT: Record<SuggestionChoice, string> = {
   COMPROMISE: "요청서에 담겨요 · 빼려면 원안 수용을 선택하세요",
   REQUEST: "요청서에 담겨요 · 빼려면 원안 수용을 선택하세요",
 };
+
+function UnlinkedClauseSourceCard({
+  clause,
+  confirmed,
+  onAction,
+}: {
+  clause: ClauseData;
+  confirmed: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-brand200 bg-brand50 px-4 py-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-[0.84em] font-black text-ink">{clause.title}</h4>
+        <span className="rounded-full bg-brand100 px-2 py-0.5 text-[0.68em] font-bold text-brand700">
+          {SIGNAL_META[clause.signal]}
+        </span>
+      </div>
+      <p className="mt-2 text-[0.74em] leading-relaxed text-neutral700">
+        {clause.aiExplanation}
+      </p>
+      <button
+        type="button"
+        onClick={onAction}
+        className="mt-3 rounded-lg bg-brand800 px-3 py-1.5 text-[0.72em] font-bold text-white"
+      >
+        {confirmed ? "요청서에서 보기" : "확인하고 요청서에 담기"}
+      </button>
+    </div>
+  );
+}
 
 function RequestCard({
   clause,
@@ -769,7 +1000,9 @@ function RequestCard({
         </div>
       </div>
 
-      <p className="mb-2.5 text-[0.75em] leading-relaxed text-neutral700">{clause.aiExplanation}</p>
+      <p className="mb-2.5 text-[0.75em] leading-relaxed text-neutral700">
+        {clause.aiExplanation}
+      </p>
 
       {onViewOriginal && (
         <button

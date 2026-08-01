@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,12 +13,15 @@ from app.api.dependencies import (
 )
 from app.core.enums import (
     AdjustmentRequestStatus,
+    AnalysisStatus,
     ContractStatus,
     ReviewItemStatus,
     SuggestionChoice,
 )
 from app.main import app
 from app.repositories.adjustments import ReviewItemForAdjustment
+from app.repositories.analysis import AnalysisTaskRecord
+from app.schemas.analysis import Analysis, DocumentClause
 from app.services.counterproposal import CounterproposalComparator
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000023")
@@ -97,6 +101,44 @@ def selected_review_item(
     )
 
 
+def completed_document_clause(
+    adapter: SupabaseAdapter,
+    *,
+    contract_id: UUID,
+) -> DocumentClause:
+    now = datetime.now(UTC)
+    task_id = uuid4()
+    document_id = uuid4()
+    clause = DocumentClause(
+        id=uuid4(),
+        document_id=document_id,
+        ordinal=1,
+        heading="제7조",
+        title="결과물 승인",
+        source_page=3,
+        source_text="제7조(결과물 승인) 시안을 받은 뒤 3영업일 이내 승인한다.",
+        confidence=None,
+    )
+    adapter._mock_analysis_tasks[task_id] = AnalysisTaskRecord(
+        id=task_id,
+        contract_id=contract_id,
+        document_id=document_id,
+        supporting_document_ids=(),
+        status=AnalysisStatus.COMPLETED,
+        attempt_count=1,
+        error_code=None,
+        result=Analysis(
+            contract_id=contract_id,
+            document_clauses=[clause],
+            extracted_terms=[],
+            review_items=[],
+        ),
+        created_at=now,
+        updated_at=now,
+    )
+    return clause
+
+
 async def create_draft(
     client: AsyncClient,
     contract_id: UUID,
@@ -171,6 +213,169 @@ async def test_draft_previews_selected_request_text_without_public_url(adjustmen
     assert detail.json()["data"]["comparisons"] == []
     events = [event for event in adapter.mock_audit_events if event.contract_id == contract_id]
     assert events[-1].event_type == "ADJUSTMENT_DRAFT_CREATED"
+
+
+async def test_draft_preserves_owner_confirmed_request_text_override(adjustment_context) -> None:
+    client, adapter = adjustment_context
+    contract_id = await reviewed_contract(client, adapter)
+    review_item = selected_review_item(
+        contract_id=contract_id,
+        choice=SuggestionChoice.REQUEST,
+    )
+    adapter._mock_review_items[review_item.id] = review_item
+    edited_text = "  계약기간을 1년으로 조정해 주시기를 요청드립니다.  "
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={
+            "review_item_ids": [str(review_item.id)],
+            "request_text_overrides": {str(review_item.id): edited_text},
+            "expires_in_hours": 72,
+        },
+    )
+
+    assert response.status_code == 201
+    item = response.json()["data"]["items"][0]
+    assert item["review_item_id"] == str(review_item.id)
+    assert item["request_text"] == edited_text.strip()
+
+
+async def test_draft_persists_owner_selected_document_clause_with_server_evidence(
+    adjustment_context,
+) -> None:
+    client, adapter = adjustment_context
+    contract_id = await reviewed_contract(client, adapter)
+    clause = completed_document_clause(adapter, contract_id=contract_id)
+    request_text = "결과물 승인 기한을 5영업일로 명확히 적어 주세요."
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={
+            "review_item_ids": [],
+            "manual_items": [
+                {
+                    "document_clause_id": str(clause.id),
+                    "request_text": request_text,
+                }
+            ],
+            "expires_in_hours": 72,
+        },
+    )
+
+    assert response.status_code == 201
+    draft = response.json()["data"]
+    assert len(draft["items"]) == 1
+    item = draft["items"][0]
+    assert item["review_item_id"] != str(clause.id)
+    assert item["user_choice"] == "REQUEST"
+    assert item["request_text"] == request_text
+    stored = adapter.mock_review_items[UUID(item["review_item_id"])]
+    assert stored.original_text == clause.source_text
+    assert stored.suggestion_request == request_text
+
+    sent = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests/{draft['id']}/send",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"confirmed": True},
+    )
+    assert sent.status_code == 200
+    token = sent.json()["data"]["public_url"].rsplit("/", maxsplit=1)[-1]
+    public = await client.get(f"/api/v1/public/adjustment-requests/{token}")
+    assert public.status_code == 200
+    assert public.json()["data"]["items"][0]["request_text"] == request_text
+
+
+async def test_draft_rejects_unknown_document_clause(adjustment_context) -> None:
+    client, adapter = adjustment_context
+    contract_id = await reviewed_contract(client, adapter)
+    completed_document_clause(adapter, contract_id=contract_id)
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={
+            "manual_items": [
+                {
+                    "document_clause_id": str(uuid4()),
+                    "request_text": "이 조항의 기한을 명확히 적어 주세요.",
+                }
+            ],
+            "expires_in_hours": 72,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"expires_in_hours": 72},
+        {
+            "manual_items": [
+                {"document_clause_id": str(uuid4()), "request_text": "   "},
+            ],
+            "expires_in_hours": 72,
+        },
+        {
+            "review_item_ids": [str(uuid4()) for _ in range(4)],
+            "manual_items": [
+                {"document_clause_id": str(uuid4()), "request_text": "기한을 명확히 적어 주세요."},
+            ],
+            "expires_in_hours": 72,
+        },
+    ],
+)
+async def test_draft_rejects_invalid_combined_item_counts_and_manual_copy(
+    adjustment_context,
+    payload,
+) -> None:
+    client, adapter = adjustment_context
+    contract_id = await reviewed_contract(client, adapter)
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        lambda item_id: {str(uuid4()): "선택하지 않은 항목"},
+        lambda item_id: {str(item_id): "   "},
+        lambda item_id: {str(item_id): "x" * 1201},
+    ],
+)
+async def test_draft_rejects_invalid_request_text_overrides(
+    adjustment_context,
+    overrides,
+) -> None:
+    client, adapter = adjustment_context
+    contract_id = await reviewed_contract(client, adapter)
+    review_item = selected_review_item(
+        contract_id=contract_id,
+        choice=SuggestionChoice.REQUEST,
+    )
+    adapter._mock_review_items[review_item.id] = review_item
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/adjustment-requests",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={
+            "review_item_ids": [str(review_item.id)],
+            "request_text_overrides": overrides(review_item.id),
+            "expires_in_hours": 72,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 async def test_send_freezes_items_transitions_contract_and_replays_safely(

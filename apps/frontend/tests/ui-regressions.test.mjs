@@ -13,20 +13,104 @@ test("owner navigation keeps integrated management and aggregate performance adj
 
   assert.ok(manageIndex < performanceIndex);
   assert.ok(performanceIndex < renewalIndex);
-  assert.match(header, /href: `\/contracts\/\$\{DEMO_CONTRACT_ID\}\/performance`/);
+  assert.match(header, /href: contractId \? `\/contracts\/\$\{contractId\}\/performance`/);
+  assert.match(header, /adapter\.getDashboard\(\)/);
   assert.match(header, /pathname\.startsWith\("\/performance"\)/);
   assert.match(header, /href: "\/performance"/);
   assert.match(header, /<AuthControl \/>/);
 });
 
-test("request editor exposes independent font controls and matching evidence signal", async () => {
+test("develop-style comparison keeps independent left and right font controls", async () => {
   const viewer = await source("src/app/contracts/[id]/page.tsx");
 
+  assert.match(viewer, /const \[fontScale, setFontScale\]/);
   assert.match(viewer, /const \[reqFontScale, setReqFontScale\]/);
   assert.match(viewer, /<FontScaleButtons onChange=\{setFontScale\}/);
   assert.match(viewer, /<FontScaleButtons onChange=\{setReqFontScale\}/);
-  assert.match(viewer, /CLAUSE_MENU_STYLE\.unconfirmed\.bg/);
+  assert.match(viewer, /계약서 원문/);
+  assert.match(viewer, /조정 요청 작성/);
+  assert.match(viewer, /단디 설명 더 보기/);
+  assert.match(viewer, /explainClauseMeaning\(clause\)/);
+  assert.match(viewer, /이 조항의 의미/);
+  assert.match(viewer, /내가 알고 있던 내용과 무엇이 다른가/);
+  assert.match(viewer, /내가 답한 \{comparison\.label\}/);
+  assert.match(viewer, /계약서 원문/);
+  assert.match(viewer, /왜 확인이 필요한가/);
+  assert.match(viewer, /확인 기준 · \{signal\.officialBasis\}/);
+  assert.match(viewer, /understoodComparisonFor/);
+  assert.match(viewer, /relatedSignals=\{related\}/);
+  assert.match(viewer, /icon: "!"/);
+  assert.match(viewer, /icon: "⋯"/);
+  assert.match(viewer, /icon: "✓"/);
+  assert.match(viewer, /aria-label="조항 메뉴 열기"/);
+  assert.match(viewer, /\{menu\.icon\}/);
+  assert.match(viewer, /fixed inset-0 z-40/);
+  assert.doesNotMatch(viewer, /자동 비교에서 이 조항/);
+  assert.match(viewer, /handleClauseAction/);
+  assert.match(viewer, /Object\.keys\(drafts\)\.length === 0/);
   assert.match(viewer, /style=\{\{ fontSize: `\$\{reqFontScale\}rem` \}\}/);
+});
+
+test("live clause detail reuses the develop clause card without inventing source pages", async () => {
+  const [page, card] = await Promise.all([
+    source("src/app/contracts/[id]/clauses/[clauseId]/page.tsx"),
+    source("src/components/ClauseCard.tsx"),
+  ]);
+
+  assert.match(page, /liveReviewItemToClause\(item\)/);
+  assert.match(page, /<ClauseCard/);
+  assert.match(card, /clause\.original\.page > 0/);
+  assert.match(card, /① 원문 근거 미확인/);
+});
+
+test("live contract review keeps the five answers beside original-clause evidence", async () => {
+  const [viewer, understood, viewModel] = await Promise.all([
+    source("src/app/contracts/[id]/page.tsx"),
+    source("src/lib/understood.ts"),
+    source("src/lib/reviewViewModel.ts"),
+  ]);
+
+  assert.match(viewer, /adapter\.getLiveContractReview\(contractId\)/);
+  assert.match(viewer, /from "@\/lib\/reviewViewModel"/);
+  assert.match(viewer, /liveReviewToDashboard\(state\.data\)/);
+  assert.match(viewer, /<ViewerBody/);
+  assert.match(viewer, /내가 이해한 조건 요약/);
+  for (const [key, label] of [
+    ["durationText", "계약 기간"],
+    ["monthlyAmount", "매달 내는 금액"],
+    ["totalAmount", "총 계약금액"],
+    ["refundText", "환불 조건"],
+    ["terminationText", "중도 해지"],
+  ]) {
+    assert.match(viewModel, new RegExp(key));
+    assert.match(understood, new RegExp(label));
+  }
+  assert.match(viewer, /계약서 원문/);
+  assert.match(viewer, /조정 요청 작성/);
+  assert.match(viewModel, /item\.sourceText/);
+  assert.match(viewModel, /item\.sourcePage/);
+  assert.match(viewModel, /item\.sourceConfidence/);
+  assert.match(viewer, /persistReviewSelection\(c\.id, draft\.choice\)/);
+  assert.match(viewer, /persistReviewSelection\(clauseId, choice\)/);
+  assert.match(viewer, /await selectionQueue\.current/);
+});
+
+test("live comparison shows every parsed clause on the left and selected requests on the right", async () => {
+  const [viewer, request] = await Promise.all([
+    source("src/app/contracts/[id]/page.tsx"),
+    source("src/app/contracts/[id]/request/page.tsx"),
+  ]);
+
+  assert.match(viewer, /doc\.clauses\.map/);
+  assert.match(viewer, /data\.clauses\.filter\(\(clause\) => drafts\[clause\.id\]\)/);
+  assert.match(viewer, /왼쪽 원문에서 조항을 선택해주세요/);
+  assert.match(viewer, /goToClause/);
+  assert.match(viewer, /requestCount === 0 \|\| requestCount > 4/);
+  assert.match(viewer, /한 요청서에는 최대 4건만 담을 수 있어요/);
+  assert.doesNotMatch(viewer, /<iframe/);
+  assert.doesNotMatch(viewer, /contract-pdf-viewer/);
+  assert.match(request, /const manualItems = Object\.entries\(draft \?\? \{\}\)/);
+  assert.match(request, /return \[\.\.\.automaticItems, \.\.\.manualItems\]/);
 });
 
 test("public adjustment links are restored, copied explicitly, and never auto-sent", async () => {
@@ -47,4 +131,15 @@ test("public adjustment links are restored, copied explicitly, and never auto-se
   assert.match(storage, /expiresAt <= Date\.now\(\)/);
   assert.match(storage, /parsed\.protocol === "http:"/);
   assert.doesNotMatch(requestPage, /fetch\([^]*sentLink/);
+});
+
+test("live adjustment responses keep the develop response dashboard layout", async () => {
+  const responses = await source("src/app/contracts/[id]/responses/page.tsx");
+
+  assert.match(responses, /function LiveResponseBody/);
+  assert.match(responses, /응답 현황/);
+  assert.match(responses, /역제안이 도착했어요/);
+  assert.match(responses, /내 요청안/);
+  assert.match(responses, /대행사 역제안/);
+  assert.match(responses, /<ResolutionButtons/);
 });

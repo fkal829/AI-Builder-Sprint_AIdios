@@ -89,12 +89,16 @@ function ClauseDetail({
         {/* ① 원문 (사실) */}
         <LayerBlock
           layer="original"
-          label={`① 원문 · 계약서 ${clause.original.page}페이지`}
+          label={clause.original.page > 0
+            ? `① 원문 · 계약서 ${clause.original.page}페이지`
+            : "① 원문 근거 미확인"}
         >
           “{clause.original.text}”
-          <div className="mt-1.5">
-            <SourceLink source={clause.original} />
-          </div>
+          {clause.original.page > 0 && (
+            <div className="mt-1.5">
+              <SourceLink source={clause.original} />
+            </div>
+          )}
         </LayerBlock>
 
         {/* ② 내가 이해한 조건 */}

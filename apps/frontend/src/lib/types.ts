@@ -112,6 +112,8 @@ export interface DocClause {
   no: string; // "제1조"
   title: string; // "계약의 목적"
   body: string; // 조항 원문
+  sourcePage?: number; // 원본 PDF에서 이 원문 구간이 시작하는 페이지
+  confidence?: number | null; // 파서가 조항 단위 확신도를 제공하지 않으면 null
   risk: ClauseRisk;
   note?: string; // 설문·계약 대조 기반 쉬운 코멘트 (고/중위험에만)
 }

@@ -24,10 +24,19 @@ test("ApiAdapter implements every remaining P0 owner workflow", async () => {
 });
 
 test("adjustment link creation remains a manual delivery boundary", async () => {
-  const page = await source("src/app/contracts/[id]/request/page.tsx");
+  const [page, adapter] = await Promise.all([
+    source("src/app/contracts/[id]/request/page.tsx"),
+    source("src/lib/adapter.ts"),
+  ]);
 
   assert.match(page, /const link = await adapter\.sendAdjustmentDraft/);
   assert.match(page, /setSentLink\(link\)/);
+  assert.match(page, /Object\.fromEntries\(/);
+  assert.match(page, /item\.id, item\.text/);
+  assert.match(page, /filter\(\(item\) => item\.manual\)/);
+  assert.match(page, /documentClauseId: item\.id/);
+  assert.match(adapter, /manual_items: manualItems\.map/);
+  assert.match(adapter, /document_clause_id: item\.documentClauseId/);
   assert.match(page, /아직 자동 발송되지 않았습니다/);
   assert.match(page, /응답 대기 화면으로/);
 });
@@ -72,4 +81,39 @@ test("dashboard routes each persisted contract status to its live workflow", asy
   assert.match(dashboard, /\/performance/);
   assert.match(dashboard, /status === "RENEWAL_DUE"/);
   assert.match(dashboard, /\/renewal/);
+});
+
+test("failed contract analysis can be explicitly retried with the same documents", async () => {
+  const [adapter, page] = await Promise.all([
+    source("src/lib/adapter.ts"),
+    source("src/app/contracts/[id]/analysis/page.tsx"),
+  ]);
+
+  assert.match(adapter, /supporting_document_ids: supportingDocumentIds/);
+  assert.match(page, /task\.document_id/);
+  assert.match(page, /task\.supporting_document_ids/);
+  assert.match(page, /adapter\.startContractAnalysis/);
+  assert.match(page, /같은 계약서 다시 분석하기/);
+  assert.match(page, /문서 분량에 따라 1~3분/);
+});
+
+test("live review loads all parsed clauses and exposes the signed PDF only as a new-tab link", async () => {
+  const [adapter, page, viewModel] = await Promise.all([
+    source("src/lib/adapter.ts"),
+    source("src/app/contracts/[id]/page.tsx"),
+    source("src/lib/reviewViewModel.ts"),
+  ]);
+
+  assert.match(adapter, /encodeURIComponent\(task\.document_id\)\}\/access/);
+  assert.match(adapter, /documentAccessUrl: documentAccess\.access_url/);
+  assert.match(adapter, /task\.result\.document_clauses \?\? \[\]/);
+  assert.match(viewModel, /review\.documentClauses\.map/);
+  assert.match(viewModel, /findDocumentClause/);
+  assert.match(page, /계약서 원문/);
+  assert.match(page, /doc\.clauses\.map/);
+  assert.match(page, /PDF 원본 보기/);
+  assert.match(page, /target="_blank"/);
+  assert.match(page, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(page, /<iframe/);
+  assert.doesNotMatch(page, /localStorage[^]*documentAccessUrl/);
 });

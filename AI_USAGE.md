@@ -45,22 +45,43 @@ live 모드는 `UPSTAGE_SOLAR_MODEL=solar-pro3`,
 - 비보정 자기평가값과 모델 한계
 
 응답은 `contract-review-copy-v1` 프롬프트와 strict JSON Schema로 요청하고 별도의
-Pydantic 스키마로 다시 검증한다. 검토 항목은 실제 live 검증에서 성공한 기본 1건
-chunk로 순차 호출한다. 일부 chunk가 성공했더라도 전체 입력 UUID의 개수·중복·순서가
-일치해야만 결과를 반환하며, 뒤 chunk가 실패하면 앞 결과도 저장하지 않고 분석 전체를
-실패 처리한다. 세 문구가 같거나, 금지된 단정 표현 또는 입력 근거에 없는 숫자가 있어도
-저장하지 않는다. 결정 규칙과 Solar 문구가 함께 사용된 항목은
-`detection_method=HYBRID`다.
+Pydantic 스키마로 다시 검증한다. 검토 항목은 Adapter 상한인 4건씩 묶어 호출한다.
+전체 입력 UUID의 개수·중복·순서가 일치하고 모든 문구 검증을 통과한 경우에만 Solar
+문구를 사용한다. 세 문구가 같거나, 금지된 단정 표현 또는 입력 근거에 없는 숫자가
+있으면 Solar 결과 전체를 저장하지 않는다. 결정 규칙과 검증된 Solar 문구가 함께
+사용된 항목은 `detection_method=HYBRID`다.
 
 Solar Chat API는 보정된 confidence를 제공하지 않는다. 공개 계약의
 `model_confidence`에는 Solar가 반환한 비보정 자기평가값을 넣고,
 `model_limitations`에 이것이 법적 판단 정확도나 `source_confidence`가 아님을
 명시한다. `source_confidence`는 기존 원문 추출 근거 값으로 유지한다.
 
-Solar timeout, HTTP 오류, 잘못된 JSON, 스키마 오류, 출력 ID 불일치는 고정 문구로
-조용히 대체하지 않고 해당 분석을 `FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다.
-`429`와 일시적인 전송·서버 오류만 한 번 재시도한다. 이 호출은 추출 Evaluator Loop의
-`attempt_count`에 포함하지 않는다.
+Solar timeout, HTTP 오류, 잘못된 JSON, 스키마 오류, 출력 ID 불일치가 발생하면 모델
+문구를 버리고 서버가 이미 만든 결정 규칙 기반 검토 항목으로 분석을 완료한다. 이때
+항목은 `detection_method=DETERMINISTIC`이고 모델 자기평가와 한계를 저장하지 않는다.
+`429`와 일시적인 전송·서버 오류만 Adapter에서 한 번 재시도한다. Solar 문구 실패는
+추출값·원문 근거·신호·상태 전이를 변경하지 않으며 추출 Evaluator Loop의
+`attempt_count`에도 포함하지 않는다.
+
+### 2026-08-01 저장 계약 live 실패 재현과 fallback 검증
+
+사용자가 명시적으로 실제 Upstage 사용을 요청해, 저장된 계약 한 건을 DB 쓰기 없이
+live Adapter 경로로 재현했다. API key·계약 원문·파일명·Storage 경로·원시 모델 응답은
+출력하지 않았다.
+
+- Document Parse 성공: 5페이지, 원문 요소 74개
+- Universal Extraction 성공: 대상 필드 28개, Evaluator 2라운드
+- 결정 규칙 검토 후보 14개 생성
+- 기존 1건 chunk 경로에서 첫 항목은 성공했지만 다음 항목의 Solar 문구에 입력 근거에
+  없는 숫자가 포함되어 안전 검증이 거부했음을 확인
+- 기본 chunk를 4건으로 바꾸고 같은 계약을 다시 실행한 결과, Solar 문구 검증 실패를
+  결정 규칙 항목 14개로 fallback해 최종 `Analysis` 스키마 검증 완료
+- 최종 안전 메타데이터: 추출값 28개, 검토 항목 14개,
+  `detection_method=DETERMINISTIC` 14개
+
+이 검증은 실제 Upstage Parse·Extract·Solar 연결과 실패 격리를 확인한 것이며 계약
+내용의 법률적 정확도 평가는 아니다. 저장된 실패 작업의 재시작은 사용자가 화면의
+`같은 계약서 다시 분석하기`를 명시적으로 눌렀을 때만 새 작업으로 실행한다.
 
 ## Solar 역제안 비교
 

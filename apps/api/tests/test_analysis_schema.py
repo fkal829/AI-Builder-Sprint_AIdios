@@ -19,6 +19,7 @@ from app.schemas.analysis import (
     Analysis,
     AnalysisStartRequest,
     AnalysisTask,
+    DocumentClause,
     ExtractedTerm,
     ExtractedTermCandidate,
     ReviewItem,
@@ -280,6 +281,27 @@ def test_analysis_accepts_review_evidence_linked_to_its_extracted_term() -> None
     )
 
     assert result.review_items[0].related_extracted_term_ids == [TERM_ID]
+
+
+def test_analysis_rejects_non_sequential_document_clause_ordinals() -> None:
+    clause = DocumentClause(
+        id=uuid4(),
+        document_id=DOCUMENT_ID,
+        ordinal=2,
+        heading="제1조",
+        title="목적",
+        source_page=1,
+        source_text="제1조(목적) 계약의 목적을 정한다.",
+        confidence=None,
+    )
+
+    with pytest.raises(ValidationError, match="순번"):
+        Analysis(
+            contract_id=CONTRACT_ID,
+            document_clauses=[clause],
+            extracted_terms=[],
+            review_items=[],
+        )
 
 
 def test_analysis_rejects_related_term_outside_its_result() -> None:

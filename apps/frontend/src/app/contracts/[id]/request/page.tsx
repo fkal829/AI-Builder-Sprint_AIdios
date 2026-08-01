@@ -41,8 +41,24 @@ export default function RequestPreviewPage() {
 
   const items = useMemo(() => {
     if (state.status !== "ready") return [];
+    const manualItems = Object.entries(draft ?? {})
+      .filter(([, item]) => item.origin === "manual" && item.text.trim() !== "")
+      .map(([clauseId, item]) => ({
+        id: clauseId,
+        title: item.title ?? "추가한 조항",
+        text: item.text,
+        manual: true,
+      }));
     if (!isUsingMock) {
-      return state.data.items.map((item) => ({ ...item, manual: false }));
+      const automaticItems = state.data.items.map((item) => {
+        const saved = draft?.[item.id];
+        return {
+          ...item,
+          text: saved && saved.origin !== "manual" ? saved.text : item.text,
+          manual: false,
+        };
+      });
+      return [...automaticItems, ...manualItems];
     }
 
     const previewById = new Map(state.data.items.map((item) => [item.id, item]));
@@ -56,15 +72,6 @@ export default function RequestPreviewPage() {
         title: previewById.get(itemId)?.title ?? "확인한 조항",
         text: item.text,
         manual: false,
-      }));
-
-    const manualItems = Object.entries(draft ?? {})
-      .filter(([, d]) => d.origin === "manual" && d.text.trim() !== "")
-      .map(([clauseId, d]) => ({
-        id: clauseId,
-        title: d.title ?? "추가한 조항",
-        text: d.text,
-        manual: true,
       }));
 
     return [...autoItems, ...manualItems];
@@ -86,7 +93,15 @@ export default function RequestPreviewPage() {
     try {
       const adjustment = await adapter.createAdjustmentDraft(
         id,
-        items.map((item) => item.id),
+        items.filter((item) => !item.manual).map((item) => item.id),
+        Object.fromEntries(
+          items
+            .filter((item) => !item.manual)
+            .map((item) => [item.id, item.text]),
+        ),
+        items
+          .filter((item) => item.manual)
+          .map((item) => ({ documentClauseId: item.id, requestText: item.text })),
       );
       const link = await adapter.sendAdjustmentDraft(id, adjustment.id);
       window.localStorage.setItem(`dandi:last-adjustment:${id}`, adjustment.id);

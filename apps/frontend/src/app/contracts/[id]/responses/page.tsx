@@ -253,40 +253,72 @@ function LiveResponseBody({
     return <EmptyState title="응답 기한이 지났어요" body="대행사와 기존 연락 채널로 다음 진행을 확인해주세요." />;
   }
 
+  const respondedCount = detail.items.filter((item) => item.decision !== null).length;
+  const counterItems = detail.items.filter((item) => item.decision === "COUNTER");
+
   return (
-    <div className="flex flex-col gap-3">
-      {detail.items.map((item, index) => (
-        <article key={item.reviewItemId} className="rounded-xl border border-neutral200 bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-black text-ink">조정 항목 {index + 1}</h2>
-            <ResponseDecision decision={item.decision} />
-          </div>
-          <div className="mt-3 rounded-lg bg-subtle p-3">
-            <div className="text-[10px] font-bold text-neutral500">내 요청</div>
-            <p className="mt-1 text-[13px] leading-relaxed text-ink">{item.requestText}</p>
-          </div>
-          {item.counterText && (
-            <div className="mt-2 rounded-lg border border-brand600 bg-brand50 p-3">
-              <div className="text-[10px] font-bold text-brand700">대행사 역제안</div>
-              <p className="mt-1 text-[13px] font-bold leading-relaxed text-ink">
-                {item.counterText}
-              </p>
+    <div className="flex flex-col gap-4">
+      <div className="rounded-xl border border-neutral200 bg-white p-4">
+        <div className="text-sm font-black text-ink">응답 현황</div>
+        <div className="mt-3 flex gap-2.5">
+          <div className="flex-1 rounded-lg bg-subtle py-2.5 text-center">
+            <div className="text-xl font-black text-ink">
+              {respondedCount}/{detail.items.length}
             </div>
-          )}
+            <div className="text-[10px] text-neutral500">응답 완료</div>
+          </div>
+          <div className="flex-1 rounded-lg bg-subtle py-2.5 text-center">
+            <div className="text-sm font-black text-ink">
+              {detail.expiresAt?.slice(0, 10) ?? "확인 필요"}
+            </div>
+            <div className="text-[10px] text-neutral500">응답 기한</div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-1.5">
+          {detail.items.map((item, index) => (
+            <div
+              key={item.reviewItemId}
+              className="flex items-center justify-between rounded-md bg-subtle px-3 py-2 text-xs"
+            >
+              <span className="text-neutral700">조정 항목 {index + 1}</span>
+              <ResponseDecision decision={item.decision} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {counterItems.map((item, index) => (
+        <article key={item.reviewItemId} className="rounded-xl border-2 border-ink bg-white p-4">
+          <div className="text-sm font-black text-ink">
+            역제안이 도착했어요 — 조정 항목 {index + 1}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <div className="flex-1 rounded-lg bg-subtle p-3">
+              <div className="mb-1 text-[10px] text-neutral500">내 요청안</div>
+              <div className="text-[13px] font-bold text-ink">{item.requestText}</div>
+            </div>
+            <div className="flex-1 rounded-lg border border-brand600 bg-brand50 p-3">
+              <div className="mb-1 text-[10px] text-brand700">대행사 역제안</div>
+              <div className="text-[13px] font-bold text-ink">{item.counterText}</div>
+            </div>
+          </div>
           {item.reason && (
             <p className="mt-2 text-[11px] leading-relaxed text-neutral700">사유: {item.reason}</p>
           )}
           {item.comparison && (
-            <div className="mt-3 rounded-lg bg-neutral100 p-3 text-[11px] leading-relaxed text-neutral700">
-              <b className="text-ink">AI 비교</b>
+            <div className="mt-3 rounded-md bg-subtle px-3 py-2.5 text-[11px] leading-relaxed text-neutral700">
+              <b className="text-ink">AI 설명</b>
               <p className="mt-1">{item.comparison.changedSummary}</p>
-              <ul className="mt-1 list-disc pl-4">
-                {item.comparison.remainingChecks.map((check) => <li key={check}>{check}</li>)}
-              </ul>
+              {item.comparison.remainingChecks.length > 0 && (
+                <ul className="mt-1 list-disc pl-4">
+                  {item.comparison.remainingChecks.map((check) => <li key={check}>{check}</li>)}
+                </ul>
+              )}
               <p className="mt-1 font-bold">{item.comparison.finalConfirmation}</p>
             </div>
           )}
-          {detail.status !== "CONFIRMED" && item.decision === "COUNTER" && (
+          {detail.status !== "CONFIRMED" && (
             <ResolutionButtons
               selected={resolutions[item.reviewItemId] ?? null}
               acceptLabel="역제안 반영"
@@ -294,26 +326,14 @@ function LiveResponseBody({
               onSelect={(resolution) => onResolution(item.reviewItemId, resolution)}
             />
           )}
-          {detail.status !== "CONFIRMED" && item.decision === "ACCEPT" && (
-            <ResolutionButtons
-              selected={resolutions[item.reviewItemId] ?? "ACCEPT_REQUEST"}
-              acceptLabel="요청안 반영"
-              acceptValue="ACCEPT_REQUEST"
-              onSelect={(resolution) => onResolution(item.reviewItemId, resolution)}
-            />
-          )}
-          {item.decision === "REJECT" && (
-            <p className="mt-3 rounded-lg bg-neutral100 p-3 text-[11px] font-bold text-neutral700">
-              거절된 항목은 원계약 조건을 유지합니다.
-            </p>
-          )}
-          {detail.status === "CONFIRMED" && (
-            <p className="mt-3 rounded-lg bg-brand50 p-3 text-[11px] font-bold text-brand700">
-              이 조정 결과는 이미 확정됐습니다. 수정 계약서를 확인해주세요.
-            </p>
-          )}
         </article>
       ))}
+
+      {detail.status === "CONFIRMED" && (
+        <p className="rounded-lg bg-brand50 p-3 text-[11px] font-bold text-brand700">
+          조정 결과를 확정했습니다. 수정 계약서를 업로드해 반영 내용을 확인해주세요.
+        </p>
+      )}
       <p className="text-[11px] leading-relaxed text-neutral500">
         응답 확정 뒤에도 바로 서명하지 않습니다. 대행사가 다시 보낸 수정 계약서를
         업로드하고 반영 내용을 직접 확인합니다.

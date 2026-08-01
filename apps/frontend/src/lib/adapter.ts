@@ -166,16 +166,33 @@ type ApiRevisedContractReview = {
   }[];
 };
 type ApiReviewItem = {
-  id: string; type: LiveReviewItem["type"]; plain_explanation: string; source_page: number | null;
+  id: string; type: LiveReviewItem["type"]; severity: LiveReviewItem["severity"];
+  plain_explanation: string; source_page: number | null;
   source_text: string | null; source_confidence: number | null; basis_text: string;
   suggestion_accept: string; suggestion_compromise: string; suggestion_request: string;
   user_choice: SuggestionChoice | null;
 };
 
+type ApiDocumentClause = {
+  id: string;
+  document_id: string;
+  ordinal: number;
+  heading: string;
+  title: string;
+  source_page: number;
+  source_text: string;
+  confidence: number | null;
+};
+
 type ApiAnalysisTask = {
+  document_id: string;
+  supporting_document_ids: string[];
   status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
   error_code: string | null;
-  result: { review_items: ApiReviewItem[] } | null;
+  result: {
+    document_clauses?: ApiDocumentClause[];
+    review_items: ApiReviewItem[];
+  } | null;
 };
 
 type ApiPerformanceMetricCandidate = {
@@ -274,6 +291,7 @@ type ApiContractPerformance = {
 export type LiveReviewItem = {
   id: string;
   type: "MISMATCH" | "NO_BASIS" | "UNCLEAR" | "MISSING" | "NEEDS_CHECK";
+  severity: "INFO" | "CHECK" | "IMPORTANT";
   plainExplanation: string;
   sourcePage: number | null;
   sourceText: string | null;
@@ -285,10 +303,23 @@ export type LiveReviewItem = {
   userChoice: SuggestionChoice | null;
 };
 
+export type LiveDocumentClause = {
+  id: string;
+  documentId: string;
+  ordinal: number;
+  heading: string;
+  title: string;
+  sourcePage: number;
+  sourceText: string;
+  confidence: number | null;
+};
+
 export type LiveContractReview = {
   title: string;
   counterpartyName: string;
   status: ContractSummary["status"];
+  documentAccessUrl: string | null;
+  documentClauses: LiveDocumentClause[];
   understood: UnderstoodTermInput | null;
   items: LiveReviewItem[];
 };
@@ -296,6 +327,11 @@ export type LiveContractReview = {
 export type LiveAdjustmentDraft = {
   id: string;
   items: { reviewItemId: string; requestText: string }[];
+};
+
+export type ManualAdjustmentDraftInput = {
+  documentClauseId: string;
+  requestText: string;
 };
 
 export type RevisedContractReview = {
@@ -523,11 +559,20 @@ export interface DataAdapter {
   uploadContractDocument(contractId: string, file: File): Promise<{ id: string }>;
   uploadRevisedContract(contractId: string, file: File): Promise<{ id: string }>;
   saveUnderstoodTerms(contractId: string, input: UnderstoodTermInput): Promise<void>;
-  startContractAnalysis(contractId: string, documentId: string): Promise<void>;
+  startContractAnalysis(
+    contractId: string,
+    documentId: string,
+    supportingDocumentIds?: string[],
+  ): Promise<void>;
   getContractAnalysis(contractId: string): Promise<ApiAnalysisTask>;
   getLiveContractReview(contractId: string): Promise<LiveContractReview>;
   selectReviewItem(contractId: string, itemId: string, choice: SuggestionChoice): Promise<void>;
-  createAdjustmentDraft(contractId: string, reviewItemIds: string[]): Promise<LiveAdjustmentDraft>;
+  createAdjustmentDraft(
+    contractId: string,
+    reviewItemIds: string[],
+    requestTextOverrides?: Record<string, string>,
+    manualItems?: ManualAdjustmentDraftInput[],
+  ): Promise<LiveAdjustmentDraft>;
   getAdjustmentPreview(contractId: string): Promise<AdjustmentPreview>;
   sendAdjustmentDraft(
     contractId: string,
@@ -1029,16 +1074,27 @@ class MockAdapter implements DataAdapter {
     await delay(120);
   }
 
-  async startContractAnalysis(contractId: string, documentId: string) {
+  async startContractAnalysis(
+    contractId: string,
+    documentId: string,
+    supportingDocumentIds: string[] = [],
+  ) {
     void contractId;
     void documentId;
+    void supportingDocumentIds;
     await delay(240);
   }
 
   async getContractAnalysis(_contractId: string): Promise<ApiAnalysisTask> {
     void _contractId;
     await delay(120);
-    return { status: "COMPLETED", error_code: null, result: { review_items: [] } };
+    return {
+      document_id: "mock-contract-document",
+      supporting_document_ids: [],
+      status: "COMPLETED",
+      error_code: null,
+      result: { document_clauses: [], review_items: [] },
+    };
   }
 
   async getLiveContractReview(_contractId: string): Promise<LiveContractReview> {
@@ -1047,6 +1103,8 @@ class MockAdapter implements DataAdapter {
       title: DEMO_CONTRACT.summary.title,
       counterpartyName: DEMO_CONTRACT.summary.counterpartyName,
       status: DEMO_CONTRACT.summary.status,
+      documentAccessUrl: DEMO_CONTRACT.document.pdfUrl,
+      documentClauses: [],
       understood: null,
       items: [],
     };
@@ -1061,12 +1119,23 @@ class MockAdapter implements DataAdapter {
   async createAdjustmentDraft(
     _contractId: string,
     _reviewItemIds: string[],
+    requestTextOverrides: Record<string, string> = {},
+    manualItems: ManualAdjustmentDraftInput[] = [],
   ): Promise<LiveAdjustmentDraft> {
     void _contractId;
     await delay(120);
     return {
       id: "mock-adjustment",
-      items: _reviewItemIds.map((reviewItemId) => ({ reviewItemId, requestText: "조정 요청" })),
+      items: [
+        ..._reviewItemIds.map((reviewItemId) => ({
+          reviewItemId,
+          requestText: requestTextOverrides[reviewItemId] ?? "조정 요청",
+        })),
+        ...manualItems.map((item) => ({
+          reviewItemId: item.documentClauseId,
+          requestText: item.requestText,
+        })),
+      ],
     };
   }
 
@@ -1581,11 +1650,18 @@ class ApiAdapter extends MockAdapter {
     );
   }
 
-  async startContractAnalysis(contractId: string, documentId: string): Promise<void> {
+  async startContractAnalysis(
+    contractId: string,
+    documentId: string,
+    supportingDocumentIds: string[] = [],
+  ): Promise<void> {
     await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`, {
       method: "POST",
       headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ document_id: documentId, supporting_document_ids: [] }),
+      body: JSON.stringify({
+        document_id: documentId,
+        supporting_document_ids: supportingDocumentIds,
+      }),
     });
   }
 
@@ -1618,10 +1694,16 @@ class ApiAdapter extends MockAdapter {
     if (task.status !== "COMPLETED" || !task.result) {
       throw new PublicApiError(409, "ANALYSIS_NOT_COMPLETED", "분석이 아직 완료되지 않았습니다.");
     }
+    const documentAccess = await this.request<{ access_url: string }>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/documents/`
+        + `${encodeURIComponent(task.document_id)}/access`,
+      { headers: await this.ownerHeaders() },
+    );
     return {
       title: contract.title,
       counterpartyName: contract.counterparty_name,
       status: contract.status,
+      documentAccessUrl: documentAccess.access_url,
       understood: contract.understood_term
         ? {
             durationText: contract.understood_term.duration_text,
@@ -1631,8 +1713,19 @@ class ApiAdapter extends MockAdapter {
             terminationText: contract.understood_term.termination_text,
           }
         : null,
+      documentClauses: (task.result.document_clauses ?? []).map((clause) => ({
+        id: clause.id,
+        documentId: clause.document_id,
+        ordinal: clause.ordinal,
+        heading: clause.heading,
+        title: clause.title,
+        sourcePage: clause.source_page,
+        sourceText: clause.source_text,
+        confidence: clause.confidence,
+      })),
       items: task.result.review_items.map((item) => ({
-        id: item.id, type: item.type, plainExplanation: item.plain_explanation,
+        id: item.id, type: item.type, severity: item.severity,
+        plainExplanation: item.plain_explanation,
         sourcePage: item.source_page, sourceText: item.source_text, sourceConfidence: item.source_confidence,
         basisText: item.basis_text, suggestionAccept: item.suggestion_accept,
         suggestionCompromise: item.suggestion_compromise, suggestionRequest: item.suggestion_request,
@@ -1647,8 +1740,13 @@ class ApiAdapter extends MockAdapter {
     });
   }
 
-  async createAdjustmentDraft(contractId: string, reviewItemIds: string[]): Promise<LiveAdjustmentDraft> {
-    const data = await this.request<{ id: string; items: { review_item_id: string; request_text: string }[] }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests`, { method: "POST", headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ review_item_ids: reviewItemIds, expires_in_hours: 72 }) });
+  async createAdjustmentDraft(
+    contractId: string,
+    reviewItemIds: string[],
+    requestTextOverrides: Record<string, string> = {},
+    manualItems: ManualAdjustmentDraftInput[] = [],
+  ): Promise<LiveAdjustmentDraft> {
+    const data = await this.request<{ id: string; items: { review_item_id: string; request_text: string }[] }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests`, { method: "POST", headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ review_item_ids: reviewItemIds, request_text_overrides: requestTextOverrides, manual_items: manualItems.map((item) => ({ document_clause_id: item.documentClauseId, request_text: item.requestText })), expires_in_hours: 72 }) });
     return { id: data.id, items: data.items.map((item) => ({ reviewItemId: item.review_item_id, requestText: item.request_text })) };
   }
 
@@ -2046,7 +2144,7 @@ class ApiAdapter extends MockAdapter {
 
   private async ownerHeaders(): Promise<HeadersInit> {
     const accessToken =
-      this.demoBearerToken ?? (await this.ownerAccessTokenProvider());
+      this.demoBearerToken || (await this.ownerAccessTokenProvider());
     if (!accessToken) {
       throw new PublicApiError(
         401,

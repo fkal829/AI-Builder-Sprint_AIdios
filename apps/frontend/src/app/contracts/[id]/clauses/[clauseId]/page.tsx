@@ -6,6 +6,7 @@ import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ClauseCard } from "@/components/ClauseCard";
 import { useAsync } from "@/lib/hooks";
 import { adapter, isUsingMock } from "@/lib/adapter";
+import { liveReviewItemToClause } from "@/lib/reviewViewModel";
 import type { SuggestionChoice } from "@/lib/types";
 
 /* ⑤ 조항 카드 상세 / 문구 선택 — 2-2 상세 패널을 화면으로 사용. */
@@ -73,6 +74,7 @@ function LiveClauseDetail({ contractId, clauseId }: { contractId: string; clause
   const item = state.status === "ready"
     ? state.data.items.find((candidate) => candidate.id === clauseId) ?? null
     : null;
+  const clause = item ? liveReviewItemToClause(item) : null;
   const selected = choice ?? item?.userChoice ?? null;
 
   const save = async () => {
@@ -111,32 +113,14 @@ function LiveClauseDetail({ contractId, clauseId }: { contractId: string; clause
       {state.status === "ready" && !item && (
         <p className="py-10 text-center text-sm text-neutral500">조항을 찾을 수 없어요.</p>
       )}
-      {item && (
+      {clause && (
         <div className="flex flex-col gap-3">
-          <div className="rounded-xl border border-neutral200 bg-white p-4">
-            <h2 className="text-sm font-black text-ink">{item.plainExplanation}</h2>
-            <p className="mt-3 rounded-lg bg-subtle p-3 text-[12px] leading-relaxed text-neutral700">
-              {item.sourcePage ? `계약서 ${item.sourcePage}쪽: ` : "원문 근거 없음: "}
-              {item.sourceText ?? "직접 확인이 필요합니다."}
-            </p>
-          </div>
-          {([
-            ["ACCEPT", "원안 수용", item.suggestionAccept],
-            ["COMPROMISE", "절충안", item.suggestionCompromise],
-            ["REQUEST", "요청안", item.suggestionRequest],
-          ] as const).map(([value, label, text]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setChoice(value)}
-              className={`rounded-xl border p-4 text-left ${
-                selected === value ? "border-brand700 bg-brand50" : "border-neutral300 bg-white"
-              }`}
-            >
-              <span className="text-[11px] font-bold text-neutral500">{label}</span>
-              <span className="mt-1 block text-[13px] font-bold leading-relaxed text-ink">{text}</span>
-            </button>
-          ))}
+          <ClauseCard
+            clause={clause}
+            variant="detail"
+            selectedChoice={selected}
+            onSelectChoice={setChoice}
+          />
           {error && <p className="text-xs font-bold text-red-700">{error}</p>}
         </div>
       )}

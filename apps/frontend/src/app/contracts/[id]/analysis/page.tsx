@@ -18,6 +18,11 @@ export default function AnalysisPage() {
   const { id } = useParams<{ id: string }>();
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [failedDocumentId, setFailedDocumentId] = useState<string | null>(null);
+  const [failedSupportingDocumentIds, setFailedSupportingDocumentIds] = useState<string[]>([]);
+  const [canRetry, setCanRetry] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [pollRun, setPollRun] = useState(0);
 
   useEffect(() => {
     if (!isUsingMock) return;
@@ -43,6 +48,9 @@ export default function AnalysisPage() {
           return;
         }
         if (task.status === "FAILED") {
+          setFailedDocumentId(task.document_id);
+          setFailedSupportingDocumentIds(task.supporting_document_ids);
+          setCanRetry(task.error_code !== "DOCUMENT_PARSE_FAILED");
           setError(
             task.error_code === "DOCUMENT_PARSE_FAILED"
               ? "계약서 내용을 읽지 못했어요. PDF 파일을 확인한 뒤 다시 등록해 주세요."
@@ -64,7 +72,27 @@ export default function AnalysisPage() {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [id, router]);
+  }, [id, pollRun, router]);
+
+  const retryAnalysis = async () => {
+    if (!failedDocumentId || retrying) return;
+    setRetrying(true);
+    setError(null);
+    try {
+      await adapter.startContractAnalysis(
+        id,
+        failedDocumentId,
+        failedSupportingDocumentIds,
+      );
+      setCanRetry(false);
+      setStep(0);
+      setPollRun((run) => run + 1);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "분석을 다시 시작하지 못했습니다.");
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   return (
     <AppScreen size="sm">
@@ -109,16 +137,30 @@ export default function AnalysisPage() {
         {error ? (
           <div className="flex flex-col items-center gap-3 text-center">
             <p className="text-xs font-bold leading-relaxed text-brand800">⚠ {error}</p>
-            <button
-              type="button"
-              onClick={() => router.replace("/contracts/new")}
-              className="rounded-lg border border-ink px-4 py-2 text-xs font-bold text-ink"
-            >
-              새 계약서 등록하기
-            </button>
+            <div className="flex flex-wrap justify-center gap-2">
+              {failedDocumentId && canRetry ? (
+                <button
+                  type="button"
+                  onClick={() => void retryAnalysis()}
+                  disabled={retrying}
+                  className="rounded-lg bg-ink px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  {retrying ? "다시 시작하는 중…" : "같은 계약서 다시 분석하기"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => router.replace("/contracts/new")}
+                className="rounded-lg border border-ink px-4 py-2 text-xs font-bold text-ink"
+              >
+                새 계약서 등록하기
+              </button>
+            </div>
           </div>
         ) : (
-          <p className="text-center text-[11px] text-neutral500">보통 30초 정도 걸려요</p>
+          <p className="text-center text-[11px] text-neutral500">
+            문서 분량에 따라 1~3분 정도 걸릴 수 있어요
+          </p>
         )}
       </div>
     </AppScreen>

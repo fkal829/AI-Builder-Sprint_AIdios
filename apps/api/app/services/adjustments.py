@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.core.enums import (
     AdjustmentRequestStatus,
@@ -16,6 +16,8 @@ from app.repositories.adjustments import (
     AdjustmentRequestItemRecord,
     AdjustmentRequestRecord,
     AdjustmentResponseRecord,
+    DocumentClauseForAdjustment,
+    ManualReviewItemRecord,
     ReviewItemForAdjustment,
 )
 from app.schemas.adjustments import (
@@ -67,10 +69,15 @@ class AdjustmentService:
         payload: AdjustmentRequestCreate,
     ) -> AdjustmentRequest:
         async def perform() -> IdempotentOutcome[AdjustmentRequest]:
-            items = await self._validated_draft_items(
+            items, manual_review_items = await self._validated_draft_items(
                 owner_id=owner_id,
                 contract_id=contract_id,
                 review_item_ids=payload.review_item_ids,
+                request_text_overrides=payload.request_text_overrides,
+                manual_items={
+                    item.document_clause_id: item.request_text
+                    for item in payload.manual_items
+                },
             )
             now = self._utc_now()
             record = AdjustmentRequestRecord(
@@ -89,6 +96,7 @@ class AdjustmentService:
             saved = await self._repository.create_adjustment_draft_with_audit(
                 owner_id=owner_id,
                 record=record,
+                manual_review_items=tuple(manual_review_items),
             )
             if saved is None:
                 raise ResourceNotFound()
@@ -296,7 +304,9 @@ class AdjustmentService:
         owner_id: UUID,
         contract_id: UUID,
         review_item_ids: list[UUID],
-    ) -> list[AdjustmentRequestItemRecord]:
+        request_text_overrides: dict[UUID, str],
+        manual_items: dict[UUID, str],
+    ) -> tuple[list[AdjustmentRequestItemRecord], list[ManualReviewItemRecord]]:
         review_items = await self._repository.list_review_items_for_adjustment(
             owner_id=owner_id,
             contract_id=contract_id,
@@ -307,7 +317,42 @@ class AdjustmentService:
         by_id = {item.id: item for item in review_items}
         if set(by_id) != set(review_item_ids):
             raise InvalidAdjustmentRequest("선택한 검토 항목을 찾을 수 없습니다.")
-        return [_request_item_from_review(by_id[item_id]) for item_id in review_item_ids]
+        adjustment_items = [
+            _request_item_from_review(
+                by_id[item_id],
+                request_text_override=request_text_overrides.get(item_id),
+            )
+            for item_id in review_item_ids
+        ]
+        clauses = await self._repository.list_document_clauses_for_adjustment(
+            owner_id=owner_id,
+            contract_id=contract_id,
+            document_clause_ids=list(manual_items),
+        )
+        if clauses is None:
+            raise ResourceNotFound()
+        clauses_by_id = {clause.id: clause for clause in clauses}
+        if set(clauses_by_id) != set(manual_items):
+            raise InvalidAdjustmentRequest("선택한 계약 원문 조항을 찾을 수 없습니다.")
+
+        manual_records = [
+            _manual_review_item(
+                contract_id=contract_id,
+                clause=clauses_by_id[clause_id],
+                request_text=manual_items[clause_id],
+            )
+            for clause_id in manual_items
+        ]
+        adjustment_items.extend(
+            AdjustmentRequestItemRecord(
+                review_item_id=item.id,
+                user_choice=SuggestionChoice.REQUEST,
+                request_text=item.request_text,
+                before_text=item.source_text,
+            )
+            for item in manual_records
+        )
+        return adjustment_items, manual_records
 
     def _replay_sent(self, stored: dict[str, Any]) -> AdjustmentRequestSent:
         token = self._public_tokens.token_for_id(UUID(stored["token_id"]))
@@ -368,7 +413,11 @@ class AdjustmentService:
         return now.astimezone(UTC)
 
 
-def _request_item_from_review(review_item: ReviewItemForAdjustment) -> AdjustmentRequestItemRecord:
+def _request_item_from_review(
+    review_item: ReviewItemForAdjustment,
+    *,
+    request_text_override: str | None = None,
+) -> AdjustmentRequestItemRecord:
     if review_item.status != ReviewItemStatus.SELECTED or review_item.user_choice not in {
         SuggestionChoice.COMPROMISE,
         SuggestionChoice.REQUEST,
@@ -376,7 +425,7 @@ def _request_item_from_review(review_item: ReviewItemForAdjustment) -> Adjustmen
         raise InvalidAdjustmentRequest(
             "SELECTED 상태의 절충안 또는 요청안만 조정 요청에 포함할 수 있습니다."
         )
-    request_text = (
+    request_text = request_text_override.strip() if request_text_override is not None else (
         review_item.suggestion_compromise
         if review_item.user_choice == SuggestionChoice.COMPROMISE
         else review_item.suggestion_request
@@ -389,6 +438,29 @@ def _request_item_from_review(review_item: ReviewItemForAdjustment) -> Adjustmen
         request_text=request_text,
         category=review_item.category,
         before_text=review_item.original_text,
+    )
+
+
+def _manual_review_item(
+    *,
+    contract_id: UUID,
+    clause: DocumentClauseForAdjustment,
+    request_text: str,
+) -> ManualReviewItemRecord:
+    item_id = uuid5(
+        NAMESPACE_URL,
+        f"dandi://contracts/{contract_id}/document-clauses/{clause.id}/adjustment",
+    )
+    return ManualReviewItemRecord(
+        id=item_id,
+        document_clause_id=clause.id,
+        analysis_task_id=clause.analysis_task_id,
+        contract_id=contract_id,
+        document_id=clause.document_id,
+        source_page=clause.source_page,
+        source_text=clause.source_text,
+        source_confidence=clause.source_confidence,
+        request_text=request_text.strip(),
     )
 
 

@@ -181,8 +181,9 @@ Solar는 서버 규칙이 만든 누락·불일치·불명확 후보에 항목�
 원안 수용·절충·요청 문구만 붙입니다. 기본 모델은
 `UPSTAGE_SOLAR_MODEL=solar-pro3`, timeout은
 `UPSTAGE_SOLAR_TIMEOUT_SECONDS=120`입니다. 응답은 strict JSON Schema와
-Pydantic으로 검증하며 잘못된 응답은 고정 문구로 대체하지 않고
-`FAILED/ANALYSIS_SCHEMA_INVALID`로 처리합니다. mock의 Solar 문구는 실제 API
+Pydantic으로 검증하고 검토 항목은 최대 4건씩 호출합니다. Solar 요청이나 문구 검증이
+실패하면 모델 문구를 저장하지 않고 서버의 결정 규칙 기반 검토 항목으로 분석을
+완료합니다. 추출값과 원문 근거는 그대로 유지합니다. mock의 Solar 문구는 실제 API
 응답이 아닙니다.
 
 소유자용 조정 상세 조회의 역제안 비교도 같은 Solar Chat 설정을 사용합니다.

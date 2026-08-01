@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from pypdf import PdfWriter
 
 from app.adapters.base import ParsedDocument, ParsedPage
-from app.adapters.solar import SolarReviewAdapter
+from app.adapters.solar import SolarReviewAdapter, SolarReviewError
 from app.adapters.supabase import SupabaseAdapter
 from app.adapters.upstage import UpstageAdapter, UpstageExtractionError
 from app.api.dependencies import get_analysis_service, get_supabase_adapter
@@ -26,11 +26,57 @@ from app.core.exceptions import ExternalStorageFailure
 from app.main import app
 from app.repositories.analysis import AnalysisTaskRecord
 from app.schemas.analysis import ExtractedTermCandidate
-from app.services.analysis import ANALYSIS_FIELDS, AnalysisService
+from app.services.analysis import ANALYSIS_FIELDS, AnalysisService, _build_document_clauses
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000013")
 DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000041")
 BEARER_TOKEN = "local-demo-owner-token"
+
+
+def test_document_clause_split_keeps_headings_preamble_and_page_continuation() -> None:
+    document_id = uuid4()
+    parsed = ParsedDocument(
+        pages=(
+            ParsedPage(
+                number=1,
+                text=(
+                    "광고대행 계약서\n"
+                    "제1조(목적) 이 계약의 목적을 정한다.\n"
+                    "제 2 조 (계약기간) 계약기간은 1년이다."
+                ),
+            ),
+            ParsedPage(number=2, text="앞 조항의 이어지는 내용과 서명란"),
+        ),
+        model="fake-parse",
+    )
+
+    clauses = _build_document_clauses(document_id=document_id, parsed_document=parsed)
+
+    assert [clause.ordinal for clause in clauses] == [1, 2, 3, 4]
+    assert [clause.heading for clause in clauses] == [
+        "1쪽 원문",
+        "제1조",
+        "제2조",
+        "2쪽 원문",
+    ]
+    assert clauses[1].title == "목적"
+    assert clauses[2].title == "계약기간"
+    assert clauses[3].source_text == "앞 조항의 이어지는 내용과 서명란"
+    assert all(clause.document_id == document_id for clause in clauses)
+    assert all(clause.confidence is None for clause in clauses)
+
+
+def test_document_clause_ids_are_deterministic_for_same_parsed_document() -> None:
+    document_id = uuid4()
+    parsed = ParsedDocument(
+        pages=(ParsedPage(number=1, text="제1조(목적) 계약의 목적"),),
+        model="fake-parse",
+    )
+
+    first = _build_document_clauses(document_id=document_id, parsed_document=parsed)
+    second = _build_document_clauses(document_id=document_id, parsed_document=parsed)
+
+    assert [clause.id for clause in first] == [clause.id for clause in second]
 
 
 def make_pdf() -> bytes:
@@ -66,6 +112,11 @@ class AlwaysInvalidExtractAdapter:
 class MissingSolarOutputAdapter:
     async def generate_review_content(self, *, items):
         return []
+
+
+class RejectedSolarOutputAdapter:
+    async def generate_review_content(self, *, items):
+        raise SolarReviewError("Solar 검토 결과가 스키마와 맞지 않습니다.")
 
 
 class RoundTrackingExtractAdapter:
@@ -253,6 +304,9 @@ async def test_starts_idempotent_analysis_and_processes_mock_result(analysis_con
     assert completed.status == AnalysisStatus.COMPLETED
     assert completed.attempt_count == 2
     assert completed.result is not None
+    assert completed.result.document_clauses
+    assert completed.result.document_clauses[0].document_id == document_id
+    assert completed.result.document_clauses[0].source_text
     assert completed.result.extracted_terms
     assert completed.result.review_items
     assert all(
@@ -616,6 +670,34 @@ async def test_invalid_solar_output_fails_analysis_without_partial_review_items(
     assert not repository.mock_review_items
 
 
+async def test_rejected_solar_copy_falls_back_to_deterministic_review_items(
+    analysis_context,
+) -> None:
+    client, repository, service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    service.reviewer = RejectedSolarOutputAdapter()
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"document_id": str(document_id), "supporting_document_ids": []},
+    )
+
+    task = repository.mock_analysis_tasks[UUID(response.json()["data"]["id"])]
+    assert response.status_code == 202
+    assert task.status == AnalysisStatus.COMPLETED
+    assert task.error_code is None
+    assert task.result is not None
+    assert task.result.review_items
+    assert all(
+        item.detection_method.value == "DETERMINISTIC"
+        and item.model_confidence is None
+        and item.model_limitations is None
+        for item in task.result.review_items
+    )
+
+
 async def test_analysis_start_requires_auth_and_idempotency_header(analysis_context) -> None:
     client, _repository, _service = analysis_context
     contract_id = await create_contract(client)
@@ -676,6 +758,7 @@ async def test_gets_latest_completed_analysis_result(analysis_context) -> None:
     assert body["data"]["attempt_count"] == 2
     assert body["data"]["error_code"] is None
     assert body["data"]["result"]["contract_id"] == str(contract_id)
+    assert body["data"]["result"]["document_clauses"]
     assert body["data"]["result"]["extracted_terms"]
     assert body["data"]["result"]["review_items"]
 

@@ -12,14 +12,40 @@ from app.core.enums import (
 from app.core.text_safety import contains_unsafe_legal_conclusion
 
 
+class ManualAdjustmentItemCreate(BaseModel):
+    document_clause_id: UUID
+    request_text: str = Field(min_length=1, max_length=1200)
+
+    @model_validator(mode="after")
+    def request_text_is_not_blank(self) -> "ManualAdjustmentItemCreate":
+        if not self.request_text.strip():
+            raise ValueError("수동 조정 요청 문구는 비어 있을 수 없습니다.")
+        return self
+
+
 class AdjustmentRequestCreate(BaseModel):
-    review_item_ids: list[UUID] = Field(min_length=1, max_length=4)
+    review_item_ids: list[UUID] = Field(default_factory=list, max_length=4)
+    request_text_overrides: dict[UUID, str] = Field(default_factory=dict, max_length=4)
+    manual_items: list[ManualAdjustmentItemCreate] = Field(default_factory=list, max_length=4)
     expires_in_hours: int = Field(ge=1, le=168)
 
     @model_validator(mode="after")
     def review_items_are_unique(self) -> "AdjustmentRequestCreate":
         if len(set(self.review_item_ids)) != len(self.review_item_ids):
             raise ValueError("review_item_ids는 중복될 수 없습니다.")
+        manual_clause_ids = [item.document_clause_id for item in self.manual_items]
+        if len(set(manual_clause_ids)) != len(manual_clause_ids):
+            raise ValueError("manual_items의 document_clause_id는 중복될 수 없습니다.")
+        item_count = len(self.review_item_ids) + len(self.manual_items)
+        if not 1 <= item_count <= 4:
+            raise ValueError("조정 요청 항목은 모두 합해 1~4개여야 합니다.")
+        if not set(self.request_text_overrides).issubset(self.review_item_ids):
+            raise ValueError("request_text_overrides 키는 review_item_ids에 포함되어야 합니다.")
+        if any(
+            not text.strip() or len(text.strip()) > 1200
+            for text in self.request_text_overrides.values()
+        ):
+            raise ValueError("수정 요청 문구는 1~1200자여야 합니다.")
         return self
 
 

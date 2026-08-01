@@ -2,35 +2,42 @@
 
 import Link from "next/link";
 import { AppScreen } from "@/components/AppScreen";
-import { StatTile, StatRow } from "@/components/StatTile";
+import { StatTile } from "@/components/StatTile";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
 import { useAsync } from "@/lib/hooks";
 import { adapter } from "@/lib/adapter";
-import { won } from "@/lib/format";
 import type { BadgeTone } from "@/lib/status";
 import type { ContractSummary } from "@/lib/types";
 
 export default function DashboardPage() {
   const state = useAsync(() => adapter.getDashboard(), []);
-  const attentionContract = state.status === "ready"
-    ? state.data.contracts.find((contract) => contract.status === "REVIEW_REQUIRED")
-      ?? state.data.contracts[0]
-    : null;
+  const hasContracts = state.status === "ready" && state.data.contracts.length > 0;
 
   return (
     <AppScreen wide>
-      {/* 히어로 */}
-      <header className="mb-8">
-        <p className="text-[13px] font-bold text-brand700">
-          계약을 읽고, 말하기 어려운 조건을 대신 정리해드려요
-        </p>
-        <h1 className="mt-1.5 text-3xl font-black tracking-tight text-ink lg:text-4xl">
-          안녕하세요, 사장님
-        </h1>
-        <p className="mt-2 text-[15px] text-neutral500">
-          계약서의 조건을 함께 확인하고, 필요한 조정 요청을 문서로 남길 수 있어요.
-        </p>
+      {/* 히어로 — 새 계약 추가가 첫 화면의 유일한 진입점이다 */}
+      <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[13px] font-bold text-brand700">
+            계약을 읽고, 말하기 어려운 조건을 대신 정리해드려요
+          </p>
+          <h1 className="mt-1.5 text-3xl font-black tracking-tight text-ink lg:text-4xl">
+            안녕하세요, 사장님
+          </h1>
+          <p className="mt-2 text-[15px] text-neutral500">
+            계약서의 조건을 함께 확인하고, 필요한 조정 요청을 문서로 남길 수 있어요.
+          </p>
+        </div>
+        {/* 계약이 없을 때는 빈 상태 카드의 버튼이 진입점 역할을 한다 */}
+        {hasContracts && (
+          <Link
+            href="/contracts/new"
+            className="flex h-12 flex-none items-center justify-center rounded-lg bg-ink px-6 text-[15px] font-bold text-white hover:bg-ink/90"
+          >
+            + 새 계약서 올리기
+          </Link>
+        )}
       </header>
 
       {state.status === "loading" && (
@@ -70,9 +77,8 @@ export default function DashboardPage() {
 
       {state.status === "ready" && state.data.contracts.length > 0 && (
         <div className="flex flex-col gap-6">
-          {/* 집계 타일 6개 가로배치 */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            <StatTile size="lg" value={state.data.stats.total} label="전체 계약" />
+          {/* 집계 타일 — 모바일 2×2, 데스크탑 4칸 */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatTile size="lg" value={state.data.stats.signing} label="서명 중" />
             <StatTile size="lg" value={state.data.stats.inProgress} label="진행 중" />
             <StatTile size="lg" value={state.data.stats.completed} label="완료" />
@@ -82,68 +88,46 @@ export default function DashboardPage() {
               label="만료 임박"
               emphasis
             />
-            <StatTile
-              size="lg"
-              value={state.data.stats.unresolvedSignals}
-              label="미해결 확인 신호"
-            />
-          </div>
-
-          {/* 3분할 지표 */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <StatRow
-              label="이행 대기 / 제출 / 확인 완료"
-              value={`${state.data.stats.obligationPending} / ${state.data.stats.obligationSubmitted} / ${state.data.stats.obligationApproved}`}
-            />
-            <StatRow label="총 약정액" value={won(state.data.stats.totalCommitted)} />
-            <StatRow
-              label="지급 조건 충족액"
-              value={won(state.data.stats.paymentConditionMet)}
-            />
           </div>
 
           {/* 내 계약 목록 */}
           <section>
-            <div className="mb-1 flex items-center justify-between border-b border-neutral200 pb-3">
+            <div className="mb-1 border-b border-neutral200 pb-3">
               <h2 className="text-lg font-black text-ink">내 계약</h2>
-              <Link
-                href="/contracts/new"
-                className="text-[13px] font-bold text-brand700 hover:underline"
-              >
-                + 새 계약서 올리기
-              </Link>
             </div>
             <div>
-              {state.data.contracts.map((c) => (
-                <ContractRow key={c.id} contract={c} />
-              ))}
+              {[...state.data.contracts]
+                .sort((a, b) => listOrder(a) - listOrder(b))
+                .map((c) => (
+                  <ContractRow key={c.id} contract={c} />
+                ))}
             </div>
           </section>
 
-          {/* 확인이 필요한 내용 */}
-          <section>
-            <h2 className="mb-3 text-lg font-black text-ink">확인이 필요한 내용</h2>
-            {attentionContract && (
-              <Link
-                href={contractHref(attentionContract)}
-                className="flex items-center justify-center rounded-2xl border border-dashed border-neutral300 bg-white/50 px-6 py-10 text-center text-sm text-neutral500 transition hover:border-brand400 hover:bg-white"
-              >
-                계약서의 기간과 금액을 함께 확인하고, 필요하면 조정 요청 문구를 선택할
-                수 있어요.
-              </Link>
-            )}
-          </section>
-
+          {/* 광고효과 모아보기 진입 */}
           <Link
-            href="/contracts/new"
-            className="flex h-12 w-fit items-center justify-center rounded-lg bg-ink px-6 text-[15px] font-bold text-white hover:bg-ink/90"
+            href="/performance"
+            className="flex items-center justify-between gap-4 rounded-2xl border border-neutral200 bg-white px-5 py-4 transition hover:border-brand400"
           >
-            새 계약서 올리기
+            <div className="min-w-0">
+              <div className="text-[15px] font-bold text-ink">광고효과 모아보기</div>
+              <p className="mt-0.5 text-[12px] text-neutral500">
+                계약마다 받은 리포트를 한데 모아, 약속한 조건대로 진행되는지 확인해요.
+              </p>
+            </div>
+            <span className="flex-none text-neutral400">→</span>
           </Link>
         </div>
       )}
     </AppScreen>
   );
+}
+
+/** 만료 임박 → 진행 중 → 완료 순. 내가 볼 차례인 계약이 위로 온다. */
+function listOrder(c: ContractSummary): number {
+  if (c.status === "RENEWAL_DUE") return 0;
+  if (c.status === "COMPLETED") return 2;
+  return 1;
 }
 
 function statusBadge(c: ContractSummary): { label: string; tone: BadgeTone } {
@@ -192,7 +176,7 @@ function contractHref(contract: ContractSummary): string {
     return `/contracts/${contract.id}/signature`;
   }
   if (contract.status === "SIGNED" || contract.status === "IN_PROGRESS") {
-    return `/contracts/${contract.id}/obligations`;
+    return `/contracts/${contract.id}/performance`;
   }
   if (contract.status === "COMPLETED" || contract.status === "RENEWAL_DUE") {
     return `/contracts/${contract.id}/renewal`;

@@ -41,3 +41,18 @@ test("performance page uses evidence-backed API data and keeps inquiry delivery 
   assert.doesNotMatch(page, /화면 목업 · 개발 예정/);
   assert.doesNotMatch(page, /const JULY_POSTS/);
 });
+
+test("aggregate performance and integrated obligation use live adapter data", async () => {
+  const [aggregate, contractPage] = await Promise.all([
+    source("src/app/performance/page.tsx"),
+    source("src/app/contracts/[id]/performance/page.tsx"),
+  ]);
+
+  assert.match(aggregate, /adapter\.getDashboard/);
+  assert.match(aggregate, /adapter\.getContractPerformance/);
+  assert.doesNotMatch(aggregate, /const CONTRACTS|화면 목업 · 개발 예정|reportDemo/);
+  assert.match(contractPage, /adapter\.getObligation/);
+  assert.match(contractPage, /adapter\.createObligationEvidenceLink/);
+  assert.match(contractPage, /obligation\.status === "SUBMITTED"/);
+  assert.doesNotMatch(contractPage, /obligation\.status === "PENDING" \|\|/);
+});

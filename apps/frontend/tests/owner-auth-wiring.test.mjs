@@ -52,6 +52,20 @@ test("dashboard authentication failures offer a login recovery path", async () =
   assert.match(dashboard, /로그인 다시 하기/);
 });
 
+test("owner route guard follows Supabase sessions and public signup stays closed", async () => {
+  const [guard, signup, demoAuth] = await Promise.all([
+    source("src/components/RequireAuth.tsx"),
+    source("src/app/signup/page.tsx"),
+    source("src/lib/auth.ts"),
+  ]);
+
+  assert.match(guard, /supabase\.auth\.getSession\(\)/);
+  assert.match(guard, /supabase\.auth\.onAuthStateChange/);
+  assert.match(guard, /isUsingMock \|\| isUsingDemoOwnerToken/);
+  assert.match(signup, /redirect\("\/login"\)/);
+  assert.doesNotMatch(demoAuth, /password|dandi:users|signUp|signIn\(/i);
+});
+
 test("frontend configuration never accepts a service-role secret", async () => {
   const [config, envExample] = await Promise.all([
     source("src/lib/supabase/config.ts"),

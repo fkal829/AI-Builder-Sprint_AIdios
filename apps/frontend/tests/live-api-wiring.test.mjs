@@ -47,13 +47,15 @@ test("counteroffers require an explicit owner resolution", async () => {
 });
 
 test("obligation and renewal decisions persist through their APIs", async () => {
-  const [obligation, renewal] = await Promise.all([
+  const [obligation, legacyObligation, renewal] = await Promise.all([
+    source("src/app/contracts/[id]/performance/page.tsx"),
     source("src/app/contracts/[id]/obligations/page.tsx"),
     source("src/app/contracts/[id]/renewal/page.tsx"),
   ]);
 
   assert.match(obligation, /adapter\.createObligationEvidenceLink/);
   assert.match(obligation, /adapter\.reviewObligation/);
+  assert.match(legacyObligation, /redirect\(`\/contracts\/\$\{id\}\/performance`\)/);
   assert.match(renewal, /adapter\.saveRenewalDecision/);
   assert.match(renewal, /자동으로 시작되지 않습니다/);
 });
@@ -67,7 +69,7 @@ test("dashboard routes each persisted contract status to its live workflow", asy
   assert.match(dashboard, /status === "READY_TO_SIGN"/);
   assert.match(dashboard, /\/signature/);
   assert.match(dashboard, /status === "IN_PROGRESS"/);
-  assert.match(dashboard, /\/obligations/);
+  assert.match(dashboard, /\/performance/);
   assert.match(dashboard, /status === "RENEWAL_DUE"/);
   assert.match(dashboard, /\/renewal/);
 });

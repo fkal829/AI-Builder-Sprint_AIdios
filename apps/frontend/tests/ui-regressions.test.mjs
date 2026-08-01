@@ -5,17 +5,18 @@ import test from "node:test";
 const source = (relativePath) =>
   readFile(new URL(`../${relativePath}`, import.meta.url), "utf8");
 
-test("owner navigation keeps obligation and performance adjacent on a valid route", async () => {
+test("owner navigation keeps integrated management and aggregate performance adjacent", async () => {
   const header = await source("src/components/SiteHeader.tsx");
-  const obligationIndex = header.indexOf('key: "obligations"');
+  const manageIndex = header.indexOf('key: "manage"');
   const performanceIndex = header.indexOf('key: "performance"');
   const renewalIndex = header.indexOf('key: "renewal"');
 
-  assert.ok(obligationIndex < performanceIndex);
+  assert.ok(manageIndex < performanceIndex);
   assert.ok(performanceIndex < renewalIndex);
   assert.match(header, /href: `\/contracts\/\$\{DEMO_CONTRACT_ID\}\/performance`/);
-  assert.match(header, /pathname\.includes\("\/performance"\)/);
-  assert.doesNotMatch(header, /href: "\/performance"/);
+  assert.match(header, /pathname\.startsWith\("\/performance"\)/);
+  assert.match(header, /href: "\/performance"/);
+  assert.match(header, /<AuthControl \/>/);
 });
 
 test("request editor exposes independent font controls and matching evidence signal", async () => {

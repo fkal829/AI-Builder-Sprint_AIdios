@@ -1,19 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ProgressDots } from "@/components/Bits";
+import { FileDropzone } from "@/components/FileDropzone";
 import { UNDERSTOOD_QUESTIONS } from "@/lib/mock";
 import { adapter } from "@/lib/adapter";
 import { saveUnderstood, type UnderstoodKey } from "@/lib/understood";
-
-/** 바이트를 사람이 읽기 쉬운 크기로 변환 */
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 /* ① 계약서 PDF 업로드 + ② 내가 안내받고 이해한 조건 5문항 (타이핑 없이 버튼 선택) */
 export default function NewContractPage() {
@@ -22,15 +16,22 @@ export default function NewContractPage() {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [counterpartyName, setCounterpartyName] = useState("");
-  const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [qIndex, setQIndex] = useState(0);
   const [answers, setAnswers] = useState<Partial<Record<UnderstoodKey, string>>>({});
   const [customText, setCustomText] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const uploaded = !!file;
+
+  // 소개 페이지의 설문 미리보기 진입 — ?phase=questions 이면 바로 문항 화면부터.
+  // URL을 마운트 시 한 번 반영하는 동기화라 초기값은 SSR/CSR 모두 upload로 같다.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("phase") === "questions") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPhase("questions");
+    }
+  }, []);
 
   // 특정 문항의 직접입력 칸에 채워둘 값(이전에 직접 입력한 값, 없으면 빈 문자열)
   const prefillFor = (i: number) => {
@@ -39,25 +40,16 @@ export default function NewContractPage() {
     return prev && !cur.options.includes(prev) ? prev : "";
   };
 
-  /** 파일 검증 후 상태 반영 — 파일 선택/드롭 공통 진입점 */
-  const acceptFile = (f: File | undefined | null) => {
-    if (!f) return;
-    const isPdf =
-      f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) {
-      setError("PDF 파일만 올릴 수 있어요.");
-      setFile(null);
-      return;
-    }
+  /** 드롭존이 통과시킨 파일 반영 — 계약 이름 기본값도 파일명에서 채운다 */
+  const acceptFile = (f: File) => {
     setError(null);
     setFile(f);
     setTitle((current) => current || f.name.replace(/\.pdf$/i, ""));
   };
 
-  const onDrop = (e: React.DragEvent<HTMLElement>) => {
-    e.preventDefault();
-    setDragActive(false);
-    acceptFile(e.dataTransfer.files?.[0]);
+  const rejectFile = (message: string) => {
+    setError(message);
+    setFile(null);
   };
 
   if (phase === "upload") {
@@ -81,59 +73,7 @@ export default function NewContractPage() {
             계약서 PDF를 올려주세요
           </h2>
 
-          {/* 숨겨진 실제 파일 입력 — 드롭존 클릭 시 열림 */}
-          <input
-            ref={inputRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            className="hidden"
-            onChange={(e) => {
-              acceptFile(e.target.files?.[0]);
-              // 같은 파일 재선택도 감지되도록 초기화
-              e.target.value = "";
-            }}
-          />
-
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              setDragActive(false);
-            }}
-            onDrop={onDrop}
-            className={`flex h-32 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm transition ${
-              dragActive
-                ? "border-brand700 bg-brand100 text-brand800"
-                : uploaded
-                  ? "border-brand400 bg-brand50 text-brand700"
-                  : "border-neutral300 text-neutral500 hover:bg-subtle"
-            }`}
-          >
-            {dragActive ? (
-              <>
-                <span className="text-2xl">⤓</span>
-                <span className="font-bold">여기에 놓으면 업로드돼요</span>
-              </>
-            ) : uploaded ? (
-              <>
-                <span className="text-2xl">✓</span>
-                <span className="font-bold">{file!.name}</span>
-                <span className="text-[11px]">
-                  {formatBytes(file!.size)} · 다시 선택하려면 클릭
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="text-2xl">＋</span>
-                <span>PDF를 클릭해서 선택하거나 여기로 끌어다 놓으세요</span>
-              </>
-            )}
-          </button>
+          <FileDropzone file={file} onFile={acceptFile} onError={rejectFile} />
 
           {error && (
             <p className="text-[12px] font-bold text-brand800">⚠ {error}</p>

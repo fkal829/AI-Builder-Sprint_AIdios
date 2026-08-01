@@ -15,7 +15,8 @@ npm run dev     # http://localhost:3000
 npm run build   # 프로덕션 빌드 (Turbopack)
 ```
 
-진입점: `/` (데모 런처). 실제 서비스 진입점은 소상공인 대시보드 `/dashboard`.
+진입점: `/` (서비스 소개). 발표·개발용 데모 런처는 `/demo`, 실제 소상공인 진입점은
+Supabase 이메일 OTP 로그인 `/login`과 대시보드 `/dashboard`입니다.
 
 ## 설계 원칙 (기능보다 우선)
 
@@ -43,9 +44,11 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 | ⑦ 발송 대기 + 역제안 비교 | `/contracts/[id]/responses` |
 | ⑧ 수정 계약서 업로드·대조 | `/contracts/[id]/revision` |
 | ⑨ 모두싸인 상태 + 타임라인 | `/contracts/[id]/signature` |
-| ⑩ 산출물 증빙 확인 | `/contracts/[id]/obligations` |
-| ⑪ 광고효과 기록·대조 | `/contracts/[id]/performance` |
+| ⑩·⑪ 산출물 증빙 + 광고효과 기록·대조 | `/contracts/[id]/performance` |
+| 전체 계약 광고효과 모아보기 | `/performance` |
 | ⑫ 만료·재계약 검토 | `/contracts/[id]/renewal` |
+
+이전 `/contracts/[id]/obligations` 주소는 통합된 performance 화면으로 이동합니다.
 
 ### 대행사 공개 (무가입 · 토큰 접근)
 | 화면 | 경로 |
@@ -56,7 +59,8 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 | ④ 산출물 URL 제출 | `/r/[token]/evidence` |
 
 ### 기타
-- `/` 데모 런처 · `/states` 실패·빈 상태 갤러리(무응답/전부거절/불일치0/파싱실패/첫사용자/링크만료)
+- `/` 서비스 소개 · `/demo` 데모 런처 · `/states` 실패·빈 상태 갤러리
+- `/signup`은 공개 가입을 만들지 않고 `/login`으로 이동합니다.
 
 ## 구조
 

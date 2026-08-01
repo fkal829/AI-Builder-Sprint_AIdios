@@ -7,6 +7,7 @@
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { SiteHeader } from "./SiteHeader";
+import { RequireAuth } from "./RequireAuth";
 
 const MAXW = {
   sm: "max-w-[520px]",
@@ -51,6 +52,7 @@ export function AppScreen({
     <div className="min-h-dvh bg-white">
       <SiteHeader />
 
+      <RequireAuth>
       <div className={`mx-auto w-full ${max} px-6 py-8 lg:px-10 lg:py-10`}>
         {showBack && (
           <button
@@ -84,6 +86,7 @@ export function AppScreen({
           </div>
         )}
       </div>
+      </RequireAuth>
     </div>
   );
 }

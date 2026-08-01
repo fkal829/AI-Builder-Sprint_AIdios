@@ -15,7 +15,7 @@ export default function StatesPage() {
           </p>
         </div>
         <Link
-          href="/"
+          href="/demo"
           className="text-[13px] font-bold text-brand700 underline underline-offset-2"
         >
           ← 런처

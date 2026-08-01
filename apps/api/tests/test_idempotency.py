@@ -291,6 +291,181 @@ async def test_pending_reservation_times_out_as_api_conflict(
         )
 
 
+async def test_tagged_uncertain_exception_preserves_pending_reservation(
+    idempotency_service,
+) -> None:
+    class RecoveryRequired(RuntimeError):
+        pass
+
+    async def perform():
+        raise RecoveryRequired("commit status is uncertain")
+
+    with pytest.raises(RecoveryRequired):
+        await idempotency_service.execute(
+            owner_id=OWNER_ID,
+            operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+            resource_id=CONTRACT_ID,
+            key=uuid4(),
+            request_payload={"period": "2026-08"},
+            perform=perform,
+            replay=lambda payload: payload,
+            preserve_pending_exception=lambda error: isinstance(error, RecoveryRequired),
+        )
+
+    records = idempotency_service._repository.mock_idempotency_records
+    assert len(records) == 1
+    assert records[0].response_status is None
+    assert records[0].response_payload is None
+
+
+async def test_pending_recovery_completes_an_existing_reservation(
+    idempotency_service,
+) -> None:
+    repository = idempotency_service._repository
+    key = uuid4()
+    request_payload = {"period": "2026-08"}
+    await repository.claim_idempotency(
+        owner_id=OWNER_ID,
+        operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+        resource_id=CONTRACT_ID,
+        key=key,
+        request_hash=request_fingerprint(request_payload),
+        created_at=datetime.now(UTC),
+    )
+    service = IdempotencyService(
+        repository,
+        pending_replay_attempts=1,
+        pending_replay_delay_seconds=0,
+    )
+    recovery_calls = 0
+
+    async def recover():
+        nonlocal recovery_calls
+        recovery_calls += 1
+        return IdempotentOutcome(
+            status_code=201,
+            response={"result": "recovered"},
+            replay_payload={"result": "recovered"},
+        )
+
+    result = await service.execute(
+        owner_id=OWNER_ID,
+        operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+        resource_id=CONTRACT_ID,
+        key=key,
+        request_payload=request_payload,
+        perform=lambda: _successful_outcome(),
+        replay=lambda payload: payload,
+        pending_recovery=recover,
+    )
+
+    assert result.status_code == 201
+    assert result.response == {"result": "recovered"}
+    assert result.replayed is True
+    assert recovery_calls == 1
+    assert repository.mock_idempotency_records[0].response_status == 201
+
+
+async def test_pending_recovery_yields_to_the_original_completed_response(
+    idempotency_service,
+) -> None:
+    repository = idempotency_service._repository
+    key = uuid4()
+    request_payload = {"period": "2026-08"}
+    request_hash = request_fingerprint(request_payload)
+    await repository.claim_idempotency(
+        owner_id=OWNER_ID,
+        operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+        resource_id=CONTRACT_ID,
+        key=key,
+        request_hash=request_hash,
+        created_at=datetime.now(UTC),
+    )
+    service = IdempotencyService(
+        repository,
+        pending_replay_attempts=1,
+        pending_replay_delay_seconds=0,
+    )
+
+    async def recover():
+        await repository.complete_idempotency(
+            owner_id=OWNER_ID,
+            operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+            resource_id=CONTRACT_ID,
+            key=key,
+            request_hash=request_hash,
+            response_status=202,
+            response_payload={"result": "original"},
+        )
+        return IdempotentOutcome(
+            status_code=201,
+            response={"result": "recovered"},
+            replay_payload={"result": "recovered"},
+        )
+
+    result = await service.execute(
+        owner_id=OWNER_ID,
+        operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+        resource_id=CONTRACT_ID,
+        key=key,
+        request_payload=request_payload,
+        perform=lambda: _successful_outcome(),
+        replay=lambda payload: payload,
+        pending_recovery=recover,
+    )
+
+    assert result.status_code == 202
+    assert result.response == {"result": "original"}
+    assert result.replayed is True
+
+
+async def test_pending_recovery_does_not_run_after_reservation_disappears(
+    idempotency_service,
+    monkeypatch,
+) -> None:
+    repository = idempotency_service._repository
+    key = uuid4()
+    request_payload = {"period": "2026-08"}
+    await repository.claim_idempotency(
+        owner_id=OWNER_ID,
+        operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+        resource_id=CONTRACT_ID,
+        key=key,
+        request_hash=request_fingerprint(request_payload),
+        created_at=datetime.now(UTC),
+    )
+    service = IdempotencyService(
+        repository,
+        pending_replay_attempts=1,
+        pending_replay_delay_seconds=0,
+    )
+    recovery_calls = 0
+
+    async def missing_record(**_kwargs):
+        return None
+
+    async def recover():
+        nonlocal recovery_calls
+        recovery_calls += 1
+        return await _successful_outcome()
+
+    monkeypatch.setattr(repository, "get_idempotency", missing_record)
+
+    with pytest.raises(IdempotencyConflict):
+        await service.execute(
+            owner_id=OWNER_ID,
+            operation=IdempotencyOperation.PERFORMANCE_REPORT_UPLOAD,
+            resource_id=CONTRACT_ID,
+            key=key,
+            request_payload=request_payload,
+            perform=lambda: _successful_outcome(),
+            replay=lambda payload: payload,
+            pending_recovery=recover,
+        )
+
+    assert recovery_calls == 0
+
+
 def test_request_fingerprint_is_stable_and_does_not_retain_payload() -> None:
     assert request_fingerprint({"b": 2, "a": 1}) == request_fingerprint({"a": 1, "b": 2})
 

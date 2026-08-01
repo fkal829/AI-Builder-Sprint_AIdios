@@ -22,6 +22,7 @@ from app.services.documents import DocumentAccessService, DocumentUploadService
 from app.services.idempotency import IdempotencyService
 from app.services.obligations import ObligationService
 from app.services.performance import PerformanceAccessGuard
+from app.services.performance_upload import PerformanceReportUploadService
 from app.services.public_tokens import PublicTokenService
 from app.services.review_items import ReviewItemService
 from app.services.revised_contracts import RevisedContractService
@@ -198,6 +199,20 @@ async def get_performance_access_guard(
     supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
 ) -> PerformanceAccessGuard:
     return PerformanceAccessGuard(supabase)
+
+
+async def get_performance_report_upload_service(
+    supabase: Annotated[SupabaseAdapter, Depends(get_supabase_adapter)],
+) -> PerformanceReportUploadService:
+    settings = get_settings()
+    return PerformanceReportUploadService(
+        access_repository=supabase,
+        upload_repository=supabase,
+        storage=supabase,
+        idempotency=IdempotencyService(supabase),
+        max_size_bytes=settings.document_max_size_bytes,
+        max_pdf_pages=settings.document_max_pdf_pages,
+    )
 
 
 async def get_counterproposal_comparator(

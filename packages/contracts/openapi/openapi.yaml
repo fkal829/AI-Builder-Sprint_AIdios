@@ -813,7 +813,6 @@ paths:
     post:
       summary: 월별 광고효과 리포트 업로드
       operationId: createPerformanceReport
-      x-implementation-status: planned
       tags: [performance]
       description: |
         소유자가 SIGNED, IN_PROGRESS, RENEWAL_DUE 또는 COMPLETED 계약에 PDF, PNG,
@@ -1235,6 +1234,7 @@ components:
             - DOCUMENT_PARSE_FAILED
             - ANALYSIS_SCHEMA_INVALID
             - ANALYSIS_START_FAILED
+            - EXTERNAL_SERVICE_UNAVAILABLE
             - ADJUSTMENT_LINK_EXPIRED
             - OBLIGATION_LINK_EXPIRED
             - INVALID_STATUS_TRANSITION

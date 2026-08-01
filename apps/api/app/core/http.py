@@ -20,6 +20,10 @@ CANONICAL_OPERATION_IDS = {
     ("PUT", "/contracts/{contract_id}/renewal-decision"): "saveRenewalDecision",
     ("POST", "/contracts/{contract_id}/documents"): "uploadContractDocument",
     (
+        "POST",
+        "/contracts/{contract_id}/performance-reports",
+    ): "createPerformanceReport",
+    (
         "GET",
         "/contracts/{contract_id}/documents/{document_id}/access",
     ): "getDocumentAccess",

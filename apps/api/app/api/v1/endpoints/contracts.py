@@ -30,12 +30,15 @@ from app.api.dependencies import (
     get_review_item_service,
     get_revised_contract_service,
     get_signature_service,
+    get_tone_polish_service,
     get_understood_term_service,
 )
 from app.core.enums import IdempotencyOperation
 from app.core.exceptions import AnalysisStartUnavailable, InvalidDocument
 from app.core.http import request_id
 from app.schemas.adjustments import (
+    AdjustmentCopyPolishRequest,
+    AdjustmentCopyPolishResult,
     AdjustmentRequest,
     AdjustmentRequestCreate,
     AdjustmentRequestSent,
@@ -91,6 +94,7 @@ from app.services.obligations import ObligationService
 from app.services.review_items import ReviewItemService
 from app.services.revised_contracts import RevisedContractService
 from app.services.signatures import SignatureService
+from app.services.tone_polish import TonePolishService
 from app.services.understood_terms import UnderstoodTermService
 
 router = APIRouter()
@@ -101,6 +105,50 @@ NO_STORE_RESPONSE_HEADERS = {
         "schema": {"type": "string", "example": "no-store"},
     }
 }
+
+
+@router.post(
+    "/{contract_id}/adjustment-copy/polish",
+    response_model=ApiResponse[AdjustmentCopyPolishResult],
+    responses={
+        200: {"description": "다듬은 문구 미리보기", "headers": NO_STORE_RESPONSE_HEADERS},
+        401: {
+            "model": ApiResponse[None],
+            "description": "인증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        404: {
+            "model": ApiResponse[None],
+            "description": "계약을 찾을 수 없음",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        422: {
+            "model": ApiResponse[None],
+            "description": "다듬기 입력 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        502: {
+            "model": ApiResponse[None],
+            "description": "Solar 다듬기 또는 출력 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+    },
+)
+async def polish_adjustment_copy(
+    request: Request,
+    response: Response,
+    contract_id: UUID,
+    payload: AdjustmentCopyPolishRequest,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[TonePolishService, Depends(get_tone_polish_service)],
+) -> ApiResponse[AdjustmentCopyPolishResult]:
+    result = await service.polish(
+        owner_id=owner_id,
+        contract_id=contract_id,
+        payload=payload,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return ApiResponse(data=result, error=None, request_id=request_id(request))
 
 
 @router.post(

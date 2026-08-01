@@ -10,6 +10,7 @@ import {
   DASHBOARD_STATS,
 } from "./mock";
 import { getOwnerAccessToken } from "./supabase/client";
+import { politen } from "./tone";
 import type {
   AuditEvent,
   AgencyDecision,
@@ -567,6 +568,8 @@ export interface DataAdapter {
   getContractAnalysis(contractId: string): Promise<ApiAnalysisTask>;
   getLiveContractReview(contractId: string): Promise<LiveContractReview>;
   selectReviewItem(contractId: string, itemId: string, choice: SuggestionChoice): Promise<void>;
+  /** POST /api/v1/contracts/{contractId}/adjustment-copy/polish */
+  polishAdjustmentCopy(contractId: string, text: string): Promise<string>;
   createAdjustmentDraft(
     contractId: string,
     reviewItemIds: string[],
@@ -1550,6 +1553,11 @@ class MockAdapter implements DataAdapter {
       confidence: null,
     };
   }
+
+  async polishAdjustmentCopy(_contractId: string, text: string): Promise<string> {
+    await delay(500);
+    return politen(text);
+  }
 }
 
 class ApiAdapter extends MockAdapter {
@@ -1748,6 +1756,18 @@ class ApiAdapter extends MockAdapter {
   ): Promise<LiveAdjustmentDraft> {
     const data = await this.request<{ id: string; items: { review_item_id: string; request_text: string }[] }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests`, { method: "POST", headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ review_item_ids: reviewItemIds, request_text_overrides: requestTextOverrides, manual_items: manualItems.map((item) => ({ document_clause_id: item.documentClauseId, request_text: item.requestText })), expires_in_hours: 72 }) });
     return { id: data.id, items: data.items.map((item) => ({ reviewItemId: item.review_item_id, requestText: item.request_text })) };
+  }
+
+  async polishAdjustmentCopy(contractId: string, text: string): Promise<string> {
+    const data = await this.request<{ polished_text: string }>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-copy/polish`,
+      {
+        method: "POST",
+        headers: await this.ownerHeaders(),
+        body: JSON.stringify({ text }),
+      },
+    );
+    return data.polished_text;
   }
 
   async getAdjustmentPreview(contractId: string): Promise<AdjustmentPreview> {

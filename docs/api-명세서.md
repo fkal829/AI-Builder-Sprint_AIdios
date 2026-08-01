@@ -37,7 +37,7 @@ attempt·완료·복구 RPC와 비공개 AI Adapter 조합기, append-only 확�
 - **D — 배포·QA 검증:** 배포·환경변수 확인, E2E 실행, 데모 데이터와 테스트 증빙;
   백엔드 endpoint·service·repository 구현은 맡지 않음
 
-현재 활성 API 34개의 구현 주 담당은 B 13개, C 21개이며 D가 직접
+현재 활성 API 35개의 구현 주 담당은 B 14개, C 21개이며 D가 직접
 구현하는 API는 0개다. 이전 데이터 호환용 deprecated `/agreement` 2개는
 이 활성 개수에 포함하지 않는다. D는 모든 endpoint의 배포본 E2E와 데모
 검증 결과를 제공하지만 코드 구현 소유자는 아니다.
@@ -60,6 +60,7 @@ attempt·완료·복구 RPC와 비공개 AI Adapter 조합기, append-only 확�
 | B | `POST` | `/contracts/{contract_id}/analysis` | 분석 작업 시작 |
 | B | `GET` | `/contracts/{contract_id}/analysis` | 최근 분석 상태·결과 조회 |
 | B | `PATCH` | `/contracts/{contract_id}/review-items/{item_id}` | 검토 항목 선택 저장 |
+| B | `POST` | `/contracts/{contract_id}/adjustment-copy/polish` | Solar 조정 요청 문구 다듬기 |
 | C | `POST` | `/contracts/{contract_id}/adjustment-requests` | 조정 요청 초안 생성 |
 | C | `GET` | `/contracts/{contract_id}/adjustment-requests/{adjustment_request_id}` | 소유자용 조정 상세 조회 |
 | C | `POST` | `/contracts/{contract_id}/adjustment-requests/{adjustment_request_id}/send` | 조정 링크 활성화 |
@@ -668,6 +669,29 @@ AI 재실행은 사용자가 확정한 선택을 덮어쓰지 않는다. 선택 
 `UNREVIEWED`의 `user_choice`는 `null`이고 이후 상태에서는 저장된 선택을 반환한다.
 
 ## 5. 조정 요청·대행사 응답 — C
+
+### 5.0 조정 요청 문구 다듬기
+
+`POST /api/v1/contracts/{contract_id}/adjustment-copy/polish`
+
+- 인증: Bearer
+- 담당: B
+- 성공: `200 AdjustmentCopyPolishResponse`
+- 모든 응답: `Cache-Control: no-store`
+- 오류: `401`, `404`, `422`, `502`
+- 입력: 사용자가 직접 작성한 `text` 1~1200자
+- 출력: Solar strict JSON Schema를 통과한 `polished_text` 1~1200자
+
+서버는 계약 소유권을 AI 호출 전에 확인한다. 입력 문구를 신뢰할 수 없는
+데이터로 취급하고, 입력에 없는 사실·금액·날짜·기간·비율·법적 결론을
+추가하지 않도록 제한한다. 입력과 출력의 숫자 토큰 multiset이 정확히 같지
+않거나 금지된 단정 표현이 있으면 결과를 폐기하고 `502 ANALYSIS_SCHEMA_INVALID`를
+반환한다. mock 모드는 입력을 직접 반영하는 규칙 기반 예시이며 live Solar 성공으로
+간주하지 않는다. 입력·출력은 영속화하지 않고 로그에도 남기지 않으며 응답은
+캐시하지 않는다.
+
+이 API는 문구 후보만 반환한다. 사용자가 미리보기의 **이 문구로 적용**을 누르기
+전에는 초안을 변경하지 않고, 적용 후에도 조정 링크를 자동 생성·전송하지 않는다.
 
 ### 5.1 조정 요청 초안 생성
 

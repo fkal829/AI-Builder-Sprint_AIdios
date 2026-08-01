@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { PublicLinkCard } from "@/components/PublicLinkCard";
 import { useAsync } from "@/lib/hooks";
 import { adapter, isUsingMock } from "@/lib/adapter";
 import {
@@ -11,6 +12,7 @@ import {
   saveRequestDraft,
   type RequestDraft,
 } from "@/lib/requestDraft";
+import { loadPublicLink, savePublicLink, type PublicLink } from "@/lib/publicLink";
 
 /* ⑥ 조정 요청서 미리보기 (주경로) — 선택한 문구 확인·발송 전 최종확인.
    톤완충 자유입력(P1)은 접힌 부가 경로로 분리. */
@@ -21,13 +23,20 @@ export default function RequestPreviewPage() {
   const [confirm, setConfirm] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [sentLink, setSentLink] = useState<{ publicUrl: string; expiresAt: string } | null>(null);
+  const [sentLink, setSentLink] = useState<PublicLink | null>(null);
 
   // 뷰어에서 인라인으로 작성한 초안이 있으면 우선 사용(없으면 목업 userChoice로 폴백)
   const [draft, setDraft] = useState<RequestDraft | null>(null);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(loadRequestDraft(id));
+  }, [id]);
+
+  // 이미 만든 링크가 있으면 복원 — 새로고침·재진입해도 링크를 다시 볼 수 있고,
+  // 같은 요청서로 링크를 또 만드는 일을 막는다.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSentLink(loadPublicLink(id));
   }, [id]);
 
   const items = useMemo(() => {
@@ -81,6 +90,7 @@ export default function RequestPreviewPage() {
       );
       const link = await adapter.sendAdjustmentDraft(id, adjustment.id);
       window.localStorage.setItem(`dandi:last-adjustment:${id}`, adjustment.id);
+      savePublicLink(id, link);
       setSentLink(link);
       setConfirm(false);
     } catch (error) {
@@ -151,21 +161,11 @@ export default function RequestPreviewPage() {
             전달해주세요. 대행사는 회원가입 없이 요청서를 열람합니다.
           </p>
           {sentLink && (
-            <div className="rounded-xl border-2 border-brand700 bg-brand50 p-4">
-              <h2 className="text-sm font-black text-ink">대행사 전달 링크가 준비됐어요</h2>
-              <p className="mt-1 text-[11px] leading-relaxed text-neutral700">
-                아직 자동 발송되지 않았습니다. 아래 링크를 복사해 대행사에 직접 보내주세요.
-              </p>
-              <a
-                href={sentLink.publicUrl}
-                className="mt-3 block break-all rounded-lg bg-white p-3 text-xs text-brand700 underline"
-              >
-                {sentLink.publicUrl}
-              </a>
-              <p className="mt-1 text-[10px] text-neutral500">
-                {sentLink.expiresAt.slice(0, 16).replace("T", " ")}까지 유효
-              </p>
-            </div>
+            <PublicLinkCard
+              link={sentLink}
+              title="대행사 전달 링크가 준비됐어요"
+              note="아직 자동 발송되지 않았습니다. 아래 링크를 복사해 대행사에 직접 보내주세요."
+            />
           )}
           {sendError && <p className="text-xs font-bold text-red-700">{sendError}</p>}
         </div>

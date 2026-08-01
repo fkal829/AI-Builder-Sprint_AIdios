@@ -172,7 +172,9 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
   const { document: doc } = data;
   const [selected, setSelected] = useState<string | null>(null);
   const [activeReq, setActiveReq] = useState<string | null>(null);
+  // 좌(원문)·우(조정 요청 작성) 글자 크기는 각각 따로 조절한다
   const [fontScale, setFontScale] = useState(1);
+  const [reqFontScale, setReqFontScale] = useState(1);
 
   // 설문 응답(localStorage) → 요약. 없으면 목업 understood로 폴백.
   const [answers, setAnswers] = useState<Partial<Record<UnderstoodKey, string>> | null>(null);
@@ -351,22 +353,7 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
         <section className="flex flex-col rounded-2xl bg-white ring-1 ring-neutral200">
           <header className="flex items-center justify-between border-b border-neutral200 px-5 py-3">
             <h2 className="text-sm font-black text-ink">계약서 원문</h2>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setFontScale((s) => Math.max(0.85, +(s - 0.1).toFixed(2)))}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral300 text-neutral500 hover:bg-subtle"
-                aria-label="글자 작게"
-              >
-                −
-              </button>
-              <button
-                onClick={() => setFontScale((s) => Math.min(1.4, +(s + 0.1).toFixed(2)))}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral300 text-neutral500 hover:bg-subtle"
-                aria-label="글자 크게"
-              >
-                +
-              </button>
-            </div>
+            <FontScaleButtons onChange={setFontScale} label="계약서 원문" />
           </header>
 
           <div className="px-5 py-5" style={{ fontSize: `${fontScale}rem` }}>
@@ -403,20 +390,34 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
         <section className="flex flex-col gap-4">
           {/* 조정 요청 작성 — 확인이 필요한 조항별 문구 선택·수정 */}
           <div className="rounded-2xl bg-white ring-1 ring-neutral200">
-            <div className="border-b border-neutral200 px-5 py-3">
+            {/* 좌측 원문 헤더와 같은 구조 — 헤더 높이가 픽셀 단위로 일치한다 */}
+            <header className="flex items-center justify-between border-b border-neutral200 px-5 py-3">
               <h2 className="text-sm font-black text-ink">조정 요청 작성</h2>
-            </div>
-            <div className="flex flex-col gap-3 p-3">
+              <FontScaleButtons onChange={setReqFontScale} label="조정 요청" />
+            </header>
+            <div
+              className="flex flex-col gap-3 p-3"
+              style={{ fontSize: `${reqFontScale}rem` }}
+            >
               {Object.keys(drafts).length === 0 && (
                 <div className="mx-1 my-3 rounded-xl border border-dashed border-brand300 bg-brand50 px-5 py-8 text-center">
-                  <div className="text-3xl">👈</div>
-                  <p className="mt-2 text-[15px] font-black text-brand800">
+                  <div className="text-[1.875em]">👈</div>
+                  <p className="mt-2 text-[0.9375em] font-black text-brand800">
                     왼쪽 원문에서 조항을 확인해주세요
                   </p>
-                  <p className="mt-2 text-[12px] leading-relaxed text-neutral700">
+                  <p className="mt-2 text-[0.75em] leading-relaxed text-neutral700">
                     조항 제목 옆의{" "}
-                    <span className="mx-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-brand600 bg-white align-middle text-[10px] font-black text-brand700">
-                      !
+                    {/* 안내가 가리키는 대상이므로 좌측 원문의 미확인 "!" 버튼과 같은 색을 쓴다.
+                        글자 크기의 em은 부모(0.75em = 12px) 기준이라 10px를 유지하려면 10/12. */}
+                    <span
+                      className="mx-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border align-middle text-[0.8333em] font-black"
+                      style={{
+                        backgroundColor: CLAUSE_MENU_STYLE.unconfirmed.bg,
+                        color: CLAUSE_MENU_STYLE.unconfirmed.fg,
+                        borderColor: CLAUSE_MENU_STYLE.unconfirmed.fg,
+                      }}
+                    >
+                      {CLAUSE_MENU_STYLE.unconfirmed.icon}
                     </span>{" "}
                     버튼을 <b>눌러야</b> 확인돼요. 확인한 조항이 이곳에 요청서 카드로 나타나요.
                   </p>
@@ -511,6 +512,36 @@ function ViewerBody({ data, contractId }: { data: ContractDetail; contractId: st
           createRequest();
         }}
       />
+    </div>
+  );
+}
+
+/** 원문 칸·조정 요청 작성 칸 공용 글자 확대·축소.
+    같은 마크업을 공유해야 좌우 헤더 높이와 조작감이 어긋나지 않는다. */
+function FontScaleButtons({
+  onChange,
+  label,
+}: {
+  onChange: (update: (scale: number) => number) => void;
+  /** 스크린리더용 구분 라벨 — 한 화면에 확대/축소 쌍이 둘이라 필요 */
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => onChange((s) => Math.max(0.85, +(s - 0.1).toFixed(2)))}
+        className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral300 text-neutral500 hover:bg-subtle"
+        aria-label={`${label} 글자 작게`}
+      >
+        −
+      </button>
+      <button
+        onClick={() => onChange((s) => Math.min(1.4, +(s + 0.1).toFixed(2)))}
+        className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral300 text-neutral500 hover:bg-subtle"
+        aria-label={`${label} 글자 크게`}
+      >
+        +
+      </button>
     </div>
   );
 }
@@ -723,27 +754,27 @@ function RequestCard({
       }`}
     >
       <div className="mb-1 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-black text-ink">{clause.title}</h3>
+        <h3 className="text-[0.875em] font-black text-ink">{clause.title}</h3>
         <div className="flex flex-none items-center gap-2">
-          <span className="rounded-full bg-brand100 px-2 py-0.5 text-[11px] font-bold text-brand700">
+          <span className="rounded-full bg-brand100 px-2 py-0.5 text-[0.6875em] font-bold text-brand700">
             {SIGNAL_META[clause.signal]}
           </span>
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="text-[11px] font-bold text-neutral500 hover:text-brand700"
+            className="text-[0.6875em] font-bold text-neutral500 hover:text-brand700"
           >
             ✕ 삭제
           </button>
         </div>
       </div>
 
-      <p className="mb-2.5 text-[12px] leading-relaxed text-neutral700">{clause.aiExplanation}</p>
+      <p className="mb-2.5 text-[0.75em] leading-relaxed text-neutral700">{clause.aiExplanation}</p>
 
       {onViewOriginal && (
         <button
           onClick={onViewOriginal}
-          className="mb-2.5 text-[11px] font-bold text-brand700 underline underline-offset-2"
+          className="mb-2.5 text-[0.6875em] font-bold text-brand700 underline underline-offset-2"
         >
           ↖ 원문에서 보기
         </button>
@@ -758,7 +789,7 @@ function RequestCard({
               key={s.choice}
               type="button"
               onClick={() => onChoice(s.choice)}
-              className={`rounded-lg border px-3 py-2 text-left text-[12px] transition ${
+              className={`rounded-lg border px-3 py-2 text-left text-[0.75em] transition ${
                 sel
                   ? "border-2 border-brand700 bg-brand50 font-bold"
                   : "border-neutral300 bg-white hover:border-brand400"
@@ -773,19 +804,19 @@ function RequestCard({
 
       {/* 직접 수정 (원안 수용이 아닐 때만) */}
       {choice === "ACCEPT" ? (
-        <p className="mt-2.5 text-[11px] text-neutral500">원안을 그대로 수용해요 · 요청서에서 제외</p>
+        <p className="mt-2.5 text-[0.6875em] text-neutral500">원안을 그대로 수용해요 · 요청서에서 제외</p>
       ) : (
         <div className="mt-2.5">
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] font-bold text-neutral700">보낼 문구 (직접 수정 가능)</span>
-            <span className="text-[10px] font-bold text-brand700">{CHOICE_HINT[choice]}</span>
+            <span className="text-[0.625em] font-bold text-neutral700">보낼 문구 (직접 수정 가능)</span>
+            <span className="text-[0.625em] font-bold text-brand700">{CHOICE_HINT[choice]}</span>
           </div>
           <textarea
             value={text}
             onChange={(e) => changeText(e.target.value)}
             rows={2}
             placeholder="내 말로 막 써도 돼요. 예) 5년은 너무 길어요 ㅠㅠ"
-            className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[12px] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
+            className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[0.75em] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
           />
 
           {/* 톤 완충 — 지금 문구를 정중하게 다듬기 */}
@@ -793,17 +824,17 @@ function RequestCard({
             type="button"
             onClick={() => setPolished(politen(text))}
             disabled={!text.trim()}
-            className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[11px] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
+            className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[0.6875em] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
           >
             ✨ 정중하게 다듬기
           </button>
 
           {polished !== null && (
             <div className="mt-2 rounded-lg border border-brand600 bg-brand50 px-3 py-2.5">
-              <div className="mb-1 text-[10px] font-bold text-brand800">
+              <div className="mb-1 text-[0.625em] font-bold text-brand800">
                 이렇게 바꿔봤어요
               </div>
-              <p className="text-[12px] leading-relaxed text-ink">“{polished}”</p>
+              <p className="text-[0.75em] leading-relaxed text-ink">“{polished}”</p>
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
@@ -811,14 +842,14 @@ function RequestCard({
                     onText(polished);
                     setPolished(null);
                   }}
-                  className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[11px] font-bold text-white"
+                  className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[0.6875em] font-bold text-white"
                 >
                   이 문구로 적용
                 </button>
                 <button
                   type="button"
                   onClick={() => setPolished(null)}
-                  className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[11px] font-bold text-neutral700"
+                  className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[0.6875em] font-bold text-neutral700"
                 >
                   취소
                 </button>
@@ -873,15 +904,15 @@ function ManualRequestCard({
       className="scroll-mt-4 rounded-xl border border-neutral200 bg-white px-4 py-3.5"
     >
       <div className="mb-1 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-black text-ink">{draft.title}</h3>
+        <h3 className="text-[0.875em] font-black text-ink">{draft.title}</h3>
         <div className="flex flex-none items-center gap-2">
-          <span className="rounded-full bg-brand100 px-2 py-0.5 text-[11px] font-bold text-brand700">
+          <span className="rounded-full bg-brand100 px-2 py-0.5 text-[0.6875em] font-bold text-brand700">
             직접 추가
           </span>
           <button
             type="button"
             onClick={onRemove}
-            className="text-[11px] font-bold text-neutral500 hover:text-brand700"
+            className="text-[0.6875em] font-bold text-neutral500 hover:text-brand700"
           >
             ✕ 삭제
           </button>
@@ -889,7 +920,7 @@ function ManualRequestCard({
       </div>
 
       {sourceBody && (
-        <p className="mb-2.5 whitespace-pre-line text-[12px] leading-relaxed text-neutral700">
+        <p className="mb-2.5 whitespace-pre-line text-[0.75em] leading-relaxed text-neutral700">
           {sourceBody}
         </p>
       )}
@@ -897,7 +928,7 @@ function ManualRequestCard({
       {onViewOriginal && (
         <button
           onClick={onViewOriginal}
-          className="mb-2.5 text-[11px] font-bold text-brand700 underline underline-offset-2"
+          className="mb-2.5 text-[0.6875em] font-bold text-brand700 underline underline-offset-2"
         >
           ↖ 원문에서 보기
         </button>
@@ -905,30 +936,30 @@ function ManualRequestCard({
 
       <div className="mt-1">
         <div className="mb-1 flex items-center justify-between">
-          <span className="text-[10px] font-bold text-neutral700">보낼 문구 (직접 작성)</span>
-          <span className="text-[10px] font-bold text-brand700">요청서에 담겨요</span>
+          <span className="text-[0.625em] font-bold text-neutral700">보낼 문구 (직접 작성)</span>
+          <span className="text-[0.625em] font-bold text-brand700">요청서에 담겨요</span>
         </div>
         <textarea
           value={draft.text}
           onChange={(e) => changeText(e.target.value)}
           rows={2}
           placeholder="추가하고 싶은 요청을 자유롭게 써주세요."
-          className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[12px] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
+          className="w-full resize-y rounded-lg border border-neutral300 px-3 py-2 text-[0.75em] leading-relaxed text-ink outline-none focus:border-ink placeholder:text-neutral400"
         />
 
         <button
           type="button"
           onClick={() => setPolished(politen(draft.text))}
           disabled={!draft.text.trim()}
-          className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[11px] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
+          className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-brand400 bg-brand50 px-2.5 py-1 text-[0.6875em] font-bold text-brand700 transition hover:bg-brand100 disabled:opacity-40"
         >
           ✨ 정중하게 다듬기
         </button>
 
         {polished !== null && (
           <div className="mt-2 rounded-lg border border-brand600 bg-brand50 px-3 py-2.5">
-            <div className="mb-1 text-[10px] font-bold text-brand800">이렇게 바꿔봤어요</div>
-            <p className="text-[12px] leading-relaxed text-ink">“{polished}”</p>
+            <div className="mb-1 text-[0.625em] font-bold text-brand800">이렇게 바꿔봤어요</div>
+            <p className="text-[0.75em] leading-relaxed text-ink">“{polished}”</p>
             <div className="mt-2 flex gap-2">
               <button
                 type="button"
@@ -936,14 +967,14 @@ function ManualRequestCard({
                   onText(polished);
                   setPolished(null);
                 }}
-                className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[11px] font-bold text-white"
+                className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[0.6875em] font-bold text-white"
               >
                 이 문구로 적용
               </button>
               <button
                 type="button"
                 onClick={() => setPolished(null)}
-                className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[11px] font-bold text-neutral700"
+                className="flex-1 rounded-md border border-neutral300 bg-white px-3 py-1.5 text-[0.6875em] font-bold text-neutral700"
               >
                 취소
               </button>

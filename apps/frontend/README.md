@@ -2,7 +2,8 @@
 
 부산 관광상권 소상공인용 AI 광고대행 계약 CLM. Next.js(App Router) + TypeScript + Tailwind CSS v4.
 와이어프레임 v2와 최종기획안의 **P0 전체**를 구현했으며, 명시적인 mock/API 모드로
-전환할 수 있습니다. 광고효과 기록·대조(6.14)는 계획대로 P2 화면 목업입니다.
+전환할 수 있습니다. 광고효과 기록·대조(6.14)도 mock/API 모드에서 업로드, 추출,
+확정·append-only 정정, 계약·전월 대조 조회까지 연결합니다.
 
 > 읽지 못한 계약을 읽어주고, 하지 못한 말을 대신해준다.
 
@@ -61,7 +62,7 @@ npm run build   # 프로덕션 빌드 (Turbopack)
 
 ```
 src/
-├─ app/                 # App Router 라우트 (P0 mock/API 모드, 6.14 P2 목업)
+├─ app/                 # App Router 라우트 (P0·6.14 광고효과 mock/API 모드)
 ├─ components/          # 재사용 컴포넌트
 │  ├─ ClauseCard.tsx    #  ★ 조항 카드 — variant="row" | "detail" 두 변형
 │  ├─ LayerBlock.tsx    #  층위 분리 프리미티브(원칙 #2)
@@ -84,8 +85,10 @@ src/
 `lib/adapter.ts`의 `MockAdapter`와 `ApiAdapter`가 같은 `DataAdapter` 계약을 구현합니다.
 API 모드에서는 대시보드, 계약 생성·업로드·분석, 검토 선택, 조정 링크·응답 확정,
 수정 계약서 대조, 모두싸인 초안·상태·타임라인, 증빙 링크·제출·검토, 재계약 결정까지
-P0 경로가 실제 FastAPI를 호출합니다. 조정·증빙 공개 링크는 자동 발송하지 않으며 사용자가
-기존 채널로 직접 전달합니다.
+P0 경로가 실제 FastAPI를 호출합니다. 광고효과 화면은 월별 PDF·PNG·JPEG 업로드,
+Upstage·Solar 지표 추출, 원문 근거 확인, 최초 확정·정정, 최신 월별 집계·확인 신호·문의
+문안 조회를 performance API에 연결합니다. 조정·증빙 공개 링크와 광고효과 문의 문안은
+자동 발송하지 않으며 사용자가 기존 채널로 직접 전달합니다.
 
 조정 응답 토큰의 scope는 `ADJUSTMENT_RESPONSE`, 증빙 제출 토큰의 scope는
 `OBLIGATION_EVIDENCE`이므로 서로 재사용할 수 없습니다. `.env.local`에는 다음을 설정합니다.
@@ -103,7 +106,7 @@ API 키·서비스 키·운영용 정적 토큰을 넣지 않습니다. 운영 �
 ## 참고
 
 - mock 모드와 `/`, `/states` 데모 화면의 데이터는 모두 가상입니다.
-- API 모드의 6.14 광고효과 화면은 P2 목업이며 performance API를 호출하지 않습니다.
+- 광고효과 화면은 API가 제공하지 않는 게시물별 상세나 성과 기여도를 임의로 표시하지 않습니다.
 - 운영 소유자 인증 공급자는 아직 확정되지 않았고 로컬 데모 Bearer 토큰만 연결돼 있습니다.
 - 디자인 토큰(amber/paper/ink/gray, 경고색 없음)은 `app/globals.css`의 `@theme`.
 - Gaegu 폰트는 판단 메모/개발 주석 전용 — 서비스 실제 화면에는 쓰지 않습니다.

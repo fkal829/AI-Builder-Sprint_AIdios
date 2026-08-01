@@ -177,6 +177,99 @@ type ApiAnalysisTask = {
   result: { review_items: ApiReviewItem[] } | null;
 };
 
+type ApiPerformanceMetricCandidate = {
+  value: number | null;
+  source_page: number | null;
+  source_text: string | null;
+  confidence: number;
+  verification_status: PerformanceMetricVerificationStatus;
+};
+
+type ApiPerformanceExtractedPayload = {
+  impressions: ApiPerformanceMetricCandidate;
+  likes: ApiPerformanceMetricCandidate;
+  comments: ApiPerformanceMetricCandidate;
+  reach: ApiPerformanceMetricCandidate;
+  saves: ApiPerformanceMetricCandidate;
+  shares: ApiPerformanceMetricCandidate;
+  follower_net_change: ApiPerformanceMetricCandidate;
+  published_content_count: ApiPerformanceMetricCandidate;
+};
+
+type ApiPerformanceConfirmedPayload = {
+  impressions: number;
+  likes: number;
+  comments: number;
+  reach: number | null;
+  saves: number | null;
+  shares: number | null;
+  follower_net_change: number | null;
+  published_content_count: number | null;
+  inquiries: number | null;
+  reservations: number | null;
+  purchases: number | null;
+};
+
+type ApiPerformanceFlag = {
+  id: string;
+  flag_type: PerformanceFlag["flagType"];
+  expected_content_count: number | null;
+  actual_content_count: number | null;
+  previous_engagement_rate: number | null;
+  current_engagement_rate: number | null;
+  issue_note: string | null;
+  basis_snapshots: {
+    source_page: number;
+    source_text: string;
+    confidence: number;
+  }[];
+};
+
+type ApiPerformanceInquiryDraft = {
+  id: string;
+  flag_id: string;
+  text: string;
+};
+
+type ApiPerformanceRevision = {
+  id: string;
+  version: number;
+  status: "CONFIRMED" | "FLAGGED";
+  confirmed_payload: ApiPerformanceConfirmedPayload;
+  engagement_rate: number | null;
+  correction_reason: string | null;
+  confirmed_at: string;
+  flags: ApiPerformanceFlag[];
+  inquiry_drafts: ApiPerformanceInquiryDraft[];
+};
+
+type ApiPerformanceReport = {
+  id: string;
+  period: string;
+  status: PerformanceReportStatus;
+  extracted_payload: ApiPerformanceExtractedPayload | null;
+  current_revision: ApiPerformanceRevision | null;
+  revision_count: number;
+  revisions: ApiPerformanceRevision[];
+  created_at: string;
+};
+
+type ApiContractPerformance = {
+  contract_id: string;
+  reports: ApiPerformanceReport[];
+  confirmed_series: {
+    report_id: string;
+    period: string;
+    version: number;
+    status: "CONFIRMED" | "FLAGGED";
+    confirmed_payload: ApiPerformanceConfirmedPayload;
+    engagement_rate: number | null;
+    confirmed_at: string;
+  }[];
+  flags: ApiPerformanceFlag[];
+  inquiry_drafts: ApiPerformanceInquiryDraft[];
+};
+
 export type LiveReviewItem = {
   id: string;
   type: "MISMATCH" | "NO_BASIS" | "UNCLEAR" | "MISSING" | "NEEDS_CHECK";
@@ -299,6 +392,110 @@ export type LiveRenewalView = {
   revisitReviewItemIds: string[];
 };
 
+export type PerformanceReportStatus = "UPLOADED" | "EXTRACTED" | "CONFIRMED" | "FLAGGED";
+export type PerformanceMetricVerificationStatus = "VERIFIED" | "NOT_FOUND" | "NEEDS_CHECK";
+export type PerformanceMetricKey =
+  | "impressions"
+  | "likes"
+  | "comments"
+  | "reach"
+  | "saves"
+  | "shares"
+  | "followerNetChange"
+  | "publishedContentCount";
+
+export type PerformanceMetricCandidate = {
+  value: number | null;
+  sourcePage: number | null;
+  sourceText: string | null;
+  confidence: number;
+  verificationStatus: PerformanceMetricVerificationStatus;
+};
+
+export type PerformanceExtractedPayload = Record<PerformanceMetricKey, PerformanceMetricCandidate>;
+
+export type PerformanceConfirmedPayload = {
+  impressions: number;
+  likes: number;
+  comments: number;
+  reach: number | null;
+  saves: number | null;
+  shares: number | null;
+  followerNetChange: number | null;
+  publishedContentCount: number | null;
+  inquiries: number | null;
+  reservations: number | null;
+  purchases: number | null;
+};
+
+export type PerformanceFlag = {
+  id: string;
+  flagType: "DELIVERABLE_COUNT_SHORTFALL" | "ENGAGEMENT_RATE_DROP" | "OWNER_REPORTED_ISSUE";
+  expectedContentCount: number | null;
+  actualContentCount: number | null;
+  previousEngagementRate: number | null;
+  currentEngagementRate: number | null;
+  issueNote: string | null;
+  basisSnapshots: {
+    sourcePage: number;
+    sourceText: string;
+    confidence: number;
+  }[];
+};
+
+export type PerformanceInquiryDraft = {
+  id: string;
+  flagId: string;
+  text: string;
+};
+
+export type PerformanceReportRevision = {
+  id: string;
+  version: number;
+  status: "CONFIRMED" | "FLAGGED";
+  confirmedPayload: PerformanceConfirmedPayload;
+  engagementRate: number | null;
+  correctionReason: string | null;
+  confirmedAt: string;
+  flags: PerformanceFlag[];
+  inquiryDrafts: PerformanceInquiryDraft[];
+};
+
+export type PerformanceReport = {
+  id: string;
+  period: string;
+  status: PerformanceReportStatus;
+  extractedPayload: PerformanceExtractedPayload | null;
+  currentRevision: PerformanceReportRevision | null;
+  revisionCount: number;
+  revisions: PerformanceReportRevision[];
+  createdAt: string;
+};
+
+export type ContractPerformance = {
+  contractId: string;
+  reports: PerformanceReport[];
+  confirmedSeries: {
+    reportId: string;
+    period: string;
+    version: number;
+    status: "CONFIRMED" | "FLAGGED";
+    confirmedPayload: PerformanceConfirmedPayload;
+    engagementRate: number | null;
+    confirmedAt: string;
+  }[];
+  flags: PerformanceFlag[];
+  inquiryDrafts: PerformanceInquiryDraft[];
+};
+
+export type PerformanceConfirmationInput = {
+  expectedRevision: number;
+  confirmedPayload: PerformanceConfirmedPayload;
+  hasIssue: boolean;
+  issueNote: string | null;
+  correctionReason: string | null;
+};
+
 export class PublicApiError extends Error {
   constructor(
     readonly status: number,
@@ -376,6 +573,18 @@ export interface DataAdapter {
     contractId: string,
     decision: "RENEW_SAME_TERMS" | "RENEW_WITH_CHANGES" | "TERMINATE",
   ): Promise<LiveRenewalView>;
+  getContractPerformance(contractId: string): Promise<ContractPerformance>;
+  uploadPerformanceReport(
+    contractId: string,
+    period: string,
+    file: File,
+  ): Promise<PerformanceReport>;
+  extractPerformanceReport(contractId: string, reportId: string): Promise<PerformanceReport>;
+  confirmPerformanceReport(
+    contractId: string,
+    reportId: string,
+    input: PerformanceConfirmationInput,
+  ): Promise<PerformanceReport>;
   /** GET /api/v1/public/adjustment-requests/{token} */
   getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic | null>;
   /** POST /api/v1/public/adjustment-requests/{token}/open */
@@ -476,7 +685,311 @@ function auditEventLabel(eventType: string): string {
   return labels[eventType] ?? eventType;
 }
 
+function mapPerformanceCandidate(data: ApiPerformanceMetricCandidate): PerformanceMetricCandidate {
+  return {
+    value: data.value,
+    sourcePage: data.source_page,
+    sourceText: data.source_text,
+    confidence: data.confidence,
+    verificationStatus: data.verification_status,
+  };
+}
+
+function mapPerformanceExtractedPayload(
+  data: ApiPerformanceExtractedPayload,
+): PerformanceExtractedPayload {
+  return {
+    impressions: mapPerformanceCandidate(data.impressions),
+    likes: mapPerformanceCandidate(data.likes),
+    comments: mapPerformanceCandidate(data.comments),
+    reach: mapPerformanceCandidate(data.reach),
+    saves: mapPerformanceCandidate(data.saves),
+    shares: mapPerformanceCandidate(data.shares),
+    followerNetChange: mapPerformanceCandidate(data.follower_net_change),
+    publishedContentCount: mapPerformanceCandidate(data.published_content_count),
+  };
+}
+
+function mapPerformanceConfirmedPayload(
+  data: ApiPerformanceConfirmedPayload,
+): PerformanceConfirmedPayload {
+  return {
+    impressions: data.impressions,
+    likes: data.likes,
+    comments: data.comments,
+    reach: data.reach,
+    saves: data.saves,
+    shares: data.shares,
+    followerNetChange: data.follower_net_change,
+    publishedContentCount: data.published_content_count,
+    inquiries: data.inquiries,
+    reservations: data.reservations,
+    purchases: data.purchases,
+  };
+}
+
+function performanceConfirmedPayloadToApi(
+  data: PerformanceConfirmedPayload,
+): ApiPerformanceConfirmedPayload {
+  return {
+    impressions: data.impressions,
+    likes: data.likes,
+    comments: data.comments,
+    reach: data.reach,
+    saves: data.saves,
+    shares: data.shares,
+    follower_net_change: data.followerNetChange,
+    published_content_count: data.publishedContentCount,
+    inquiries: data.inquiries,
+    reservations: data.reservations,
+    purchases: data.purchases,
+  };
+}
+
+function mapPerformanceFlag(data: ApiPerformanceFlag): PerformanceFlag {
+  return {
+    id: data.id,
+    flagType: data.flag_type,
+    expectedContentCount: data.expected_content_count,
+    actualContentCount: data.actual_content_count,
+    previousEngagementRate: data.previous_engagement_rate,
+    currentEngagementRate: data.current_engagement_rate,
+    issueNote: data.issue_note,
+    basisSnapshots: data.basis_snapshots.map((basis) => ({
+      sourcePage: basis.source_page,
+      sourceText: basis.source_text,
+      confidence: basis.confidence,
+    })),
+  };
+}
+
+function mapPerformanceInquiryDraft(
+  data: ApiPerformanceInquiryDraft,
+): PerformanceInquiryDraft {
+  return { id: data.id, flagId: data.flag_id, text: data.text };
+}
+
+function mapPerformanceRevision(data: ApiPerformanceRevision): PerformanceReportRevision {
+  return {
+    id: data.id,
+    version: data.version,
+    status: data.status,
+    confirmedPayload: mapPerformanceConfirmedPayload(data.confirmed_payload),
+    engagementRate: data.engagement_rate,
+    correctionReason: data.correction_reason,
+    confirmedAt: data.confirmed_at,
+    flags: data.flags.map(mapPerformanceFlag),
+    inquiryDrafts: data.inquiry_drafts.map(mapPerformanceInquiryDraft),
+  };
+}
+
+function mapPerformanceReport(data: ApiPerformanceReport): PerformanceReport {
+  return {
+    id: data.id,
+    period: data.period,
+    status: data.status,
+    extractedPayload: data.extracted_payload
+      ? mapPerformanceExtractedPayload(data.extracted_payload)
+      : null,
+    currentRevision: data.current_revision
+      ? mapPerformanceRevision(data.current_revision)
+      : null,
+    revisionCount: data.revision_count,
+    revisions: data.revisions.map(mapPerformanceRevision),
+    createdAt: data.created_at,
+  };
+}
+
+function mapContractPerformance(data: ApiContractPerformance): ContractPerformance {
+  return {
+    contractId: data.contract_id,
+    reports: data.reports.map(mapPerformanceReport),
+    confirmedSeries: data.confirmed_series.map((point) => ({
+      reportId: point.report_id,
+      period: point.period,
+      version: point.version,
+      status: point.status,
+      confirmedPayload: mapPerformanceConfirmedPayload(point.confirmed_payload),
+      engagementRate: point.engagement_rate,
+      confirmedAt: point.confirmed_at,
+    })),
+    flags: data.flags.map(mapPerformanceFlag),
+    inquiryDrafts: data.inquiry_drafts.map(mapPerformanceInquiryDraft),
+  };
+}
+
+function mockConfirmedPayload(
+  impressions: number,
+  likes: number,
+  comments: number,
+  saves: number,
+  shares: number,
+  publishedContentCount: number,
+): PerformanceConfirmedPayload {
+  return {
+    impressions,
+    likes,
+    comments,
+    reach: null,
+    saves,
+    shares,
+    followerNetChange: null,
+    publishedContentCount,
+    inquiries: null,
+    reservations: null,
+    purchases: null,
+  };
+}
+
+function calculatePerformanceEngagementRate(payload: PerformanceConfirmedPayload): number | null {
+  if (payload.impressions === 0) return null;
+  return (
+    payload.likes
+    + payload.comments
+    + (payload.saves ?? 0)
+    + (payload.shares ?? 0)
+  ) / payload.impressions;
+}
+
+function createMockContractPerformance(contractId: string): ContractPerformance {
+  const points = [
+    { period: "2026-05", payload: mockConfirmedPayload(12400, 400, 50, 30, 6, 4) },
+    { period: "2026-06", payload: mockConfirmedPayload(15200, 500, 60, 40, 12, 4) },
+    { period: "2026-07", payload: mockConfirmedPayload(8300, 180, 20, 40, 0, 2) },
+  ];
+  const reports = points.map(({ period, payload }, index): PerformanceReport => {
+    const reportId = `mock-performance-${period}`;
+    const flags: PerformanceFlag[] = index === 2
+      ? [
+          {
+            id: "mock-shortfall-flag",
+            flagType: "DELIVERABLE_COUNT_SHORTFALL",
+            expectedContentCount: 4,
+            actualContentCount: 2,
+            previousEngagementRate: null,
+            currentEngagementRate: null,
+            issueNote: null,
+            basisSnapshots: [
+              { sourcePage: 3, sourceText: "월 게시물 4건", confidence: 0.96 },
+              { sourcePage: 3, sourceText: "매월 콘텐츠를 게시한다.", confidence: 0.92 },
+            ],
+          },
+          {
+            id: "mock-engagement-flag",
+            flagType: "ENGAGEMENT_RATE_DROP",
+            expectedContentCount: null,
+            actualContentCount: null,
+            previousEngagementRate: calculatePerformanceEngagementRate(points[1].payload),
+            currentEngagementRate: calculatePerformanceEngagementRate(payload),
+            issueNote: null,
+            basisSnapshots: [],
+          },
+        ]
+      : [];
+    const inquiryDrafts: PerformanceInquiryDraft[] = index === 2
+      ? [
+          {
+            id: "mock-shortfall-inquiry",
+            flagId: "mock-shortfall-flag",
+            text: "2026-07 리포트의 게시물 수는 2건으로 기록되어 있습니다. 계약 원문에서 확인한 월 4건과 차이가 있어 해당 월 게시 수와 집계 기준을 확인 부탁드립니다.",
+          },
+          {
+            id: "mock-engagement-inquiry",
+            flagId: "mock-engagement-flag",
+            text: "2026-06 반응률 4.03%에서 2026-07 2.89%로 낮아진 것으로 계산됩니다. 두 달 리포트의 집계 기준과 변동 사유를 확인 부탁드립니다.",
+          },
+        ]
+      : [];
+    const revision: PerformanceReportRevision = {
+      id: `${reportId}-revision-1`,
+      version: 1,
+      status: flags.length ? "FLAGGED" : "CONFIRMED",
+      confirmedPayload: payload,
+      engagementRate: calculatePerformanceEngagementRate(payload),
+      correctionReason: null,
+      confirmedAt: `${period}-28T09:00:00+09:00`,
+      flags,
+      inquiryDrafts,
+    };
+    return {
+      id: reportId,
+      period,
+      status: revision.status,
+      extractedPayload: null,
+      currentRevision: revision,
+      revisionCount: 1,
+      revisions: [revision],
+      createdAt: `${period}-28T08:00:00+09:00`,
+    };
+  });
+  return buildMockContractPerformance(contractId, reports);
+}
+
+function buildMockContractPerformance(
+  contractId: string,
+  reports: PerformanceReport[],
+): ContractPerformance {
+  const confirmed = reports.filter(
+    (report) => report.currentRevision && ["CONFIRMED", "FLAGGED"].includes(report.status),
+  );
+  return {
+    contractId,
+    reports: [...reports].sort((left, right) => left.period.localeCompare(right.period)),
+    confirmedSeries: confirmed.map((report) => ({
+      reportId: report.id,
+      period: report.period,
+      version: report.currentRevision!.version,
+      status: report.currentRevision!.status,
+      confirmedPayload: report.currentRevision!.confirmedPayload,
+      engagementRate: report.currentRevision!.engagementRate,
+      confirmedAt: report.currentRevision!.confirmedAt,
+    })),
+    flags: confirmed.flatMap((report) => report.currentRevision!.flags),
+    inquiryDrafts: confirmed.flatMap((report) => report.currentRevision!.inquiryDrafts),
+  };
+}
+
+function mockExtractedPayload(): PerformanceExtractedPayload {
+  const candidate = (
+    value: number | null,
+    label: string,
+  ): PerformanceMetricCandidate => value === null
+    ? {
+        value: null,
+        sourcePage: null,
+        sourceText: null,
+        confidence: 0,
+        verificationStatus: "NOT_FOUND",
+      }
+    : {
+        value,
+        sourcePage: 1,
+        sourceText: `${label}: ${value.toLocaleString()}`,
+        confidence: 0.94,
+        verificationStatus: "VERIFIED",
+      };
+  return {
+    impressions: candidate(9100, "노출"),
+    likes: candidate(230, "좋아요"),
+    comments: candidate(32, "댓글"),
+    reach: candidate(7400, "도달"),
+    saves: candidate(48, "저장"),
+    shares: candidate(12, "공유"),
+    followerNetChange: candidate(35, "팔로워 순증"),
+    publishedContentCount: candidate(4, "게시물 수"),
+  };
+}
+
+function previousPerformancePeriod(period: string): string {
+  const [year, month] = period.split("-").map(Number);
+  return month === 1
+    ? `${String(year - 1).padStart(4, "0")}-12`
+    : `${String(year).padStart(4, "0")}-${String(month - 1).padStart(2, "0")}`;
+}
+
 class MockAdapter implements DataAdapter {
+  private readonly performanceByContract = new Map<string, ContractPerformance>();
+
   async getDashboard() {
     await delay(120);
     return { stats: DASHBOARD_STATS, contracts: DASHBOARD_CONTRACTS };
@@ -757,6 +1270,172 @@ class MockAdapter implements DataAdapter {
   ): Promise<LiveRenewalView> {
     const current = await this.getRenewalView(contractId);
     return { ...current, currentDecision: decision };
+  }
+
+  async getContractPerformance(contractId: string): Promise<ContractPerformance> {
+    await delay(120);
+    const current = this.performanceByContract.get(contractId)
+      ?? createMockContractPerformance(contractId);
+    this.performanceByContract.set(contractId, current);
+    return structuredClone(current);
+  }
+
+  async uploadPerformanceReport(
+    contractId: string,
+    period: string,
+    file: File,
+  ): Promise<PerformanceReport> {
+    void file;
+    await delay(240);
+    const current = await this.getContractPerformance(contractId);
+    if (current.reports.some((report) => report.period === period)) {
+      throw new PublicApiError(409, "REPORT_PERIOD_ALREADY_EXISTS", "이미 등록된 월입니다.");
+    }
+    const report: PerformanceReport = {
+      id: `mock-performance-${period}`,
+      period,
+      status: "UPLOADED",
+      extractedPayload: null,
+      currentRevision: null,
+      revisionCount: 0,
+      revisions: [],
+      createdAt: new Date().toISOString(),
+    };
+    this.performanceByContract.set(
+      contractId,
+      buildMockContractPerformance(contractId, [...current.reports, report]),
+    );
+    return structuredClone(report);
+  }
+
+  async extractPerformanceReport(
+    contractId: string,
+    reportId: string,
+  ): Promise<PerformanceReport> {
+    await delay(700);
+    const current = await this.getContractPerformance(contractId);
+    const report = current.reports.find((item) => item.id === reportId);
+    if (!report) throw new PublicApiError(404, "NOT_FOUND", "리포트를 찾을 수 없습니다.");
+    if (report.status !== "UPLOADED") {
+      throw new PublicApiError(409, "INVALID_STATUS_TRANSITION", "이미 추출한 리포트입니다.");
+    }
+    const extracted: PerformanceReport = {
+      ...report,
+      status: "EXTRACTED",
+      extractedPayload: mockExtractedPayload(),
+    };
+    this.performanceByContract.set(
+      contractId,
+      buildMockContractPerformance(
+        contractId,
+        current.reports.map((item) => item.id === reportId ? extracted : item),
+      ),
+    );
+    return structuredClone(extracted);
+  }
+
+  async confirmPerformanceReport(
+    contractId: string,
+    reportId: string,
+    input: PerformanceConfirmationInput,
+  ): Promise<PerformanceReport> {
+    await delay(240);
+    const current = await this.getContractPerformance(contractId);
+    const report = current.reports.find((item) => item.id === reportId);
+    if (!report) throw new PublicApiError(404, "NOT_FOUND", "리포트를 찾을 수 없습니다.");
+    if (report.revisionCount !== input.expectedRevision) {
+      throw new PublicApiError(409, "REPORT_REVISION_CONFLICT", "최신 값을 다시 확인해주세요.");
+    }
+
+    const rate = calculatePerformanceEngagementRate(input.confirmedPayload);
+    const flags: PerformanceFlag[] = [];
+    if (
+      input.confirmedPayload.publishedContentCount !== null
+      && input.confirmedPayload.publishedContentCount < 4
+    ) {
+      flags.push({
+        id: crypto.randomUUID(),
+        flagType: "DELIVERABLE_COUNT_SHORTFALL",
+        expectedContentCount: 4,
+        actualContentCount: input.confirmedPayload.publishedContentCount,
+        previousEngagementRate: null,
+        currentEngagementRate: null,
+        issueNote: null,
+        basisSnapshots: [
+          { sourcePage: 3, sourceText: "월 게시물 4건", confidence: 0.96 },
+          { sourcePage: 3, sourceText: "매월 콘텐츠를 게시한다.", confidence: 0.92 },
+        ],
+      });
+    }
+    const previous = current.confirmedSeries.find(
+      (point) => point.period === previousPerformancePeriod(report.period),
+    );
+    if (
+      previous?.engagementRate
+      && rate !== null
+      && previous.confirmedPayload.impressions >= 1000
+      && input.confirmedPayload.impressions >= 1000
+      && previous.engagementRate - rate >= 0.01
+      && (previous.engagementRate - rate) / previous.engagementRate >= 0.25
+    ) {
+      flags.push({
+        id: crypto.randomUUID(),
+        flagType: "ENGAGEMENT_RATE_DROP",
+        expectedContentCount: null,
+        actualContentCount: null,
+        previousEngagementRate: previous.engagementRate,
+        currentEngagementRate: rate,
+        issueNote: null,
+        basisSnapshots: [],
+      });
+    }
+    if (input.hasIssue && input.issueNote) {
+      flags.push({
+        id: crypto.randomUUID(),
+        flagType: "OWNER_REPORTED_ISSUE",
+        expectedContentCount: null,
+        actualContentCount: null,
+        previousEngagementRate: null,
+        currentEngagementRate: null,
+        issueNote: input.issueNote,
+        basisSnapshots: [],
+      });
+    }
+    const inquiryDrafts = flags.map((flag): PerformanceInquiryDraft => ({
+      id: crypto.randomUUID(),
+      flagId: flag.id,
+      text: flag.flagType === "DELIVERABLE_COUNT_SHORTFALL"
+        ? `${report.period} 리포트의 게시물 수는 ${flag.actualContentCount}건으로 기록되어 있습니다. 계약 원문에서 확인한 월 ${flag.expectedContentCount}건과 차이가 있어 해당 월 게시 수와 집계 기준을 확인 부탁드립니다.`
+        : flag.flagType === "ENGAGEMENT_RATE_DROP"
+          ? `${previous?.period} 반응률 ${((flag.previousEngagementRate ?? 0) * 100).toFixed(2)}%에서 ${report.period} ${((flag.currentEngagementRate ?? 0) * 100).toFixed(2)}%로 낮아진 것으로 계산됩니다. 두 달 리포트의 집계 기준과 변동 사유를 확인 부탁드립니다.`
+          : `${report.period} 리포트와 관련해 다음 내용을 확인하고 싶습니다: ${flag.issueNote} 관련 수치와 집계 기준을 확인 부탁드립니다.`,
+    }));
+    const revision: PerformanceReportRevision = {
+      id: crypto.randomUUID(),
+      version: input.expectedRevision + 1,
+      status: flags.length ? "FLAGGED" : "CONFIRMED",
+      confirmedPayload: input.confirmedPayload,
+      engagementRate: rate,
+      correctionReason: input.correctionReason,
+      confirmedAt: new Date().toISOString(),
+      flags,
+      inquiryDrafts,
+    };
+    const confirmed: PerformanceReport = {
+      ...report,
+      status: revision.status,
+      currentRevision: revision,
+      revisionCount: revision.version,
+      revisions: [...report.revisions, revision],
+    };
+    this.performanceByContract.set(
+      contractId,
+      buildMockContractPerformance(
+        contractId,
+        current.reports.map((item) => item.id === reportId ? confirmed : item),
+      ),
+    );
+    return structuredClone(confirmed);
   }
 
   async getAdjustmentRequest(token: string) {
@@ -1246,6 +1925,71 @@ class ApiAdapter extends MockAdapter {
       currentDecision: saved.decision,
       revisitReviewItemIds: saved.revisit_review_item_ids,
     };
+  }
+
+  async getContractPerformance(contractId: string): Promise<ContractPerformance> {
+    const data = await this.request<ApiContractPerformance>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/performance`,
+      { headers: this.ownerHeaders() },
+    );
+    return mapContractPerformance(data);
+  }
+
+  async uploadPerformanceReport(
+    contractId: string,
+    period: string,
+    file: File,
+  ): Promise<PerformanceReport> {
+    const formData = new FormData();
+    formData.set("period", period);
+    formData.set("file", file);
+    const data = await this.request<ApiPerformanceReport>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/performance-reports`,
+      {
+        method: "POST",
+        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+        body: formData,
+      },
+    );
+    return mapPerformanceReport(data);
+  }
+
+  async extractPerformanceReport(
+    contractId: string,
+    reportId: string,
+  ): Promise<PerformanceReport> {
+    const data = await this.request<ApiPerformanceReport>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/performance-reports/`
+        + `${encodeURIComponent(reportId)}/extract`,
+      {
+        method: "POST",
+        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+      },
+    );
+    return mapPerformanceReport(data);
+  }
+
+  async confirmPerformanceReport(
+    contractId: string,
+    reportId: string,
+    input: PerformanceConfirmationInput,
+  ): Promise<PerformanceReport> {
+    const data = await this.request<ApiPerformanceReport>(
+      `/api/v1/contracts/${encodeURIComponent(contractId)}/performance-reports/`
+        + encodeURIComponent(reportId),
+      {
+        method: "PATCH",
+        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          expected_revision: input.expectedRevision,
+          confirmed_payload: performanceConfirmedPayloadToApi(input.confirmedPayload),
+          has_issue: input.hasIssue,
+          issue_note: input.issueNote,
+          correction_reason: input.correctionReason,
+        }),
+      },
+    );
+    return mapPerformanceReport(data);
   }
 
   async getAdjustmentRequest(token: string): Promise<AdjustmentRequestPublic> {

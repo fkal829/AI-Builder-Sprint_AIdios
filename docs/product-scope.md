@@ -23,6 +23,7 @@
 - 대행사 리포트 업로드 → 지표 확인 → 계약 조건 대조 → 문의 문안 생성
 - 리포트 업로드·영속 저장과 Upstage·Solar 지표 추출 API 구현됨
 - 소상공인 확정값 저장·append-only 정정·계약 조건 대조·문의 문안·계약별 조회 API 구현됨
+- 프론트엔드 월별 업로드·추출 근거 확인·확정·정정·집계·확인 신호·문의 문안 API 연동 구현됨
 - 비식별 합성 PDF의 Upstage Document Parse·Solar Adapter live 연결은 검증됨
 - 로컬 FastAPI 실제 TCP·live Supabase Auth/Storage/PostgreSQL·Upstage Parse·Solar를
   포함한 16.2~16.5 수직 E2E 통과, 합성 fixture 정리 확인

@@ -24,10 +24,14 @@
 - 계약상 날짜는 ISO 8601 `date`, 이벤트 시각은 timezone-aware UTC `date-time`을 쓴다.
 - 총액, 비율, D-day는 AI가 아닌 결정적 코드로 계산한다.
 
-## ADR-004 인증 경계
+## ADR-004 인증 경계와 운영 소유자 세션
 
-- 상태: 경계 확정, 공급자 미정
-- 결정: 소유자 API는 Bearer 인증이 필요하다. 특정 인증 공급자는 아직 도입하지 않는다.
+- 상태: 확정
+- 결정: 소유자 API는 Supabase Auth가 발급한 access token의 Bearer 인증이 필요하다.
+  프런트 로그인은 가입된 이메일의 OTP 매직 링크와 PKCE 콜백을 사용하며 신규 사용자를
+  자동 생성하지 않는다. 백엔드가 토큰과 객체 소유권을 최종 검증한다.
+- 브라우저에는 Supabase publishable(legacy anon) 키만 공개한다. service-role/secret 키와
+  운영용 정적 Bearer 토큰은 넣지 않는다. 고정 데모 토큰은 로컬 mock API 검증에만 쓴다.
 - 조정 응답 토큰과 산출물 증빙 토큰은 각각 `ADJUSTMENT_RESPONSE`,
   `OBLIGATION_EVIDENCE` scope로 분리한다.
 - 공개 토큰 원문은 생성 응답에서 한 번만 반환하고 저장소에는 hash와 scope, 만료,
@@ -73,8 +77,8 @@
   PDF만 허용하고 `MESSAGE`는 PDF·PNG·JPEG·UTF-8 text를 허용한다.
 - 원본 파일명은 Storage 경로에 사용하지 않는다. 서버가 생성한 owner·contract·document
   UUID 기반 경로에 저장하고 일반 `Document` 응답에는 경로를 포함하지 않는다.
-- 인증 공급자가 확정되기 전 로컬 `SUPABASE_MODE=mock`에서는 고정된 데모 Bearer 토큰과
-  데모 owner·contract UUID만 사용한다. production에서는 mock 모드로 기동할 수 없다.
+- 로컬 `SUPABASE_MODE=mock`에서는 고정된 데모 Bearer 토큰과 데모 owner·contract UUID만
+  사용한다. production에서는 mock 모드로 기동할 수 없다.
 - 제한값은 `DOCUMENT_MAX_SIZE_MIB`, `DOCUMENT_MAX_PDF_PAGES`로 더 낮게 조정할 수 있다.
   운영에서 상향할 때는 API 문서, Storage bucket 제한과 배포 설정을 함께 변경한다.
 

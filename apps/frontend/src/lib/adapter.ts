@@ -9,6 +9,7 @@ import {
   DASHBOARD_CONTRACTS,
   DASHBOARD_STATS,
 } from "./mock";
+import { getOwnerAccessToken } from "./supabase/client";
 import type {
   AuditEvent,
   AgencyDecision,
@@ -1486,12 +1487,14 @@ class ApiAdapter extends MockAdapter {
   constructor(
     private readonly apiBaseUrl: string,
     private readonly demoBearerToken?: string,
+    private readonly ownerAccessTokenProvider: () => Promise<string | null> =
+      getOwnerAccessToken,
   ) {
     super();
   }
 
   async getDashboard(): Promise<{ stats: DashboardStats; contracts: ContractSummary[] }> {
-    const ownerHeaders = this.ownerHeaders();
+    const ownerHeaders = await this.ownerHeaders();
     const [dashboard, contracts] = await Promise.all([
       this.request<ApiDashboard>("/api/v1/dashboard", { headers: ownerHeaders }),
       this.request<ApiContractListItem[]>("/api/v1/contracts", { headers: ownerHeaders }),
@@ -1529,7 +1532,7 @@ class ApiAdapter extends MockAdapter {
   async createContract(input: ContractCreateInput): Promise<{ id: string }> {
     const contract = await this.request<ApiContract>("/api/v1/contracts", {
       method: "POST",
-      headers: this.ownerHeaders(),
+      headers: await this.ownerHeaders(),
       body: JSON.stringify({
         title: input.title.trim(),
         counterparty_name: input.counterpartyName.trim(),
@@ -1544,7 +1547,7 @@ class ApiAdapter extends MockAdapter {
     formData.set("type", "CONTRACT");
     const document = await this.request<ApiDocument>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/documents`,
-      { method: "POST", headers: this.ownerHeaders(), body: formData },
+      { method: "POST", headers: await this.ownerHeaders(), body: formData },
     );
     return { id: document.id };
   }
@@ -1555,7 +1558,7 @@ class ApiAdapter extends MockAdapter {
     formData.set("type", "REVISED_CONTRACT");
     const document = await this.request<ApiDocument>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/documents`,
-      { method: "POST", headers: this.ownerHeaders(), body: formData },
+      { method: "POST", headers: await this.ownerHeaders(), body: formData },
     );
     return { id: document.id };
   }
@@ -1565,7 +1568,7 @@ class ApiAdapter extends MockAdapter {
       `/api/v1/contracts/${encodeURIComponent(contractId)}/understood-terms`,
       {
         method: "PUT",
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
         body: JSON.stringify({
           duration_text: input.durationText,
           monthly_amount: input.monthlyAmount,
@@ -1581,7 +1584,7 @@ class ApiAdapter extends MockAdapter {
   async startContractAnalysis(contractId: string, documentId: string): Promise<void> {
     await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`, {
       method: "POST",
-      headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+      headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({ document_id: documentId, supporting_document_ids: [] }),
     });
   }
@@ -1589,7 +1592,7 @@ class ApiAdapter extends MockAdapter {
   async getContractAnalysis(contractId: string): Promise<ApiAnalysisTask> {
     return this.request<ApiAnalysisTask>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/analysis`,
-      { headers: this.ownerHeaders() },
+      { headers: await this.ownerHeaders() },
     );
   }
 
@@ -1608,7 +1611,7 @@ class ApiAdapter extends MockAdapter {
         } | null;
       }>(
         `/api/v1/contracts/${encodeURIComponent(contractId)}`,
-        { headers: this.ownerHeaders() },
+        { headers: await this.ownerHeaders() },
       ),
       this.getContractAnalysis(contractId),
     ]);
@@ -1640,12 +1643,12 @@ class ApiAdapter extends MockAdapter {
 
   async selectReviewItem(contractId: string, itemId: string, choice: SuggestionChoice): Promise<void> {
     await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/review-items/${encodeURIComponent(itemId)}`, {
-      method: "PATCH", headers: this.ownerHeaders(), body: JSON.stringify({ user_choice: choice }),
+      method: "PATCH", headers: await this.ownerHeaders(), body: JSON.stringify({ user_choice: choice }),
     });
   }
 
   async createAdjustmentDraft(contractId: string, reviewItemIds: string[]): Promise<LiveAdjustmentDraft> {
-    const data = await this.request<{ id: string; items: { review_item_id: string; request_text: string }[] }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests`, { method: "POST", headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ review_item_ids: reviewItemIds, expires_in_hours: 72 }) });
+    const data = await this.request<{ id: string; items: { review_item_id: string; request_text: string }[] }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests`, { method: "POST", headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ review_item_ids: reviewItemIds, expires_in_hours: 72 }) });
     return { id: data.id, items: data.items.map((item) => ({ reviewItemId: item.review_item_id, requestText: item.request_text })) };
   }
 
@@ -1674,7 +1677,7 @@ class ApiAdapter extends MockAdapter {
         + `${encodeURIComponent(adjustmentId)}/send`,
       {
         method: "POST",
-        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+        headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({ confirmed: true }),
       },
     );
@@ -1688,7 +1691,7 @@ class ApiAdapter extends MockAdapter {
     const detail = await this.request<ApiOwnerAdjustmentDetail>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-requests/`
         + encodeURIComponent(adjustmentId),
-      { headers: this.ownerHeaders() },
+      { headers: await this.ownerHeaders() },
     );
     const responseById = new Map(
       detail.responses.map((response) => [response.review_item_id, response]),
@@ -1728,7 +1731,7 @@ class ApiAdapter extends MockAdapter {
   ): Promise<void> {
     await this.request(`/api/v1/contracts/${encodeURIComponent(contractId)}/adjustment-confirmation`, {
       method: "POST",
-      headers: this.ownerHeaders(),
+      headers: await this.ownerHeaders(),
       body: JSON.stringify({
         adjustment_request_id: adjustmentId,
         confirmed_items: resolutions.map((item) => ({
@@ -1749,7 +1752,7 @@ class ApiAdapter extends MockAdapter {
       `/api/v1/contracts/${encodeURIComponent(contractId)}/revised-contract-reviews`,
       {
         method: "POST",
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
         body: JSON.stringify({
           adjustment_request_id: adjustmentId,
           document_id: documentId,
@@ -1762,7 +1765,7 @@ class ApiAdapter extends MockAdapter {
   async getLatestRevisedContractReview(contractId: string): Promise<RevisedContractReview> {
     const data = await this.request<ApiRevisedContractReview>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/revised-contract-reviews/latest`,
-      { headers: this.ownerHeaders() },
+      { headers: await this.ownerHeaders() },
     );
     return mapRevisedContractReview(data);
   }
@@ -1777,7 +1780,7 @@ class ApiAdapter extends MockAdapter {
         + `${encodeURIComponent(reviewId)}/confirmation`,
       {
         method: "POST",
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
         body: JSON.stringify({
           confirmed_review_item_ids: reviewItemIds,
           confirmed: true,
@@ -1797,7 +1800,7 @@ class ApiAdapter extends MockAdapter {
       {
         method: "POST",
         headers: {
-          ...this.ownerHeaders(),
+          ...(await this.ownerHeaders()),
           "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify({
@@ -1818,10 +1821,10 @@ class ApiAdapter extends MockAdapter {
     const contractPath = encodeURIComponent(contractId);
     const [timeline, signature] = await Promise.all([
       this.request<ApiAuditEvent[]>(`/api/v1/contracts/${contractPath}/timeline`, {
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
       }),
       this.request<ApiSignature>(`/api/v1/contracts/${contractPath}/signature`, {
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
       }).catch((error: unknown) => {
         if (error instanceof PublicApiError && error.status === 404) return null;
         throw error;
@@ -1842,7 +1845,7 @@ class ApiAdapter extends MockAdapter {
   async getObligation(contractId: string): Promise<LiveObligation | null> {
     const obligations = await this.request<ApiObligation[]>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/obligations`,
-      { headers: this.ownerHeaders() },
+      { headers: await this.ownerHeaders() },
     );
     return obligations[0] ? mapObligation(obligations[0]) : null;
   }
@@ -1857,7 +1860,7 @@ class ApiAdapter extends MockAdapter {
       {
         method: "POST",
         headers: {
-          ...this.ownerHeaders(),
+          ...(await this.ownerHeaders()),
           "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify({ expires_in_hours: 72 }),
@@ -1876,7 +1879,7 @@ class ApiAdapter extends MockAdapter {
         + encodeURIComponent(obligationId),
       {
         method: "PATCH",
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
         body: JSON.stringify({ decision }),
       },
     );
@@ -1887,10 +1890,10 @@ class ApiAdapter extends MockAdapter {
     const contractPath = encodeURIComponent(contractId);
     const [contract, contracts] = await Promise.all([
       this.request<ApiContract>(`/api/v1/contracts/${contractPath}`, {
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
       }),
       this.request<ApiContractListItem[]>("/api/v1/contracts", {
-        headers: this.ownerHeaders(),
+        headers: await this.ownerHeaders(),
       }),
     ]);
     const summary = contracts.find((item) => item.id === contractId);
@@ -1916,7 +1919,7 @@ class ApiAdapter extends MockAdapter {
       revisit_review_item_ids: string[];
     }>(`/api/v1/contracts/${encodeURIComponent(contractId)}/renewal-decision`, {
       method: "PUT",
-      headers: this.ownerHeaders(),
+      headers: await this.ownerHeaders(),
       body: JSON.stringify({ decision, confirmed: true }),
     });
     const current = await this.getRenewalView(contractId);
@@ -1930,7 +1933,7 @@ class ApiAdapter extends MockAdapter {
   async getContractPerformance(contractId: string): Promise<ContractPerformance> {
     const data = await this.request<ApiContractPerformance>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/performance`,
-      { headers: this.ownerHeaders() },
+      { headers: await this.ownerHeaders() },
     );
     return mapContractPerformance(data);
   }
@@ -1947,7 +1950,7 @@ class ApiAdapter extends MockAdapter {
       `/api/v1/contracts/${encodeURIComponent(contractId)}/performance-reports`,
       {
         method: "POST",
-        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+        headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() },
         body: formData,
       },
     );
@@ -1963,7 +1966,7 @@ class ApiAdapter extends MockAdapter {
         + `${encodeURIComponent(reportId)}/extract`,
       {
         method: "POST",
-        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+        headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() },
       },
     );
     return mapPerformanceReport(data);
@@ -1979,7 +1982,7 @@ class ApiAdapter extends MockAdapter {
         + encodeURIComponent(reportId),
       {
         method: "PATCH",
-        headers: { ...this.ownerHeaders(), "Idempotency-Key": crypto.randomUUID() },
+        headers: { ...(await this.ownerHeaders()), "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({
           expected_revision: input.expectedRevision,
           confirmed_payload: performanceConfirmedPayloadToApi(input.confirmedPayload),
@@ -2041,15 +2044,17 @@ class ApiAdapter extends MockAdapter {
     );
   }
 
-  private ownerHeaders(): HeadersInit {
-    if (!this.demoBearerToken) {
+  private async ownerHeaders(): Promise<HeadersInit> {
+    const accessToken =
+      this.demoBearerToken ?? (await this.ownerAccessTokenProvider());
+    if (!accessToken) {
       throw new PublicApiError(
         401,
         "OWNER_AUTH_REQUIRED",
-        "소유자 API를 사용하려면 로컬 데모 Bearer 토큰을 설정해 주세요.",
+        "로그인이 필요합니다. 다시 로그인해 주세요.",
       );
     }
-    return { Authorization: `Bearer ${this.demoBearerToken}` };
+    return { Authorization: `Bearer ${accessToken}` };
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -2110,7 +2115,8 @@ const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
 const demoBearerToken = process.env.NEXT_PUBLIC_DEMO_BEARER_TOKEN;
 const useMock = process.env.NEXT_PUBLIC_USE_MOCK !== "false" || !apiBaseUrl;
 export const isUsingMock = useMock;
+export const isUsingDemoOwnerToken = !useMock && Boolean(demoBearerToken);
 
 export const adapter: DataAdapter = useMock
   ? new MockAdapter()
-  : new ApiAdapter(apiBaseUrl, demoBearerToken);
+  : new ApiAdapter(apiBaseUrl, demoBearerToken, getOwnerAccessToken);

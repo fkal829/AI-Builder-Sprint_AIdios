@@ -737,6 +737,52 @@ class SupabaseAdapter:
                 "광고효과 리포트 월별 조회 결과가 올바르지 않습니다."
             ) from error
 
+    async def list_owned_performance_reports(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> list[PerformanceReportAccess] | None:
+        if self.mode == "mock":
+            async with self._mock_lock:
+                contract = self._mock_contracts.get(contract_id)
+                if (
+                    (owner_id, contract_id) not in self._mock_owned_contracts
+                    or contract is None
+                    or contract.owner_id != owner_id
+                ):
+                    return None
+                return [
+                    report
+                    for report in self._mock_performance_reports.values()
+                    if report.contract_id == contract_id
+                ]
+
+        if not await self.is_contract_owned(owner_id=owner_id, contract_id=contract_id):
+            return None
+        client = self._require_live_client()
+        try:
+            response = await asyncio.to_thread(
+                lambda: (
+                    client.table("performance_reports")
+                    .select(
+                        "id,contract_id,period,source_document_id,status,"
+                        "extracted_payload,current_revision_id,revision_count,"
+                        "extraction_attempt_id,extraction_started_at,created_at,updated_at"
+                    )
+                    .eq("contract_id", str(contract_id))
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("광고효과 리포트 목록 조회에 실패했습니다.") from error
+        try:
+            return [_performance_report_access_from_row(row) for row in response.data or []]
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalStorageFailure(
+                "광고효과 리포트 목록 조회 결과가 올바르지 않습니다."
+            ) from error
+
     async def create_performance_report_upload_with_audit(
         self,
         *,

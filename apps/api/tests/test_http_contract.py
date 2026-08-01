@@ -35,7 +35,7 @@ def _implemented_canonical_operations(canonical: dict):
             yield path, method, operation
 
 
-def test_canonical_openapi_marks_only_two_p2_operations_as_planned() -> None:
+def test_canonical_openapi_marks_only_one_p2_operation_as_planned() -> None:
     canonical = yaml.safe_load(
         (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
             encoding="utf-8"
@@ -61,7 +61,6 @@ def test_canonical_openapi_marks_only_two_p2_operations_as_planned() -> None:
             "POST",
             "/contracts/{contract_id}/performance-reports/{report_id}/extract",
         ): "extractPerformanceReport",
-        ("GET", "/contracts/{contract_id}/performance"): "getContractPerformance",
     }
 
 

@@ -9,6 +9,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.api.dependencies import (
     get_current_owner_id,
+    get_performance_aggregation_service,
     get_performance_confirmation_service,
     get_performance_report_upload_service,
 )
@@ -16,11 +17,13 @@ from app.core.exceptions import InvalidDocument
 from app.core.http import request_id
 from app.schemas.common import ApiError, ApiResponse
 from app.schemas.performance import (
+    ContractPerformance,
     PerformanceReportConfirmation,
     PerformanceReportConfirmed,
     PerformanceReportCreated,
 )
 from app.services.documents import read_upload_content
+from app.services.performance_aggregation import PerformanceAggregationService
 from app.services.performance_confirmation import PerformanceConfirmationService
 from app.services.performance_upload import PerformanceReportUploadService
 
@@ -217,6 +220,51 @@ async def confirm_performance_report(
     )
     return ApiResponse(
         data=confirmed,
+        error=None,
+        request_id=request_id(request),
+    )
+
+
+@router.get(
+    "/{contract_id}/performance",
+    response_model=ApiResponse[ContractPerformance],
+    responses={
+        200: {
+            "description": "최신 확정값 집계와 append-only 이력",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        401: {
+            "model": ApiResponse[None],
+            "description": "인증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        404: {
+            "model": ApiResponse[None],
+            "description": "계약을 찾을 수 없음",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+        422: {
+            "model": ApiResponse[None],
+            "description": "요청 검증 실패",
+            "headers": NO_STORE_RESPONSE_HEADERS,
+        },
+    },
+)
+async def get_contract_performance(
+    request: Request,
+    contract_id: UUID,
+    owner_id: Annotated[UUID, Depends(get_current_owner_id)],
+    service: Annotated[
+        PerformanceAggregationService,
+        Depends(get_performance_aggregation_service),
+    ],
+) -> ApiResponse[ContractPerformance]:
+    performance = await service.get_contract_performance(
+        owner_id=owner_id,
+        contract_id=contract_id,
+    )
+    return ApiResponse(
+        data=performance,
         error=None,
         request_id=request_id(request),
     )

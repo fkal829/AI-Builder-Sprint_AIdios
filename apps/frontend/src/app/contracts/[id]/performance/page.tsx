@@ -6,11 +6,14 @@ import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
 import { StatTile } from "@/components/StatTile";
 import { LayerBlock } from "@/components/LayerBlock";
+import { useAsync } from "@/lib/hooks";
+import { adapter, type LiveObligation } from "@/lib/adapter";
 
-/* ⑪ 광고효과 관리 — 화면 목업(기능 미구현).
+/* ⑩⑪ 이행·광고효과 관리 — 체결 후 사장님이 들어오는 관리 단계 단일 화면.
    대행사에게 받은 리포트를 사장님이 올리면 → 지표를 뽑아 대시보드로 모으고 →
-   계약 조건과 어긋나는 부분을 짚어 문의 문안까지 만들어주는 흐름을 보여준다.
-   실제 추출은 백엔드(이행/증빙 API + 문서 추출) 연동 후 붙는다.
+   계약 조건과 대조해 어긋나는 부분을 짚고 → 그 숫자를 근거로 산출물 증빙을
+   확인 완료(지급 조건 충족)하거나 이의로 기록한다.
+   ①~④는 화면 목업(문서 추출 연동 후 실제 값이 붙는다), ⑤만 실 API 연동.
    데모 전용 데이터라 mock.ts(실 API 응답 모델)와 분리해 이 파일에 둔다. */
 
 const MONTHS = [
@@ -77,9 +80,9 @@ export default function PerformancePage() {
 
   return (
     <AppScreen
-      title="광고효과 관리"
+      title="이행·광고효과 관리"
       size="wide"
-      backHref={`/contracts/${id}/obligations`}
+      backHref="/dashboard"
       right={
         <span className="rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
           화면 목업 · 개발 예정
@@ -94,7 +97,7 @@ export default function PerformancePage() {
       <div className="flex flex-col gap-5">
         <p className="text-[13px] leading-relaxed text-neutral700">
           대행사에게 받은 광고 리포트를 올려두면, 계약에서 약속한 조건대로
-          진행되고 있는지 한눈에 확인할 수 있어요.
+          진행되고 있는지 한눈에 확인하고 산출물 증빙까지 마무리할 수 있어요.
         </p>
 
         {/* 계약 단계 ↔ 관리 단계 연결 — 무엇을 근거로 대조하는지 밝힌다 */}
@@ -286,16 +289,22 @@ export default function PerformancePage() {
               </div>
             </section>
 
-            {/* ④ 짚어볼 점 + 문의 */}
+            {/* ④ 계약과 대조 + 문의 */}
             <section className="flex flex-col gap-2">
-              <SectionTitle>④ 짚어볼 점 · 대행사에 문의하기</SectionTitle>
+              <SectionTitle>④ 계약과 대조해봤어요 · 대행사에 문의하기</SectionTitle>
               <InquiryPanel />
+            </section>
+
+            {/* ⑤ 위 숫자를 근거로 산출물 증빙을 마무리한다 */}
+            <section className="flex flex-col gap-2">
+              <SectionTitle>⑤ 산출물 증빙 확인</SectionTitle>
+              <ObligationPanel contractId={id} />
             </section>
           </>
         )}
 
         <Disclaimer>
-          지금은 화면 구성을 보여주는 목업이에요. 리포트에서 숫자를 읽어오는
+          ①~④는 화면 구성을 보여주는 목업이에요. 리포트에서 숫자를 읽어오는
           기능은 준비 중이며, 확인한 숫자만 기록으로 남습니다. 문의 문안은
           사장님이 직접 대행사에 보내는 참고 문구예요.
         </Disclaimer>
@@ -306,8 +315,14 @@ export default function PerformancePage() {
 
 /** 상단 4단계 흐름 표시 */
 function StepFlow({ stage }: { stage: Stage }) {
-  const steps = ["리포트 올리기", "읽은 내용 확인", "대시보드", "문의하기"];
-  const reached = stage === "done" ? 4 : stage === "parsing" ? 1 : 0;
+  const steps = [
+    "리포트 올리기",
+    "읽은 내용 확인",
+    "대시보드",
+    "계약과 대조",
+    "증빙 확인",
+  ];
+  const reached = stage === "done" ? 5 : stage === "parsing" ? 1 : 0;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {steps.map((s, i) => (
@@ -354,6 +369,107 @@ function MonthlyChart() {
         );
       })}
     </div>
+  );
+}
+
+/** 대표 산출물 증빙 확인 — 위에서 확인한 숫자를 근거로 지급 조건 충족/이의를 기록한다.
+    화면 안에서 유일하게 실 API에 연결된 부분. */
+function ObligationPanel({ contractId }: { contractId: string }) {
+  const state = useAsync(() => adapter.getObligation(contractId), [contractId]);
+  const [updated, setUpdated] = useState<LiveObligation | null>(null);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const obligation = updated ?? (state.status === "ready" ? state.data : null);
+
+  const review = async (decision: "APPROVED" | "DISPUTED") => {
+    if (!obligation || working) return;
+    setWorking(true);
+    setError(null);
+    try {
+      setUpdated(await adapter.reviewObligation(contractId, obligation.id, decision));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "증빙 검토 결과를 저장하지 못했습니다.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  if (state.status === "loading") {
+    return <p className="py-6 text-center text-sm text-neutral500">불러오는 중…</p>;
+  }
+  if (state.status === "error") {
+    return (
+      <p className="py-6 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>
+    );
+  }
+  if (!obligation) {
+    return (
+      <Card>
+        <p className="text-[12px] leading-relaxed text-neutral500">
+          원문 근거로 확인된 대표 산출물이 아직 없어요. 계약서 분석이 끝나면
+          이곳에서 증빙을 확인할 수 있어요.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="text-[13px] font-black text-ink">{obligation.title}</div>
+      <div className="mt-2 rounded-lg bg-subtle p-3.5">
+        <div className="text-[11px] text-neutral500">기한 {obligation.dueDate}</div>
+        <p className="mt-2 text-[12px] leading-relaxed text-neutral700">
+          계약서 {obligation.sourcePage}쪽: “{obligation.sourceText}”
+        </p>
+        <div className="mt-1 text-[10px] text-neutral500">
+          원문 근거 확신도 {Math.round(obligation.confidence * 100)}%
+        </div>
+      </div>
+
+      {(obligation.status === "PENDING" || obligation.status === "SUBMITTED") && (
+        <>
+          <p className="mt-3 text-[12px] leading-relaxed text-neutral700">
+            위 리포트에서 확인한 <b className="text-ink">게시물 2건</b>을 근거로
+            판단해주세요.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              disabled={working}
+              onClick={() => review("APPROVED")}
+              className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
+            >
+              {working ? "저장 중…" : "확인 완료"}
+            </button>
+            <button
+              type="button"
+              disabled={working}
+              onClick={() => review("DISPUTED")}
+              className="h-11 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral500 disabled:opacity-40"
+            >
+              이의 있어요
+            </button>
+          </div>
+        </>
+      )}
+
+      {obligation.status === "APPROVED" && (
+        <div className="mt-3 rounded-lg border-2 border-brand700 bg-brand50 px-4 py-3 text-center text-sm font-black text-brand700">
+          지급 조건 충족으로 표시됨
+        </div>
+      )}
+      {obligation.status === "DISPUTED" && (
+        <div className="mt-3 rounded-lg border border-neutral500 bg-neutral100 px-4 py-3 text-center text-sm font-bold text-neutral700">
+          이의 있음으로 기록됐어요
+        </div>
+      )}
+
+      {error && <p className="mt-2 text-xs font-bold text-red-700">{error}</p>}
+      <p className="mt-2 text-[11px] leading-relaxed text-neutral500">
+        확인 완료는 계약상 지급 조건 충족 표시이며 실제 송금·결제를 실행하지
+        않습니다.
+      </p>
+    </Card>
   );
 }
 

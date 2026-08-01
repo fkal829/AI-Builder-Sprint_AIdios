@@ -88,8 +88,8 @@ export default function SignaturePage() {
       backHref="/dashboard"
       footer={
         state.status === "ready" && state.data.signature?.modusignStatus === "COMPLETED" ? (
-          <CTAButton href={`/contracts/${id}/obligations`}>
-            산출물 증빙 확인하기
+          <CTAButton href={`/contracts/${id}/performance`}>
+            리포트 올리고 이행 확인하기
           </CTAButton>
         ) : undefined
       }

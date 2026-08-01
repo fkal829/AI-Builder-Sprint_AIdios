@@ -181,6 +181,16 @@ class PerformanceAccessRepository(Protocol):
         immediately preceding month for the engagement-rate-drop comparison."""
         ...
 
+    async def list_owned_performance_reports(
+        self,
+        *,
+        owner_id: UUID,
+        contract_id: UUID,
+    ) -> list[PerformanceReportAccess] | None:
+        """All of one contract's reports, any order. ``None`` hides a missing or
+        foreign contract; an owned contract with no reports returns ``[]``."""
+        ...
+
 
 class PerformanceReportUploadRepository(Protocol):
     """Atomic upload metadata boundary for the planned 16.2 endpoint.

@@ -27,6 +27,7 @@ CANONICAL_OPERATION_IDS = {
         "PATCH",
         "/contracts/{contract_id}/performance-reports/{report_id}",
     ): "confirmPerformanceReport",
+    ("GET", "/contracts/{contract_id}/performance"): "getContractPerformance",
     (
         "GET",
         "/contracts/{contract_id}/documents/{document_id}/access",

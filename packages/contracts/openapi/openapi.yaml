@@ -937,7 +937,6 @@ paths:
     get:
       summary: 계약별 월별 광고효과 조회
       operationId: getContractPerformance
-      x-implementation-status: planned
       tags: [performance]
       description: |
         report 원본 연결과 version 오름차순 revision 이력, 각 월의 최신 확정 revision만

@@ -6,8 +6,8 @@
 > Base URL: `/api/v1`<br>
 > 상세 기계 판독 명세: `packages/contracts/openapi/openapi.yaml`<br>
 > 적용 범위: 1~14절은 현재 P0 구현 계약, 15~19절은 6.14 P2-0 확정 설계<br>
-> P2 구현 상태: canonical OpenAPI 4/4 `planned` 등록, runtime endpoint 0/4,
-> 16.1·17.2·17.5 내부 기반 구현
+> P2 구현 상태: canonical OpenAPI 3/4 `planned`, runtime endpoint 1/4,
+> 16.1·16.2·17.2·17.5 구현
 
 이 문서는 백엔드 API와 개발 순서를 사람이 읽을 수 있도록 정리한다. 1~14절의 P0 제품
 범위와 사용자 흐름은 `docs/기획안.md`, 15~19절의 6.14 P2 변경분은
@@ -18,10 +18,10 @@
 경로 표기는 모두 저장소 루트 기준이다.
 
 15~19절은 `docs/단디계약최종기획안.md` 6.14의 P2-0 확정 설계 구역이다. 현재
-canonical OpenAPI에는 신규 4개 operation을 `planned`로 등록했지만 FastAPI runtime과
-네 endpoint는 아직 등록하지 않았다. 16.1 공통 접근 기반, 업로드
-Document·report·감사 원자 RPC, 추출 attempt·완료·복구 RPC와 비공개 AI
-Adapter 조합기는 구현됐다. 17.4의 확정값은 기획안, OpenAPI,
+신규 4개 operation 중 16.2 리포트 업로드는 canonical OpenAPI의 활성 operation과
+FastAPI runtime에 등록했고, 16.3~16.5 세 endpoint는 `planned`다. 16.1 공통
+접근 기반, 업로드 Document·report·감사 원자 RPC, 추출 attempt·완료·복구
+RPC와 비공개 AI Adapter 조합기는 구현됐다. 17.4의 확정값은 기획안, OpenAPI,
 `docs/api-data-contract.md`, 공통 enum·오류에 같은 값으로 유지하고 구조 검증을
 통과시킨 뒤 runtime을 추가한다.
 
@@ -162,7 +162,7 @@ Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 | `410` | 공개 링크 만료 |
 | `422` | 요청 스키마 검증 실패 |
 | `502` | Solar 역제안 비교 또는 모두싸인 요청 실패 |
-| `503` | 분석 작업 접수 실패 |
+| `503` | 분석 작업 접수 또는 외부 기반 서비스 사용 불가 |
 
 ### 2.6 공통 경로 변수
 
@@ -1348,8 +1348,8 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 >
 > - 기준: `docs/단디계약최종기획안.md` 6.14·10장·11장·12장·13장
 > - 우선순위: P2 발표 로드맵
-> - 현재 상태: 프론트엔드 화면 목업과 16.1 백엔드 공통 기반 존재, endpoint 0/4
-> - 기계 계약: canonical OpenAPI 4/4 `planned`, runtime 0/4, 기반 DB migration 구현
+> - 현재 상태: 프론트엔드 화면 목업과 16.1 공통 기반, 16.2 업로드 endpoint 구현
+> - 기계 계약: canonical OpenAPI 3/4 `planned`, runtime 1/4, 기반 DB migration 구현
 > - 선행 의존성: 이행·증빙 API와 기존 대시보드 API는 현재 구현됨
 > - 신규 번호: `P2-B-*`, `P2-C-*`; 기존 B-1~B-16·C-1~C-10과 독립
 
@@ -1395,14 +1395,15 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 | 응답 헤더 | 민감한 계약·성과 자료이므로 성공·오류 모두 `Cache-Control: no-store` |
 | 멱등성 | 업로드·추출·확인 쓰기에 `Idempotency-Key` 필수 |
 | 원본 파일 | `Document.type=PERFORMANCE_REPORT`와 private Storage를 사용하고, 공개 URL·Storage 경로를 일반 응답에 포함하지 않음 |
-| 현재 등록 상태 | 아래 4개는 canonical OpenAPI에 `planned`로 등록, runtime에는 아직 없음 |
+| 현재 등록 상태 | 16.2는 canonical OpenAPI·runtime 등록, 16.3~16.5는 `planned` |
 
 16.1 공통 기반은 구현됐다. Bearer 인증은 기존 공통 인증을 재사용하며, owner-scoped
 Contract·report·source Document 조회, 쓰기 허용 상태 guard, 월 중복 preflight와 DB
 고유 제약, multipart 멱등 fingerprint 구성요소, 성과 경로 `no-store`, private Document
-경계를 공통 service·repository·migration에서 제공한다. 업로드 원자 RPC와
-추출 attempt RPC·service·AI 경계는 내부 기반으로 구현됐지만, 16.2~16.5의 네
-endpoint는 계속 `planned`이며 runtime operation 수는 0/4다.
+경계를 공통 service·repository·migration에서 제공한다. 업로드 원자 RPC와 16.2
+FastAPI endpoint는 runtime에 구현됐다. 추출 attempt RPC·service·AI 경계는 내부
+기반으로 구현됐지만, 16.3~16.5 세 endpoint는 `planned`이며 runtime operation
+수는 1/4이다.
 
 `period`는 API에서 `YYYY-MM`으로 받고 `(contract_id, period)`를 DB 고유 제약으로
 보호한다. 같은 `Idempotency-Key`와 같은 요청은 최초 응답을 재생하고, 다른 요청으로
@@ -1423,11 +1424,12 @@ endpoint는 계속 `planned`이며 runtime operation 수는 0/4다.
 
 `POST /api/v1/contracts/{contract_id}/performance-reports`
 
+- 구현 상태: canonical OpenAPI·FastAPI runtime 등록 완료
 - 인증: Bearer
 - 담당: P2-B
 - 필수 헤더: `Idempotency-Key`
 - Content-Type: `multipart/form-data`
-- 성공: `201 PerformanceReportResponse`
+- 성공: `201 PerformanceReportCreatedResponse`
 - 오류: `401`, `404`, `409`, `422`, `503`
 
 Form:
@@ -1448,9 +1450,10 @@ nullable `extracted_payload`, `current_revision=null`, `revision_count=0`을 포
 
 Storage 업로드는 긴 DB 트랜잭션 밖에서 수행한다. 이후 DB RPC에서 `Document`
 메타데이터, `PerformanceReport`, `PERFORMANCE_REPORT_UPLOADED` 감사 이벤트를 원자
-저장한다. DB 저장 실패 시 업로드 객체를 삭제하고, 응답 유실 시 서버가 미리 만든
-Document·report UUID로 커밋 여부를 복구한다. 같은 계약·`period`의 두 번째 논리
-리포트 생성은 `409 REPORT_PERIOD_ALREADY_EXISTS`로 거부한다.
+저장한다. 명시적인 DB 거부에는 업로드 객체를 삭제하지만 전송 오류로 커밋 여부가
+불명확하면 객체와 멱등 예약을 보존한다. `Idempotency-Key`에서 결정적으로 만든
+Document·report UUID로 응답 유실과 멱등 응답 저장 실패를 복구한다. 같은 계약·`period`의
+두 번째 논리 리포트 생성은 `409 REPORT_PERIOD_ALREADY_EXISTS`로 거부한다.
 
 ### 16.3 리포트 지표 추출 — P2-B
 

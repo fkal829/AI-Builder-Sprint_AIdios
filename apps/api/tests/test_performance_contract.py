@@ -215,6 +215,7 @@ def test_performance_error_codes_match_the_five_approved_codes() -> None:
         "REPORT_EXTRACTION_IN_PROGRESS",
         "REPORT_EXTRACT_FAILED",
     }
+    assert ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE.value == "EXTERNAL_SERVICE_UNAVAILABLE"
     assert "REPORT_UPLOAD_FAILED" not in {code.value for code in ErrorCode}
 
 
@@ -270,9 +271,7 @@ def test_confirmed_payload_requires_nullable_keys_and_preserves_zero() -> None:
 
     with pytest.raises(ValidationError):
         PerformanceConfirmedPayloadInput(**missing_reach)
-    zero = PerformanceConfirmedPayloadInput(
-        **confirmed_payload_values(published_content_count=0)
-    )
+    zero = PerformanceConfirmedPayloadInput(**confirmed_payload_values(published_content_count=0))
     unknown = PerformanceConfirmedPayloadInput(
         **confirmed_payload_values(published_content_count=None)
     )
@@ -301,15 +300,11 @@ def test_confirmed_payload_rejects_negative_non_negative_metrics(field: str) -> 
 
 
 def test_confirmed_payload_allows_negative_follower_net_change_but_rejects_boolean() -> None:
-    payload = PerformanceConfirmedPayloadInput(
-        **confirmed_payload_values(follower_net_change=-12)
-    )
+    payload = PerformanceConfirmedPayloadInput(**confirmed_payload_values(follower_net_change=-12))
 
     assert payload.follower_net_change == -12
     with pytest.raises(ValidationError):
-        PerformanceConfirmedPayloadInput(
-            **confirmed_payload_values(published_content_count=True)
-        )
+        PerformanceConfirmedPayloadInput(**confirmed_payload_values(published_content_count=True))
 
 
 def test_published_content_count_candidate_preserves_not_found_and_zero() -> None:
@@ -711,7 +706,7 @@ def test_pydantic_performance_properties_match_openapi() -> None:
         assert openapi_schema["additionalProperties"] is False
 
 
-def test_openapi_marks_exactly_four_performance_operations_as_planned() -> None:
+def test_openapi_marks_three_unimplemented_performance_operations_as_planned() -> None:
     canonical = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
     planned = {
         (method.upper(), path, operation["operationId"])
@@ -722,11 +717,6 @@ def test_openapi_marks_exactly_four_performance_operations_as_planned() -> None:
     }
 
     assert planned == {
-        (
-            "POST",
-            "/contracts/{contract_id}/performance-reports",
-            "createPerformanceReport",
-        ),
         (
             "POST",
             "/contracts/{contract_id}/performance-reports/{report_id}/extract",

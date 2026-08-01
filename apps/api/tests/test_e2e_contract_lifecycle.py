@@ -30,7 +30,9 @@ from app.api.dependencies import (
     get_analysis_service,
     get_modusign_adapter,
     get_modusign_webhook_service,
+    get_solar_review_adapter,
     get_supabase_adapter,
+    get_upstage_adapter,
 )
 from app.core.enums import ContractStatus, InternalSignatureStatus, ModusignStatus
 from app.main import app
@@ -80,18 +82,28 @@ async def lifecycle_context(monkeypatch):
         demo_contract_id=DEMO_CONTRACT_ID,
         demo_bearer_token=BEARER_TOKEN,
     )
+    mock_solar_adapter = SolarReviewAdapter(
+        mode="mock",
+        api_key="",
+        base_url="https://api.upstage.ai",
+    )
+    mock_upstage_adapter = UpstageAdapter(
+        mode="mock",
+        api_key="",
+        base_url="https://api.upstage.ai",
+    )
     analysis_service = AnalysisService(
-        adapter=UpstageAdapter(mode="mock", api_key="", base_url="https://api.upstage.ai"),
-        reviewer=SolarReviewAdapter(mode="mock", api_key="", base_url="https://api.upstage.ai"),
+        adapter=mock_upstage_adapter,
+        reviewer=mock_solar_adapter,
         contracts=repository,
         documents=repository,
         understood_terms=repository,
         analyses=repository,
         storage=repository,
     )
-    # Real .env in this repo is wired to MODUSIGN_MODE=live with real vendor
-    # credentials. Force mock mode here so an automated test run never makes
-    # a live network call to Modusign.
+    # Real .env in this repo can point Upstage, Solar, and Modusign at live
+    # vendors. Force all vendor dependencies to mock mode so an automated test
+    # never calls the network.
     mock_modusign_adapter = ModusignAdapter(mode="mock", account_email="", api_key="")
 
     async def override_repository():
@@ -103,9 +115,17 @@ async def lifecycle_context(monkeypatch):
     async def override_modusign_adapter():
         return mock_modusign_adapter
 
+    async def override_solar_review_adapter():
+        return mock_solar_adapter
+
+    async def override_upstage_adapter():
+        return mock_upstage_adapter
+
     app.dependency_overrides[get_supabase_adapter] = override_repository
     app.dependency_overrides[get_analysis_service] = override_analysis_service
     app.dependency_overrides[get_modusign_adapter] = override_modusign_adapter
+    app.dependency_overrides[get_solar_review_adapter] = override_solar_review_adapter
+    app.dependency_overrides[get_upstage_adapter] = override_upstage_adapter
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"

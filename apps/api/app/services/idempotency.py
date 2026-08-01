@@ -72,6 +72,10 @@ class IdempotencyService:
         exception_outcome: (
             Callable[[Exception], IdempotentOutcome[ResponseT] | None] | None
         ) = None,
+        pending_recovery: (
+            Callable[[], Awaitable[IdempotentOutcome[ResponseT] | None]] | None
+        ) = None,
+        preserve_pending_exception: Callable[[Exception], bool] | None = None,
     ) -> IdempotentResult[ResponseT]:
         request_hash = request_fingerprint(request_payload)
         claim = await self._repository.claim_idempotency(
@@ -94,6 +98,7 @@ class IdempotencyService:
                 key=key,
                 request_hash=request_hash,
                 replay=replay,
+                pending_recovery=pending_recovery,
             )
 
         try:
@@ -102,19 +107,20 @@ class IdempotencyService:
             outcome = exception_outcome(error) if exception_outcome is not None else None
             if outcome is not None:
                 _ensure_safe_replay_payload(outcome.replay_payload)
-                await self._complete_with_retry(
+                return await self._complete_or_replay_winner(
                     owner_id=owner_id,
                     operation=operation,
                     resource_id=resource_id,
                     key=key,
                     request_hash=request_hash,
                     outcome=outcome,
+                    replay=replay,
+                    recovered=False,
                 )
-                return IdempotentResult(
-                    status_code=outcome.status_code,
-                    response=outcome.response,
-                    replayed=False,
-                )
+            if preserve_pending_exception is not None and preserve_pending_exception(error):
+                # The business commit may still become visible. Keep the reservation
+                # so a retry can recover the same deterministic side effect safely.
+                raise
             await self._repository.abandon_idempotency(
                 owner_id=owner_id,
                 operation=operation,
@@ -128,18 +134,58 @@ class IdempotencyService:
         # transaction. Never abandon its reservation if replay persistence fails:
         # deleting it would allow the same key to execute the side effect again.
         _ensure_safe_replay_payload(outcome.replay_payload)
-        await self._complete_with_retry(
+        return await self._complete_or_replay_winner(
             owner_id=owner_id,
             operation=operation,
             resource_id=resource_id,
             key=key,
             request_hash=request_hash,
             outcome=outcome,
+            replay=replay,
+            recovered=False,
         )
+
+    async def _complete_or_replay_winner(
+        self,
+        *,
+        owner_id: UUID,
+        operation: IdempotencyOperation,
+        resource_id: UUID,
+        key: UUID,
+        request_hash: str,
+        outcome: IdempotentOutcome[ResponseT],
+        replay: Callable[[dict[str, Any]], ResponseT],
+        recovered: bool,
+    ) -> IdempotentResult[ResponseT]:
+        try:
+            await self._complete_with_retry(
+                owner_id=owner_id,
+                operation=operation,
+                resource_id=resource_id,
+                key=key,
+                request_hash=request_hash,
+                outcome=outcome,
+            )
+        except Exception:
+            # A concurrent deterministic recovery may have completed first. Return
+            # that authoritative first response instead of surfacing a false 503.
+            record = await self._repository.get_idempotency(
+                owner_id=owner_id,
+                operation=operation,
+                resource_id=resource_id,
+                key=key,
+            )
+            if (
+                record is not None
+                and record.request_hash == request_hash
+                and record.response_status is not None
+            ):
+                return _replay(record, request_hash=request_hash, replay=replay)
+            raise
         return IdempotentResult(
             status_code=outcome.status_code,
             response=outcome.response,
-            replayed=False,
+            replayed=recovered,
         )
 
     async def _complete_with_retry(
@@ -181,6 +227,7 @@ class IdempotencyService:
         key: UUID,
         request_hash: str,
         replay: Callable[[dict[str, Any]], ResponseT],
+        pending_recovery: (Callable[[], Awaitable[IdempotentOutcome[ResponseT] | None]] | None),
     ) -> IdempotentResult[ResponseT]:
         for _ in range(self._pending_replay_attempts):
             await asyncio.sleep(self._pending_replay_delay_seconds)
@@ -191,11 +238,39 @@ class IdempotencyService:
                 key=key,
             )
             if record is None:
-                break
+                # Another execution explicitly abandoned the reservation. Recovery
+                # must not create a side effect without first owning a new claim.
+                raise IdempotencyConflict("같은 멱등 요청의 예약이 더 이상 유효하지 않습니다.")
             if record.request_hash != request_hash:
                 raise IdempotencyConflict()
             if record.response_status is not None:
                 return _replay(record, request_hash=request_hash, replay=replay)
+        if pending_recovery is not None:
+            outcome = await pending_recovery()
+            if outcome is not None:
+                _ensure_safe_replay_payload(outcome.replay_payload)
+                record = await self._repository.get_idempotency(
+                    owner_id=owner_id,
+                    operation=operation,
+                    resource_id=resource_id,
+                    key=key,
+                )
+                if record is None:
+                    raise IdempotencyConflict("같은 멱등 요청의 예약이 더 이상 유효하지 않습니다.")
+                if record.request_hash != request_hash:
+                    raise IdempotencyConflict()
+                if record.response_status is not None:
+                    return _replay(record, request_hash=request_hash, replay=replay)
+                return await self._complete_or_replay_winner(
+                    owner_id=owner_id,
+                    operation=operation,
+                    resource_id=resource_id,
+                    key=key,
+                    request_hash=request_hash,
+                    outcome=outcome,
+                    replay=replay,
+                    recovered=True,
+                )
         raise IdempotencyConflict("같은 멱등 요청이 아직 처리 중입니다.")
 
 

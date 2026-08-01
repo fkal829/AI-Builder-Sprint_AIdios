@@ -10,9 +10,9 @@ HTTP endpoint와 요청·응답 스키마의
 `/api/v1`이다. 이 문서의 파일 경로 표기는 모두 저장소 루트 기준이다.
 
 1~13절은 현재 P0 구현 계약이고 14절은 기획안 6.14의 P2-0 확정 설계다. 14절 중
-16.1 공통 접근 계층, 업로드·추출 원자 RPC와 성과 지표 AI 경계는 구현됐지만
-네 FastAPI endpoint는 아직 등록되지 않았다. 내부 기반 완료를 전체 P2 완료로
-해석하지 않는다.
+16.1 공통 접근 계층, 업로드·추출 원자 RPC와 성과 지표 AI 경계, 16.2 리포트 업로드
+FastAPI endpoint는 구현됐다. 16.3~16.5 세 endpoint는 아직 `planned`이며, 현재 상태를
+전체 P2 완료로 해석하지 않는다.
 
 기획안의 제품 기능과 P0 범위는 유지하되, 구현 담당만 최신 팀 결정에 따라 D의 백엔드
 항목을 B·C로 재배정한다.
@@ -79,6 +79,7 @@ minimum: 0
 | `DOCUMENT_PARSE_FAILED` | 문서 파싱 실패 |
 | `ANALYSIS_SCHEMA_INVALID` | AI 구조화 출력 검증 실패 |
 | `ANALYSIS_START_FAILED` | 분석 작업 접수 실패 |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | private Storage 등 외부 기반 서비스 사용 불가 |
 | `ADJUSTMENT_LINK_EXPIRED` | 조정 링크 만료 |
 | `OBLIGATION_LINK_EXPIRED` | 산출물 증빙 링크 만료 |
 | `INVALID_STATUS_TRANSITION` | 허용되지 않은 상태 전환 또는 중복 제출 |
@@ -665,9 +666,9 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 ## 14. 6.14 광고효과 P2-0 확정 데이터 계약
 
 이 절은 `docs/api-명세서.md` 16~17절의 확정값을 영속성·보안·상태 관점에서
-고정한다. 광고효과 기능은 P2이며 16.1 공통 접근 계층과 기반 migration은 구현됐다.
-네 업무 endpoint와 후속 RPC는 아직 미구현이다. 기존 P0 API, 전역 `/dashboard` 응답과
-계약 상태 머신을 공통 기반만으로 변경하지 않는다.
+고정한다. 광고효과 기능은 P2이며 16.1 공통 접근 계층, 기반 migration과 16.2 업로드
+endpoint는 구현됐다. 16.3~16.5 세 업무 endpoint와 확정·집계 runtime은 아직
+미구현이다. 기존 P0 API, 전역 `/dashboard` 응답과 계약 상태 머신은 변경하지 않는다.
 
 ### 14.1 소유권·업무 범위
 
@@ -722,9 +723,11 @@ fingerprint를 사용하면 `409 IDEMPOTENCY_CONFLICT`다.
 
 Storage 업로드는 긴 DB 트랜잭션 밖에서 수행한다. DB RPC는 `Document` 메타데이터,
 `PerformanceReport=UPLOADED`, `PERFORMANCE_REPORT_UPLOADED` 감사 이벤트를 원자적으로
-저장한다. DB 저장 실패 시 업로드 객체를 삭제한다. 응답 유실 뒤 재시도는 서버가 미리
-만든 Document·report UUID와 멱등 예약으로 커밋 여부를 복구하며 중복 파일·행·이벤트를
-만들지 않는다. Storage 경로와 원본 파일명은 일반 응답이나 로그에 노출하지 않는다.
+저장한다. RPC가 명시적으로 요청을 거부한 경우에만 업로드 객체를 삭제한다. 전송 오류로
+커밋 여부가 불명확하면 객체와 멱등 예약을 보존하며, `Idempotency-Key`에서 결정적으로 만든
+Document·report UUID로 재요청 시 커밋 또는 미완료 작업을 복구한다. 멱등 응답 저장이
+실패해도 같은 복구 경로를 사용해 중복 파일·행·이벤트를 만들지 않는다. Storage 경로와
+원본 파일명은 일반 응답이나 로그에 노출하지 않는다.
 
 ### 14.3 추출 claim·실패·stale 복구
 
@@ -878,12 +881,13 @@ GET은 상태·revision·flag·감사 이벤트를 변경하지 않고 AI나 문
 
 이 절은 P2-0 공개·영속 계약을 확정한다. 현재 16.1의 owner-scoped repository·접근
 guard·멱등 fingerprint·`no-store`, `performance_reports` 기반, 업로드·추출 원자
-RPC와 비공개 AI 조합기까지 구현됐다. 16.2~16.5 FastAPI endpoint와 확정·집계
-영속 runtime은 아직 구현되지 않았다. 다음을 모두 검증하기 전 전체 P2 완료로
+RPC와 비공개 AI 조합기, 16.2 FastAPI 업로드 endpoint까지 구현됐다.
+16.3~16.5 FastAPI endpoint와 확정·집계 영속 runtime은 아직 구현되지 않았다. 다음을
+모두 검증하기 전 전체 P2 완료로
 표시하지 않는다.
 
 - 계약·월·source Document 고유성, 소유권과 private 접근
-- 업로드 응답 유실·롤백과 추출 claim·15분 stale 복구
+- 업로드 응답 유실·명시적 거부 롤백·불명확 커밋 보존과 추출 claim·15분 stale 복구
 - 0/null·첫 달·전월 누락·999/1000 노출·1.0%p·25% 경계
 - 수량 부족만 flag하고 같거나 초과한 게시 수에는 flag하지 않음
 - 최신 월 append-only 정정, revision conflict와 후속 월 dependency 거부

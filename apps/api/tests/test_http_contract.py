@@ -35,7 +35,7 @@ def _implemented_canonical_operations(canonical: dict):
             yield path, method, operation
 
 
-def test_canonical_openapi_marks_only_the_four_p2_operations_as_planned() -> None:
+def test_canonical_openapi_marks_only_three_p2_operations_as_planned() -> None:
     canonical = yaml.safe_load(
         (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
             encoding="utf-8"
@@ -57,7 +57,6 @@ def test_canonical_openapi_marks_only_the_four_p2_operations_as_planned() -> Non
 
     assert declared_statuses <= {None, "planned"}
     assert planned == {
-        ("POST", "/contracts/{contract_id}/performance-reports"): "createPerformanceReport",
         (
             "POST",
             "/contracts/{contract_id}/performance-reports/{report_id}/extract",
@@ -68,6 +67,28 @@ def test_canonical_openapi_marks_only_the_four_p2_operations_as_planned() -> Non
         ): "confirmPerformanceReport",
         ("GET", "/contracts/{contract_id}/performance"): "getContractPerformance",
     }
+
+
+def test_performance_upload_runtime_multipart_schema_matches_canonical_constraints() -> None:
+    canonical = yaml.safe_load(
+        (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    canonical_schema = canonical["paths"]["/contracts/{contract_id}/performance-reports"]["post"][
+        "requestBody"
+    ]["content"]["multipart/form-data"]["schema"]
+    runtime_schema = app.openapi()["paths"]["/api/v1/contracts/{contract_id}/performance-reports"][
+        "post"
+    ]["requestBody"]["content"]["multipart/form-data"]["schema"]
+    canonical_period = canonical["components"]["schemas"]["PerformancePeriod"]
+
+    assert runtime_schema["type"] == canonical_schema["type"] == "object"
+    assert runtime_schema["additionalProperties"] is False
+    assert canonical_schema["additionalProperties"] is False
+    assert runtime_schema["required"] == canonical_schema["required"] == ["period", "file"]
+    assert runtime_schema["properties"]["period"] == canonical_period
+    assert runtime_schema["properties"]["file"] == canonical_schema["properties"]["file"]
 
 
 async def test_invalid_transition_body_and_header_share_request_id() -> None:
@@ -274,9 +295,7 @@ def test_runtime_openapi_response_statuses_and_sensitive_headers_match_canonical
         )
         for status, response in expected_responses.items():
             if "$ref" in response:
-                response = canonical["components"]["responses"][
-                    response["$ref"].rsplit("/", 1)[1]
-                ]
+                response = canonical["components"]["responses"][response["$ref"].rsplit("/", 1)[1]]
             if "Cache-Control" in response.get("headers", {}):
                 assert "Cache-Control" in actual_responses[status].get(
                     "headers",

@@ -17,9 +17,9 @@ P0 데모 경로는 다음과 같다.
 `계약서 업로드 → 이해조건 5문항 → 조건 추출 → 불일치·누락 검토 → 조정 요청 링크 →`
 `대행사 1회 응답 → 수정 계약서 업로드·대조 → 모두싸인 서명 → 산출물 증빙 확인 → 만료·재계약 확인`
 
-광고효과 기록·대조(기획안 6.14)는 P2다. 업로드·추출의 영속·AI 내부 기반은
-구현 중이지만 네 공개 FastAPI endpoint는 아직 `planned`며 runtime에 등록하지
-않는다.
+광고효과 기록·대조(기획안 6.14)는 P2다. 16.2 업로드 FastAPI endpoint와
+업로드·추출의 영속·AI 내부 기반은 구현됐다. 16.3~16.5 세 공개 endpoint는
+아직 `planned`며 runtime에 등록하지 않는다.
 
 이 서비스는 법률 자문, 사기 판정, 위법성 판정, 승소 가능성 예측을 제공하지 않는다.
 사용자와 계약 상대방이 같은 조건을 확인하고 합의 과정을 기록하도록 돕는 것이 목적이다.
@@ -514,10 +514,13 @@ C  GET   /api/v1/dashboard
   처리한다. 공개 토큰은 열거 방지를 위해 형식·길이·scope·대상 불일치를 모두
   `404`로 은닉하고, 유효하지만 만료된 토큰만 `410`으로 처리한다.
 - `ApiError.code` 허용값은 `DOCUMENT_PARSE_FAILED`, `ANALYSIS_SCHEMA_INVALID`,
-  `ANALYSIS_START_FAILED`, `ADJUSTMENT_LINK_EXPIRED`, `OBLIGATION_LINK_EXPIRED`,
-  `INVALID_STATUS_TRANSITION`, `MODUSIGN_REQUEST_FAILED`, `WEBHOOK_AUTH_FAILED`,
-  `UNAUTHORIZED_ACCESS`, `IDEMPOTENCY_CONFLICT`, `NOT_FOUND`, `VALIDATION_ERROR`로
-  제한한다. 추가가 필요하면 명세와 테스트를 먼저 변경한다.
+  `ANALYSIS_START_FAILED`, `EXTERNAL_SERVICE_UNAVAILABLE`, `ADJUSTMENT_LINK_EXPIRED`,
+  `OBLIGATION_LINK_EXPIRED`, `INVALID_STATUS_TRANSITION`, `MODUSIGN_REQUEST_FAILED`,
+  `WEBHOOK_AUTH_FAILED`, `UNAUTHORIZED_ACCESS`, `IDEMPOTENCY_CONFLICT`,
+  `REPORT_PERIOD_ALREADY_EXISTS`, `REPORT_REVISION_CONFLICT`,
+  `REPORT_CORRECTION_DEPENDENCY_EXISTS`, `REPORT_EXTRACTION_IN_PROGRESS`,
+  `REPORT_EXTRACT_FAILED`, `NOT_FOUND`, `VALIDATION_ERROR`로 제한한다. 추가가 필요하면
+  명세와 테스트를 먼저 변경한다.
 - 새 필드나 enum을 추가할 때 Pydantic 스키마, OpenAPI, 공유 계약 타입, 테스트를
   함께 갱신한다.
 - 외부 JSON 필드 명명 규칙은 OpenAPI에서 하나로 확정하고 Pydantic alias로 관리한다.

@@ -81,8 +81,7 @@ class PerformanceReportExtractFailed(ApiException):
             status_code=502,
             code=ErrorCode.REPORT_EXTRACT_FAILED,
             message=(
-                "광고효과 리포트에서 지표를 추출하지 못했습니다. "
-                "새 요청으로 다시 시도해 주세요."
+                "광고효과 리포트에서 지표를 추출하지 못했습니다. 새 요청으로 다시 시도해 주세요."
             ),
         )
 
@@ -93,6 +92,15 @@ class AnalysisStartUnavailable(ApiException):
             status_code=503,
             code=ErrorCode.ANALYSIS_START_FAILED,
             message="분석 작업을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        )
+
+
+class ExternalServiceUnavailable(ApiException):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=503,
+            code=ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE,
+            message="요청한 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
         )
 
 

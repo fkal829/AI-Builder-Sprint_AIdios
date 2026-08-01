@@ -1352,7 +1352,7 @@ D는 endpoint, service, repository, Adapter 또는 migration을 직접 구현하
 >
 > - 기준: `docs/단디계약최종기획안.md` 6.14·10장·11장·12장·13장
 > - 우선순위: P2 발표 로드맵
-> - 현재 상태: 프론트엔드 화면 목업과 16.1 공통 기반, 16.2~16.5 endpoint 구현
+> - 현재 상태: 프론트엔드 16.2~16.5 API 연동, 백엔드 공통 기반과 endpoint 구현
 > - 기계 계약: canonical OpenAPI 0/4 `planned`, runtime 4/4, 기반 DB migration 구현
 > - 선행 의존성: 이행·증빙 API와 기존 대시보드 API는 현재 구현됨
 > - 신규 번호: `P2-B-*`, `P2-C-*`; 기존 B-1~B-16·C-1~C-10과 독립

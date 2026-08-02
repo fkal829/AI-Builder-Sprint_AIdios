@@ -238,6 +238,15 @@ Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서�
 | `MISSING_EVIDENCE` | `value`는 있으나 `source_page`, `source_text`가 모두 `null`; 확정값 표시 금지 |
 | `NEEDS_CHECK` | `source_page`, `source_text`는 모두 있고 모순·낮은 확신도·검증 실패로 사용자 확인 필요 |
 
+`refund_condition`의 검증된 원문이 "환불 조건을 계약서에 기재하지 않았다"처럼 환불
+조건의 명시적 부재만 말하면, 모델이 그 문장을 값으로 반환했더라도 모호 표현 판정보다
+먼저 `NOT_FOUND`로 정규화한다. 이때 `value`, `source_page`, `source_text`는 모두
+`null`이고 `confidence=0`이며, 사용자 이해조건에 환불 설명이 있으면 검토 신호는
+`MISSING`이다. "환불하지 않는다", "환불 불가"처럼 실제 비환불 조건을 정한 문장은
+명시적 부재가 아니며, 타입과 원문 근거 검증을 통과하면 유효한 환불 조건으로 취급한다.
+검증된 원문이 없으면 모델 값은 `MISSING_EVIDENCE`로 남기며, 같은 근거에 명시적 부재와
+실제 환불 조건이 함께 있으면 근거를 버리지 않고 `NEEDS_CHECK`로 격리한다.
+
 Universal Extraction 응답이 JSON 객체가 아니거나 요청하지 않은 필드를 포함하면
 해당 호출 전체의 구조 오류로 처리한다. 요청한 필드 값 하나만 서버의 타입·형식·
 enum·범위 검증을 통과하지 못하면 정상 후보를 버리지 않고 그 필드만 격리한다.

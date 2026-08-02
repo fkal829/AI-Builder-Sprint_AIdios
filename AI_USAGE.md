@@ -50,6 +50,29 @@ Universal Extraction의 `additional_values` 좌표를 같은 페이지의 Docume
 외부 Upstage를 다시 호출하지 않았으므로, `05-many-blanks` live 재검증은 아직 완료하지
 않았다.
 
+### 2026-08-02 `02-refund-omission` live 명시적 부재 오분류 발견
+
+고정 평가 케이스 `02-refund-omission`을 Universal Extraction live로 호출했을 때,
+모델은 "환불 조건은 계약서에 기재하지 않았다"는 원문을 `refund_condition` 값으로
+반환했다. 반환 위치와 Document Parse 원문이 실제로 일치하고 confidence도 `high`여서
+기존 검증은 이를 `VERIFIED`로 통과시켰다. 이는 근거가 없는 할루시네이션이 아니라,
+필드 설명이 실제 환불 조건과 환불 조건의 명시적 부재를 구분하지 못한 문제다.
+
+그 결과 사용자가 이해한 환불 조건이 있을 때 기대한 `MISSING` 대신, 명시적 부재 문장을
+계약상 환불 조건으로 비교한 `MISMATCH` 검토 항목이 생성될 수 있었다. 수정된 추출
+스키마 설명은 실제 환불 가능 여부·대상·금액·시기·방식만 값으로 추출하고, 계약서에
+환불 조건을 기재·명시·정하지 않았다는 문장은 속성에서 생략하도록 지시한다. 서버도
+검증된 `source_text`에 이 환불 전용 명시적 부재만 있고 실제 환불 조건이 함께 없으면
+모호 표현 판정보다 먼저 `value`, `source_page`, `source_text`를 `null`,
+`confidence=0`으로 정규화한 `NOT_FOUND`로 처리한다. 검증된 원문이 없으면 기존
+`MISSING_EVIDENCE`를 유지하고, 부재 표현과 실제 환불 조건이 한 근거에 섞여 있으면
+근거를 보존한 `NEEDS_CHECK`로 처리한다. 반면 "환불하지 않는다", "환불 불가"처럼 실제
+비환불 조건을 정한 문장은 유효한 계약 조건으로 유지한다.
+
+이번 수정 후 검증은 고정 fake 응답을 사용한 offline regression까지 수행한다. 외부
+Upstage를 다시 호출하지 않았으므로 `02-refund-omission` live 재검증은 아직 완료하지
+않았다.
+
 ## Solar 검토 문구
 
 live 모드는 `UPSTAGE_SOLAR_MODEL=solar-pro3`,

@@ -6,6 +6,9 @@ MIGRATION = (
     / "migrations"
     / "20260802010000_add_user_selected_adjustment_items.sql"
 )
+ORDINALITY_FIX_MIGRATION = MIGRATION.with_name(
+    "20260802030000_fix_adjustment_draft_ordinality.sql"
+)
 
 
 def test_user_selected_adjustment_migration_preserves_server_evidence() -> None:
@@ -32,6 +35,20 @@ def test_user_selected_adjustment_migration_creates_exact_validated_copy_atomica
     assert "jsonb_to_recordset(p_items)" in sql
     assert "jsonb_to_recordset(p_manual_items)" in sql
     assert "btrim(requested.request_text)" in sql
+    assert "insert into public.adjustment_requests" in sql
+    assert "insert into public.adjustment_request_items" in sql
+    assert "insert into public.audit_events" in sql
+    assert "to service_role" in sql
+
+
+def test_adjustment_draft_ordinality_fix_replaces_the_rpc_with_valid_rows_from_syntax() -> None:
+    sql = ORDINALITY_FIX_MIGRATION.read_text(encoding="utf-8").lower()
+
+    assert "create or replace function public.create_adjustment_draft_with_audit" in sql
+    assert "from rows from (" in sql
+    assert ") with ordinality as requested(" in sql
+    assert "jsonb_to_recordset(p_items) with ordinality" not in sql
+    assert "order by requested.position" in sql
     assert "insert into public.adjustment_requests" in sql
     assert "insert into public.adjustment_request_items" in sql
     assert "insert into public.audit_events" in sql

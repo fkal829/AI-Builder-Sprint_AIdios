@@ -56,6 +56,10 @@ test("adjustment link creation remains a manual delivery boundary", async () => 
   assert.match(page, /item\.id, item\.text/);
   assert.match(page, /filter\(\(item\) => item\.manual\)/);
   assert.match(page, /documentClauseId: item\.id/);
+  assert.match(page, /if \(draft === null\) return true/);
+  assert.match(page, /saved\?\.choice === "REQUEST" \|\| saved\?\.choice === "COMPROMISE"/);
+  assert.match(page, /items\.length === 0 \|\| items\.length > 4/);
+  assert.match(page, /한 요청서에는 조정 항목을 최대 4건까지 담을 수 있습니다/);
   assert.match(adapter, /manual_items: manualItems\.map/);
   assert.match(adapter, /document_clause_id: item\.documentClauseId/);
   assert.match(page, /아직 자동 발송되지 않았습니다/);

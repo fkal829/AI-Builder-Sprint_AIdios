@@ -102,9 +102,11 @@ test("performance metric editor keeps six defaults, dynamic rows, and determinis
 });
 
 test("aggregate performance and integrated obligation use live adapter data", async () => {
-  const [aggregate, contractPage] = await Promise.all([
+  const [aggregate, contractPage, format, statTile] = await Promise.all([
     source("src/app/performance/page.tsx"),
     source("src/app/contracts/[id]/performance/page.tsx"),
+    source("src/lib/format.ts"),
+    source("src/components/StatTile.tsx"),
   ]);
 
   assert.match(aggregate, /adapter\.getDashboard/);
@@ -126,9 +128,27 @@ test("aggregate performance and integrated obligation use live adapter data", as
   assert.match(contractPage, /전체 CTR/);
   assert.match(contractPage, /전체 CPC/);
   assert.match(contractPage, /누적 게시물/);
+  assert.match(contractPage, /compactWon\(totals\.adSpend\)/);
+  assert.match(contractPage, /compactCount\(totals\.impressions\)/);
+  assert.match(contractPage, /compactCount\(totals\.posts, "건"\)/);
+  const summaryCards = contractPage.slice(
+    contractPage.indexOf("③ 확인한 광고효과 한눈에 보기"),
+    contractPage.indexOf("월별 노출 추이"),
+  );
+  assert.equal(summaryCards.match(/fitValue/g)?.length, 6);
+  assert.match(format, /100_000_000/);
+  assert.match(format, /10_000/);
+  assert.match(format, /unit: "억"/);
+  assert.match(format, /unit: "만"/);
+  assert.match(statTile, /card min-w-0/);
+  assert.match(statTile, /whitespace-nowrap/);
+  assert.match(statTile, /if \(length >= 10\) return "text-lg"/);
   assert.doesNotMatch(contractPage, /누적 반응|전체 반응률/);
   assert.match(contractPage, /adapter\.getObligation/);
-  assert.match(contractPage, /adapter\.createObligationEvidenceLink/);
+  assert.doesNotMatch(contractPage, /adapter\.createObligationEvidenceLink/);
+  assert.match(contractPage, /adapter\.reviewObligation/);
+  assert.match(contractPage, /사장님 이행 체크/);
+  assert.match(contractPage, /증빙 URL은 선택 사항/);
   assert.match(contractPage, /obligation\.status === "SUBMITTED"/);
-  assert.doesNotMatch(contractPage, /obligation\.status === "PENDING" \|\|/);
+  assert.match(contractPage, /\["PENDING", "SUBMITTED"\]\.includes/);
 });

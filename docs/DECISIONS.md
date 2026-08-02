@@ -271,3 +271,17 @@
   동시에 요청되면 둘 중 하나만 성공한다.
 - 파일: DB 삭제가 반환한 Document의 서버 생성 Storage 경로만 정리한다. 외부에 발송된
   링크, 모두싸인 문서 또는 서명 추적 기록을 삭제하거나 취소하는 기능으로 사용하지 않는다.
+
+## ADR-019 소유자 직접 산출물 체크리스트
+
+- 상태: 2026-08-03 확정
+- 결정: 대표 산출물의 기본 이행 흐름을 대행사 공개 링크 요청에서 소유자 직접 체크리스트
+  확인으로 바꾼다. 소유자는 계약 원문과 기한을 확인하고 `APPROVED` 또는 `DISPUTED`를
+  명시적으로 선택하며, 증빙 URL은 선택적으로 함께 기록한다.
+- 상태: 기본 흐름은 `PENDING → APPROVED / DISPUTED`다. 기존 공개 링크를 이미 사용한
+  데이터와 API의 호환을 위해 `PENDING → SUBMITTED → APPROVED / DISPUTED`도 유지한다.
+- 승인 경계: 체크 결과 저장은 Contract가 `SIGNED` 또는 `IN_PROGRESS`일 때만 허용하고
+  자동 승인·실제 지급·송금·상대방 통지를 실행하지 않는다. `APPROVED`만
+  `payment_condition_met=true`다.
+- 근거: 대표 산출물의 `source_document_id`, `source_page`, `source_text`, `confidence`는
+  그대로 보존하며 사용자가 입력한 URL을 서버가 가져오거나 진위를 판정하지 않는다.

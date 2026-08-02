@@ -103,7 +103,11 @@ ALLOWED_INTERNAL_SIGNATURE_TRANSITIONS: dict[
 }
 
 ALLOWED_OBLIGATION_TRANSITIONS: dict[ObligationStatus, set[ObligationStatus]] = {
-    ObligationStatus.PENDING: {ObligationStatus.SUBMITTED},
+    ObligationStatus.PENDING: {
+        ObligationStatus.SUBMITTED,
+        ObligationStatus.APPROVED,
+        ObligationStatus.DISPUTED,
+    },
     ObligationStatus.SUBMITTED: {
         ObligationStatus.APPROVED,
         ObligationStatus.DISPUTED,
@@ -297,6 +301,12 @@ AUDIT_RULES: dict[tuple[StateEntityType, StrEnum, StrEnum], AuditRule] = {
     ): _audit_rule(AuditEventType.SIGNATURE_FAILED, actors=(AuditActorType.SYSTEM,)),
     (OBLIGATION_ENTITY, ObligationStatus.PENDING, ObligationStatus.SUBMITTED): _audit_rule(
         AuditEventType.EVIDENCE_SUBMITTED, actors=(AuditActorType.AGENCY,)
+    ),
+    (OBLIGATION_ENTITY, ObligationStatus.PENDING, ObligationStatus.APPROVED): _audit_rule(
+        AuditEventType.EVIDENCE_APPROVED, actors=(AuditActorType.OWNER,)
+    ),
+    (OBLIGATION_ENTITY, ObligationStatus.PENDING, ObligationStatus.DISPUTED): _audit_rule(
+        AuditEventType.EVIDENCE_DISPUTED, actors=(AuditActorType.OWNER,)
     ),
     (
         StateEntityType.INTERNAL_SIGNATURE,

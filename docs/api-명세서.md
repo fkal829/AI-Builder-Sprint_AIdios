@@ -76,9 +76,9 @@ attempt·완료·복구 RPC와 비공개 AI Adapter 조합기, append-only 확�
 | C | `GET` | `/contracts/{contract_id}/signature` | 서명 상태 조회 |
 | C | `POST` | `/webhooks/modusign` | 모두싸인 웹훅 수신 |
 | B | `GET` | `/contracts/{contract_id}/obligations` | 이행 항목 목록 조회 |
-| B | `POST` | `/contracts/{contract_id}/obligations/{obligation_id}/evidence-link` | 증빙 제출 링크 생성 |
-| B | `POST` | `/public/obligations/{token}/evidence` | 대행사 증빙 URL 제출 |
-| B | `PATCH` | `/contracts/{contract_id}/obligations/{obligation_id}` | 증빙 승인·이의 처리 |
+| B | `POST` | `/contracts/{contract_id}/obligations/{obligation_id}/evidence-link` | 기존 증빙 제출 링크 생성 호환 경로 |
+| B | `POST` | `/public/obligations/{token}/evidence` | 기존 대행사 증빙 URL 제출 호환 경로 |
+| B | `PATCH` | `/contracts/{contract_id}/obligations/{obligation_id}` | 소유자 산출물 직접 확인 |
 | B | `POST` | `/contracts/{contract_id}/performance-reports` | 광고효과 리포트 업로드 |
 | B | `POST` | `/contracts/{contract_id}/performance-reports/{report_id}/extract` | 광고효과 지표 추출 |
 | C | `PATCH` | `/contracts/{contract_id}/performance-reports/{report_id}` | 광고효과 확정값 최초 확인·정정 |
@@ -1197,7 +1197,7 @@ P0에서는 계약당 대표 이행 항목을 최대 한 건만 반환하므로 
 - 명확한 산출물이 없으면 임의로 만들지 않고 확인 신호를 유지한다.
 - 초기 상태는 `PENDING`, `evidence_url`, 제출·검토 시각은 `null`이다.
 
-### 7.3 증빙 제출 링크 생성
+### 7.3 증빙 제출 링크 생성 (호환 경로)
 
 `POST /api/v1/contracts/{contract_id}/obligations/{obligation_id}/evidence-link`
 
@@ -1225,7 +1225,7 @@ P0에서는 계약당 대표 이행 항목을 최대 한 건만 반환하므로 
 트랜잭션에 기록한다. DB 커밋 뒤 응답이 유실되어도 같은 키 재시도에서 최초 링크를
 재생하며 토큰과 감사 이벤트를 중복 생성하지 않는다.
 
-### 7.4 대행사 증빙 URL 제출
+### 7.4 대행사 증빙 URL 제출 (호환 경로)
 
 `POST /api/v1/public/obligations/{token}/evidence`
 
@@ -1247,7 +1247,7 @@ URL은 `http://` 또는 `https://`, 최대 2,048자만 허용한다. 서버는 U
 실재 여부를 판정하지 않는다. 최초 제출은 상태와 `EVIDENCE_SUBMITTED` 감사 이벤트를
 하나의 트랜잭션으로 기록한다.
 
-### 7.5 증빙 승인·이의 처리
+### 7.5 소유자 산출물 직접 확인
 
 `PATCH /api/v1/contracts/{contract_id}/obligations/{obligation_id}`
 
@@ -1260,13 +1260,20 @@ URL은 `http://` 또는 `https://`, 최대 2,048자만 허용한다. 서버는 U
 
 ```json
 {
-  "decision": "APPROVED"
+  "decision": "APPROVED",
+  "confirmed": true,
+  "evidence_url": "https://www.instagram.com/p/example"
 }
 ```
 
-`decision`: `APPROVED`, `DISPUTED`
+`decision`: `APPROVED`, `DISPUTED`. `confirmed`는 반드시 `true`다. `evidence_url`은
+`PENDING` 산출물을 소유자가 직접 확인할 때 선택 사항이며 생략하거나 `null`로 보낼 수
+있다. 기존 공개 링크로 이미 `SUBMITTED`된 항목을 검토할 때는 저장된 URL을 덮어쓰지
+않도록 `null`이어야 한다.
 
-상태는 `PENDING → SUBMITTED → APPROVED / DISPUTED`다.
+기본 소유자 체크리스트 흐름은 `PENDING → APPROVED / DISPUTED`다. 기존 공개 제출 호환
+흐름은 `PENDING → SUBMITTED → APPROVED / DISPUTED`로 유지한다. 소유자 직접 확인은
+계약 상태가 `SIGNED` 또는 `IN_PROGRESS`이고 이행 항목이 `PENDING`일 때 허용한다.
 `payment_condition_met=true`는 `APPROVED`일 때만 표시하며 실제 지급 승인이 아니다.
 승인은 `EVIDENCE_APPROVED`, 이의 제기는 `EVIDENCE_DISPUTED` 감사 이벤트를 상태와
 같은 트랜잭션에 기록한다.
@@ -1328,7 +1335,7 @@ URL은 `http://` 또는 `https://`, 최대 2,048자만 허용한다. 서버는 U
 
 ### 9.4 이행 항목
 
-`PENDING → SUBMITTED → APPROVED / DISPUTED`
+`PENDING → APPROVED / DISPUTED` 또는 `PENDING → SUBMITTED → APPROVED / DISPUTED`
 
 ### 9.5 내부 서명과 모두싸인 원본
 

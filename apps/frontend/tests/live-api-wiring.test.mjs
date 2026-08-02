@@ -89,8 +89,11 @@ test("obligation and renewal decisions persist through their APIs", async () => 
     source("src/app/contracts/[id]/renewal/page.tsx"),
   ]);
 
-  assert.match(obligation, /adapter\.createObligationEvidenceLink/);
+  assert.doesNotMatch(obligation, /adapter\.createObligationEvidenceLink/);
   assert.match(obligation, /adapter\.reviewObligation/);
+  assert.match(obligation, /사장님 이행 체크/);
+  assert.match(obligation, /계약대로 완료했어요/);
+  assert.match(obligation, /문제 있거나 미완료예요/);
   assert.match(legacyObligation, /redirect\(`\/contracts\/\$\{id\}\/performance`\)/);
   assert.match(renewal, /adapter\.saveRenewalDecision/);
   assert.match(renewal, /자동으로 시작되지 않습니다/);

@@ -494,9 +494,9 @@ export const DEMO_CONTRACT: ContractDetail = {
     dueDate: "2026-08-20",
     assignee: "AGENCY",
     evidenceType: "URL",
-    evidenceUrl: "https://instagram.com/p/demo-4posts",
-    status: "SUBMITTED",
-    submittedAt: "2026-08-18",
+    evidenceUrl: null,
+    status: "PENDING",
+    submittedAt: null,
   },
   agreement: [
     {

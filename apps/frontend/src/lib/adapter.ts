@@ -709,6 +709,7 @@ export interface DataAdapter {
     contractId: string,
     obligationId: string,
     decision: "APPROVED" | "DISPUTED",
+    evidenceUrl?: string | null,
   ): Promise<LiveObligation>;
   getRenewalView(contractId: string): Promise<LiveRenewalView>;
   saveRenewalDecision(
@@ -1458,6 +1459,7 @@ class MockAdapter implements DataAdapter {
     _contractId: string,
     _obligationId: string,
     decision: "APPROVED" | "DISPUTED",
+    evidenceUrl: string | null = null,
   ): Promise<LiveObligation> {
     const current = await this.getObligation(_contractId);
     if (!current) {
@@ -1465,6 +1467,9 @@ class MockAdapter implements DataAdapter {
     }
     return {
       ...current,
+      evidenceUrl: current.status === "PENDING" ? evidenceUrl : current.evidenceUrl,
+      submittedAt:
+        current.status === "PENDING" && evidenceUrl ? new Date().toISOString() : current.submittedAt,
       status: decision,
       reviewedAt: new Date().toISOString(),
       paymentConditionMet: decision === "APPROVED",
@@ -2144,6 +2149,7 @@ class ApiAdapter extends MockAdapter {
     contractId: string,
     obligationId: string,
     decision: "APPROVED" | "DISPUTED",
+    evidenceUrl: string | null = null,
   ): Promise<LiveObligation> {
     const data = await this.request<ApiObligation>(
       `/api/v1/contracts/${encodeURIComponent(contractId)}/obligations/`
@@ -2151,7 +2157,7 @@ class ApiAdapter extends MockAdapter {
       {
         method: "PATCH",
         headers: await this.ownerHeaders(),
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ decision, confirmed: true, evidence_url: evidenceUrl }),
       },
     );
     return mapObligation(data);

@@ -42,7 +42,7 @@
     "PROCESSING_FAILED": []
   },
   "obligation": {
-    "PENDING": ["SUBMITTED"],
+    "PENDING": ["SUBMITTED", "APPROVED", "DISPUTED"],
     "SUBMITTED": ["APPROVED", "DISPUTED"],
     "APPROVED": [],
     "DISPUTED": []

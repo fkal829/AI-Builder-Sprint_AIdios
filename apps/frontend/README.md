@@ -56,7 +56,7 @@ Supabase 이메일·비밀번호 회원가입 `/signup`, 로그인 `/login`과 �
 | ① 요청서 열람 | `/r/[token]` |
 | ② 조항별 수락/거절/역제안 | `/r/[token]/respond` |
 | ③ 응답 완료 | `/r/[token]/done` |
-| ④ 산출물 URL 제출 | `/r/[token]/evidence` |
+| ④ 산출물 URL 제출(기존 공개 링크 호환 경로) | `/r/[token]/evidence` |
 
 ### 기타
 - `/` 서비스 소개 · `/demo` 데모 런처 · `/states` 실패·빈 상태 갤러리

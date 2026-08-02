@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { AppScreen } from "@/components/AppScreen";
 import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
 import { LayerBlock } from "@/components/LayerBlock";
-import { PublicLinkCard } from "@/components/PublicLinkCard";
 import { StatTile } from "@/components/StatTile";
 import { useAsync } from "@/lib/hooks";
 import {
@@ -27,6 +26,7 @@ import {
   type PerformanceReport,
 } from "@/lib/adapter";
 import { displayText } from "@/lib/displayText";
+import { compactCount, compactWon } from "@/lib/format";
 
 type EvidenceMetricField = {
   key: string;
@@ -742,28 +742,38 @@ function PerformanceDashboard({
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
               <StatTile
                 size="lg"
-                value={totals.adSpend === null ? "—" : `${totals.adSpend.toLocaleString()}원`}
+                fitValue
+                value={totals.adSpend === null ? "—" : compactWon(totals.adSpend)}
                 label="누적 광고비"
               />
               <StatTile
                 size="lg"
-                value={totals.impressions?.toLocaleString() ?? "—"}
+                fitValue
+                value={totals.impressions === null ? "—" : compactCount(totals.impressions)}
                 label="누적 노출"
               />
               <StatTile
                 size="lg"
-                value={totals.clicks?.toLocaleString() ?? "—"}
+                fitValue
+                value={totals.clicks === null ? "—" : compactCount(totals.clicks)}
                 label="누적 클릭"
               />
               <StatTile
                 size="lg"
+                fitValue
                 value={totals.ctr === null ? "—" : `${totals.ctr.toFixed(2)}%`}
                 label="전체 CTR"
               />
-              <StatTile size="lg" value={totals.cpc === null ? "—" : `${totals.cpc.toLocaleString()}원`} label="전체 CPC" />
               <StatTile
                 size="lg"
-                value={totals.posts === null ? "—" : `${totals.posts.toLocaleString()}건`}
+                fitValue
+                value={totals.cpc === null ? "—" : compactWon(totals.cpc)}
+                label="전체 CPC"
+              />
+              <StatTile
+                size="lg"
+                fitValue
+                value={totals.posts === null ? "—" : compactCount(totals.posts, "건")}
                 label="누적 게시물"
               />
             </div>
@@ -937,33 +947,20 @@ function StepFlow({
 function ObligationPanel({ contractId }: { contractId: string }) {
   const state = useAsync(() => adapter.getObligation(contractId), [contractId]);
   const [updated, setUpdated] = useState<LiveObligation | null>(null);
-  const [publicLink, setPublicLink] = useState<{ publicUrl: string; expiresAt: string } | null>(null);
+  const [evidenceUrl, setEvidenceUrl] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const obligation = updated ?? (state.status === "ready" ? state.data : null);
 
-  const createEvidenceLink = async () => {
-    if (!obligation || working) return;
-    setWorking(true);
-    setError(null);
-    try {
-      const link = await adapter.createObligationEvidenceLink(contractId, obligation.id);
-      setPublicLink({ publicUrl: link.publicUrl, expiresAt: link.expiresAt });
-    } catch (cause) {
-      setError(errorMessage(cause, "증빙 제출 링크를 만들지 못했습니다."));
-    } finally {
-      setWorking(false);
-    }
-  };
-
   const review = async (decision: "APPROVED" | "DISPUTED") => {
-    if (!obligation || obligation.status !== "SUBMITTED" || working) return;
+    if (!obligation || !["PENDING", "SUBMITTED"].includes(obligation.status) || working) return;
     setWorking(true);
     setError(null);
     try {
-      setUpdated(await adapter.reviewObligation(contractId, obligation.id, decision));
+      const url = obligation.status === "PENDING" ? evidenceUrl.trim() || null : null;
+      setUpdated(await adapter.reviewObligation(contractId, obligation.id, decision, url));
     } catch (cause) {
-      setError(errorMessage(cause, "증빙 검토 결과를 저장하지 못했습니다."));
+      setError(errorMessage(cause, "산출물 확인 결과를 저장하지 못했습니다."));
     } finally {
       setWorking(false);
     }
@@ -980,7 +977,7 @@ function ObligationPanel({ contractId }: { contractId: string }) {
       <Card>
         <p className="text-[12px] leading-relaxed text-neutral500">
           원문 근거로 확인된 대표 산출물이 아직 없어요. 계약서 분석이 끝나면 이곳에서
-          증빙 제출 링크를 만들 수 있어요.
+          약속한 산출물 체크리스트를 직접 확인할 수 있어요.
         </p>
       </Card>
     );
@@ -1011,28 +1008,43 @@ function ObligationPanel({ contractId }: { contractId: string }) {
 
       {obligation.status === "PENDING" && (
         <div className="mt-3 rounded-xl border border-neutral200 bg-white p-4">
-          <h3 className="text-sm font-black text-ink">대행사 증빙 제출 링크</h3>
+          <h3 className="text-sm font-black text-ink">사장님 이행 체크</h3>
           <p className="mt-1 text-[11px] leading-relaxed text-neutral500">
-            링크를 만든 뒤 복사해 기존 이메일이나 메신저로 직접 전달해주세요.
+            실제로 받은 산출물을 확인하고 결과를 직접 기록해주세요. 증빙 URL은 선택 사항입니다.
           </p>
-          {publicLink ? (
-            <div className="mt-3">
-              <PublicLinkCard
-                link={publicLink}
-                title="증빙 제출 링크"
-                note="아직 자동 발송되지 않았습니다. 사장님이 직접 전달해주세요."
-              />
-            </div>
-          ) : (
+          <label className="mt-3 block text-[11px] font-bold text-neutral700">
+            확인한 산출물 URL · 선택
+            <input
+              type="url"
+              inputMode="url"
+              value={evidenceUrl}
+              onChange={(event) => {
+                setEvidenceUrl(event.target.value);
+                setError(null);
+              }}
+              placeholder="https://..."
+              disabled={working}
+              className="mt-1 h-10 w-full rounded-lg border border-neutral300 px-3 text-[12px] text-ink disabled:opacity-40"
+            />
+          </label>
+          <div className="mt-3 flex gap-2">
             <button
               type="button"
-              onClick={() => void createEvidenceLink()}
+              onClick={() => void review("APPROVED")}
               disabled={working}
-              className="mt-3 h-11 w-full rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
+              className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
             >
-              {working ? "링크 만드는 중…" : "증빙 제출 링크 만들기"}
+              {working ? "저장 중…" : "계약대로 완료했어요"}
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => void review("DISPUTED")}
+              disabled={working}
+              className="h-11 flex-1 rounded-lg border border-neutral300 bg-white px-2 text-[13px] font-bold text-neutral600 disabled:opacity-40"
+            >
+              문제 있거나 미완료예요
+            </button>
+          </div>
         </div>
       )}
 
@@ -1044,7 +1056,7 @@ function ObligationPanel({ contractId }: { contractId: string }) {
             onClick={() => void review("APPROVED")}
             className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
           >
-            {working ? "저장 중…" : "확인 완료"}
+            {working ? "저장 중…" : "계약대로 완료했어요"}
           </button>
           <button
             type="button"
@@ -1052,7 +1064,7 @@ function ObligationPanel({ contractId }: { contractId: string }) {
             onClick={() => void review("DISPUTED")}
             className="h-11 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral500 disabled:opacity-40"
           >
-            이의 있어요
+            문제 있거나 미완료예요
           </button>
         </div>
       )}
@@ -1061,11 +1073,11 @@ function ObligationPanel({ contractId }: { contractId: string }) {
         <p className="mt-3 text-[13px] font-bold text-brand700">✓ 지급 조건 충족으로 표시했어요</p>
       )}
       {obligation.status === "DISPUTED" && (
-        <p className="mt-3 text-[13px] font-bold text-neutral700">! 이의 있음으로 기록했어요</p>
+        <p className="mt-3 text-[13px] font-bold text-neutral700">! 문제 있거나 미완료로 기록했어요</p>
       )}
       {error && <p className="mt-2 text-xs font-bold text-brand800">{error}</p>}
       <p className="mt-2 text-[11px] leading-relaxed text-neutral500">
-        확인 완료는 계약상 지급 조건 충족 표시이며 실제 송금·결제를 실행하지 않습니다.
+        완료 체크는 계약상 지급 조건 충족 표시이며 실제 송금·결제나 상대방 통지를 실행하지 않습니다.
       </p>
     </Card>
   );

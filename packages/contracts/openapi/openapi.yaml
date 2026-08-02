@@ -839,10 +839,16 @@ paths:
       - $ref: "#/components/parameters/ContractId"
       - $ref: "#/components/parameters/ObligationId"
     patch:
-      summary: 산출물 증빙 검토
+      summary: 소유자 산출물 완료 확인
       operationId: reviewObligation
       tags: [obligations]
-      description: 승인 시 EVIDENCE_APPROVED, 이의 제기 시 EVIDENCE_DISPUTED 감사 이벤트를 상태와 같은 트랜잭션에 기록한다.
+      description: |
+        소유자가 PENDING 대표 산출물을 직접 확인하거나, 기존 공개 링크에서 SUBMITTED된
+        증빙을 검토한다. PENDING에서는 선택적인 evidence_url을 함께 저장할 수 있으며
+        APPROVED 또는 DISPUTED로 바로 전이한다. SUBMITTED에서는 기존 증빙 URL을
+        덮어쓰지 않는다. 승인 시 EVIDENCE_APPROVED, 문제 있음 선택 시
+        EVIDENCE_DISPUTED 감사 이벤트를 상태와 같은 트랜잭션에 기록한다. 이 호출은
+        실제 지급·송금이나 외부 요청을 실행하지 않는다.
       requestBody:
         required: true
         content:
@@ -850,11 +856,21 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [decision]
+              required: [decision, confirmed]
               properties:
                 decision:
                   type: string
                   enum: [APPROVED, DISPUTED]
+                confirmed:
+                  type: boolean
+                  const: true
+                  description: 소유자가 체크리스트 결과를 직접 확인했음을 뜻한다.
+                evidence_url:
+                  type: [string, "null"]
+                  format: uri
+                  pattern: "^https?://"
+                  maxLength: 2048
+                  description: PENDING 직접 확인에서 선택적으로 저장할 산출물 URL. SUBMITTED 검토에서는 null이어야 한다.
       responses:
         "200":
           description: 사용자 확인 결과
@@ -2968,8 +2984,6 @@ components:
               status: {const: APPROVED}
           then:
             properties:
-              evidence_url: {type: string, format: uri, pattern: "^https?://", maxLength: 2048}
-              submitted_at: {type: string, format: date-time}
               reviewed_at: {type: string, format: date-time}
               payment_condition_met: {const: true}
         - if:
@@ -2977,8 +2991,6 @@ components:
               status: {const: DISPUTED}
           then:
             properties:
-              evidence_url: {type: string, format: uri, pattern: "^https?://", maxLength: 2048}
-              submitted_at: {type: string, format: date-time}
               reviewed_at: {type: string, format: date-time}
               payment_condition_met: {const: false}
     ObligationResponse:

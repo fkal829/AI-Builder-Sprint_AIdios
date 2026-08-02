@@ -38,7 +38,7 @@ export type ModusignStatus =
   | "ABORTED"
   | "PROCESSING_FAILED";
 
-/** 이행 항목: PENDING → SUBMITTED → APPROVED / DISPUTED */
+/** 이행 항목: 소유자 직접 확인 또는 기존 공개 제출 호환 흐름 */
 export type ObligationStatus = "PENDING" | "SUBMITTED" | "APPROVED" | "DISPUTED";
 
 /* ---------------------------------- 조항 카드 (§6.5) ---------------------------------- */

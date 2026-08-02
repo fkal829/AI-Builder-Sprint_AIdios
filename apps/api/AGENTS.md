@@ -288,7 +288,7 @@ Day 1 환경 구축 완료 조건:
 - 사용자가 확정한 한 개 이상의 조항 전체와 대행사 수정 계약서의 근거 기반 대조·소유자 확인
 - 모두싸인 실제 요청, 상태 조회, 웹훅, 완료·중단·실패 처리
 - append-only 성격의 계약 감사 타임라인
-- 대표 산출물 1건의 URL 증빙 제출과 승인·이의 처리
+- 대표 산출물 1건의 소유자 직접 체크와 선택적 URL 증빙·문제 있음 처리
 - 계약 만료, 해지 통보기한, 자동갱신 임박 계산
 - 최소 대시보드와 최대 2회의 Evaluator Loop
 
@@ -416,6 +416,7 @@ side effect, 실패·재시도 경로를 기록한다. 기획안에 없는 실�
   `PROCESSING_FAILED`. 정상 P0 흐름은 `ON_PROCESSING → ON_GOING →`
   `COMPLETED / ABORTED / PROCESSING_FAILED`이며 `DRAFT`, `SCHEDULED`는 원본 보존용이다.
 - Obligation:
+  `PENDING → APPROVED / DISPUTED` 또는 기존 공개 제출 호환 흐름
   `PENDING → SUBMITTED → APPROVED / DISPUTED`
 
 Adapter는 모두싸인 원본 상태를 canonical `Signature` 상태로만 변환한다. 계약 상태
@@ -767,10 +768,13 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
   없으면 임의의 의무를 만들지 않고 확인 신호를 유지한다.
 - 제목 또는 due date 근거가 없으면 대표 의무를 임의로 만들지 않고 확인 신호를 유지한다.
   서버가 근거 없는 날짜를 자동 생성하지 않는다.
-- 자동 대표 산출물 생성과 사용자가 승인하는 증빙 링크 생성을 분리하고, 증빙 링크에는
-  `OBLIGATION_EVIDENCE` scope만 부여한다.
+- 자동 대표 산출물 생성과 소유자의 명시적 체크를 분리한다. 기본 소유자 화면은 공개
+  링크를 만들지 않으며, 호환용 증빙 링크에는 `OBLIGATION_EVIDENCE` scope만 부여한다.
 - 증빙 URL은 최대 2,048자의 `http://` 또는 `https://` URL만 허용한다. 서버가 URL을
   가져오거나 실제 존재 여부와 진위를 판정하지 않는다.
+- 소유자는 `SIGNED` 또는 `IN_PROGRESS` 계약의 `PENDING` 대표 산출물을 선택적 URL과
+  함께 `APPROVED` 또는 `DISPUTED`로 직접 기록할 수 있다. 기존 `SUBMITTED` 증빙은
+  URL을 덮어쓰지 않고 검토한다.
 - 산출물 증빙 제출은 한 번만 확정하고 DB 유일성 제약과 트랜잭션으로 동시 제출을 막는다.
 - `APPROVED`일 때만 `payment_condition_met=true`다. 이는 실제 지급 승인이나 법적 이행
   판정이 아니다.
@@ -880,7 +884,8 @@ Upstage, Solar, 모두싸인, Supabase 호출은 인터페이스 뒤에 두고 `
 - 모두싸인 서명자 역할·연락처 형식·중복과 최신 수정 계약서 ID·SHA-256 검증
 - 모두싸인 웹훅 secret, fingerprint 중복, 즉시 204·비동기 처리, 순서 역전,
   종료 상태 보호
-- 산출물 `PENDING → SUBMITTED → APPROVED / DISPUTED`
+- 산출물 `PENDING → APPROVED / DISPUTED`와 호환 흐름
+  `PENDING → SUBMITTED → APPROVED / DISPUTED`
 - 분석 완료의 근거 있는 대표 산출물 자동 생성과 재처리·동시 실행 중복 방지
 - 증빙 URL의 HTTP(S) scheme·2,048자 제한과 1회 제출
 - 갱신 의사 저장의 무부작용과 대시보드 조정·금액 집계

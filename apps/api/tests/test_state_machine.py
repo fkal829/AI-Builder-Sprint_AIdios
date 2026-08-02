@@ -141,6 +141,11 @@ def test_every_allowed_edge_has_an_audit_rule() -> None:
             ALLOWED_OBLIGATION_TRANSITIONS,
         ),
         (
+            ObligationStatus.PENDING,
+            ObligationStatus.APPROVED,
+            ALLOWED_OBLIGATION_TRANSITIONS,
+        ),
+        (
             AnalysisStatus.PROCESSING,
             AnalysisStatus.COMPLETED,
             ALLOWED_ANALYSIS_TASK_TRANSITIONS,
@@ -170,8 +175,8 @@ def test_allows_domain_state_transitions(current, target, transitions) -> None:
             ALLOWED_MODUSIGN_TRANSITIONS,
         ),
         (
-            ObligationStatus.PENDING,
             ObligationStatus.APPROVED,
+            ObligationStatus.PENDING,
             ALLOWED_OBLIGATION_TRANSITIONS,
         ),
         (

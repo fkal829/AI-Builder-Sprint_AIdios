@@ -24,6 +24,7 @@ class ReviewItemForAdjustment:
     suggestion_request: str
     category: AgreementClauseCategory = AgreementClauseCategory.OTHER
     original_text: str = "원계약에서 확인되지 않아 추가 확인 필요"
+    source_page: int | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class AdjustmentRequestItemRecord:
     request_text: str
     category: AgreementClauseCategory = AgreementClauseCategory.OTHER
     before_text: str = "원계약에서 확인되지 않아 추가 확인 필요"
+    source_page: int | None = None
 
 
 @dataclass(frozen=True)

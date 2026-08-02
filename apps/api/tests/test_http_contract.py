@@ -59,6 +59,32 @@ def test_canonical_openapi_marks_no_operations_as_planned() -> None:
     assert planned == {}
 
 
+def test_public_adjustment_original_text_contract_matches_runtime() -> None:
+    canonical = yaml.safe_load(
+        (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )["components"]["schemas"]["PublicAdjustment"]
+    canonical_item = canonical["properties"]["items"]["items"]
+    runtime_item = app.openapi()["components"]["schemas"]["PublicAdjustmentItem"]
+
+    expected_fields = {"item_id", "before_text", "source_page", "request_text"}
+    assert set(canonical_item["properties"]) == expected_fields
+    assert set(canonical_item["required"]) == expected_fields
+    assert set(runtime_item["properties"]) == expected_fields
+    assert set(runtime_item["required"]) == expected_fields
+    assert canonical_item["properties"]["before_text"]["type"] == ["string", "null"]
+    assert {entry["type"] for entry in runtime_item["properties"]["before_text"]["anyOf"]} == {
+        "string",
+        "null",
+    }
+    assert canonical_item["properties"]["source_page"]["type"] == ["integer", "null"]
+    assert {entry["type"] for entry in runtime_item["properties"]["source_page"]["anyOf"]} == {
+        "integer",
+        "null",
+    }
+
+
 def test_performance_extraction_runtime_contract_matches_canonical() -> None:
     canonical = yaml.safe_load(
         (REPOSITORY_ROOT / "packages" / "contracts" / "openapi" / "openapi.yaml").read_text(

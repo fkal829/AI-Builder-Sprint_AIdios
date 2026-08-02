@@ -103,6 +103,11 @@ minimum: 0
   `Cache-Control: no-store`를 적용한다. `source_page`는 1-based이며 해당 문서의
   `page_count`를 초과하면 접근 URL을 발급하지 않고 `422 VALIDATION_ERROR`로 거부한다.
 - `/public/adjustment-requests/*`는 `ADJUSTMENT_RESPONSE` scope 토큰만 허용한다.
+- 공개 조정 요청 조회는 해당 요청 항목에 발송 시점에 저장된 원계약 문구
+  `before_text`와 그 문구가 확인된 1-based `source_page`만 노출한다. 원본 파일 URL·Storage
+  경로·계약 전문은 노출하지 않으며, `ReviewItem.source_text`가 있는 기존 요청의 기본
+  안내값은 해당 근거 문구와 페이지로 복구하고 실제 원문 근거가 없는 요청만 두 필드를
+  `null`로 반환한다.
 - `/public/obligations/*`는 `OBLIGATION_EVIDENCE` scope 토큰만 허용한다.
 - 두 공개 토큰은 서로 교환해 사용할 수 없다.
 - 소유자 API의 UUID path 변수가 문법적으로 잘못되면 `422 VALIDATION_ERROR`를

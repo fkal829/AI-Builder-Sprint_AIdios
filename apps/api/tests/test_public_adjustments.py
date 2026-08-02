@@ -6,7 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.adapters.solar import SolarCounterproposalError, SolarReviewAdapter
-from app.adapters.supabase import SupabaseAdapter
+from app.adapters.supabase import SupabaseAdapter, _public_adjustment_with_source_text
 from app.api.dependencies import (
     get_counterproposal_comparator,
     get_supabase_adapter,
@@ -19,7 +19,12 @@ from app.core.enums import (
     SuggestionChoice,
 )
 from app.main import app
-from app.repositories.adjustments import ReviewItemForAdjustment
+from app.repositories.adjustments import (
+    AdjustmentRequestItemRecord,
+    AdjustmentRequestRecord,
+    PublicAdjustmentRecord,
+    ReviewItemForAdjustment,
+)
 from app.schemas.adjustments import CounterproposalComparisonInput
 from app.services.counterproposal import CounterproposalComparator
 
@@ -106,6 +111,8 @@ async def sent_adjustment(
             ),
             suggestion_compromise=f"절충 요청 문구 {index + 1}",
             suggestion_request=f"수정 요청 문구 {index + 1}",
+            original_text=f"원계약 문구 {index + 1}",
+            source_page=index + 1,
         )
         for index in range(item_count)
     ]
@@ -142,9 +149,51 @@ async def test_public_get_is_no_store_and_does_not_record_open(public_adjustment
     body = response.json()["data"]
     assert body["status"] == "SENT"
     assert len(body["items"]) == len(review_items)
+    assert body["items"][0]["before_text"] == "원계약 문구 1"
+    assert body["items"][0]["source_page"] == 1
+    assert "file_url" not in response.text
+    assert "storage" not in response.text.lower()
     assert str(review_items[0].id) not in response.text
     assert adapter.mock_adjustment_requests[adjustment_id].status == AdjustmentRequestStatus.SENT
     assert not any(event.event_type == "ADJUSTMENT_OPENED" for event in adapter.mock_audit_events)
+
+
+def test_public_adjustment_recovers_source_text_from_legacy_default() -> None:
+    now = datetime.now(UTC)
+    review_item_id = uuid4()
+    request = AdjustmentRequestRecord(
+        id=uuid4(),
+        contract_id=uuid4(),
+        status=AdjustmentRequestStatus.SENT,
+        items=(
+            AdjustmentRequestItemRecord(
+                review_item_id=review_item_id,
+                user_choice=SuggestionChoice.REQUEST,
+                request_text="계약 문구를 명확히 적어 주세요.",
+            ),
+        ),
+        expires_in_hours=72,
+        sent_at=now,
+        expires_at=now + timedelta(hours=72),
+        opened_at=None,
+        responded_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+    recovered = _public_adjustment_with_source_text(
+        PublicAdjustmentRecord(contract_title="공개 조정 계약", request=request),
+        [
+            {
+                "id": str(review_item_id),
+                "source_page": 3,
+                "source_text": "제3조 계약기간은 6개월로 한다.",
+            }
+        ],
+    )
+
+    assert recovered.request.items[0].before_text == "제3조 계약기간은 6개월로 한다."
+    assert recovered.request.items[0].source_page == 3
 
 
 async def test_first_open_is_recorded_once_and_repeated_open_is_stable(

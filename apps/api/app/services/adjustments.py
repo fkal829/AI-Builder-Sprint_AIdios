@@ -227,6 +227,8 @@ class AdjustmentService:
                         adjustment_request_id=public.request.id,
                         review_item_id=item.review_item_id,
                     ),
+                    before_text=item.before_text if item.before_text.strip() else None,
+                    source_page=item.source_page,
                     request_text=item.request_text,
                 )
                 for item in public.request.items
@@ -349,6 +351,7 @@ class AdjustmentService:
                 user_choice=SuggestionChoice.REQUEST,
                 request_text=item.request_text,
                 before_text=item.source_text,
+                source_page=item.source_page,
             )
             for item in manual_records
         )
@@ -438,6 +441,7 @@ def _request_item_from_review(
         request_text=request_text,
         category=review_item.category,
         before_text=review_item.original_text,
+        source_page=review_item.source_page,
     )
 
 

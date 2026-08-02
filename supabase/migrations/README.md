@@ -142,6 +142,11 @@ constraint trigger가 confirmation RPC 반환 뒤 service-role 트랜잭션의 c
 선택·문구·원문 근거·순서·감사 이벤트 검증을 그대로 유지하고, 최신 수정본은
 확정된 모든 조항을 빈 배열 없이 대조할 수 있다.
 
+`20260802050000_sync_adjustment_original_text.sql`은 기존 검토 항목의 원문 기본 안내값을
+보존된 `source_text`로 backfill하고, 새 검토 항목도 insert 시 같은 근거 문구를
+`original_text`에 동기화한다. 공개 조정 링크와 최종 합의 비교는 이 문구와
+`source_page`를 사용하며 원문 파일 URL이나 계약 전문은 공개하지 않는다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

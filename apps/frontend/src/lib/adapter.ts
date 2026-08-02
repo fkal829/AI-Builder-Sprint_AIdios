@@ -37,7 +37,12 @@ type ApiEnvelope<T> = {
 type ApiPublicAdjustment = {
   contract_title: string;
   status: AdjustmentRequestPublic["status"];
-  items: { item_id: string; request_text: string }[];
+  items: {
+    item_id: string;
+    before_text: string | null;
+    source_page: number | null;
+    request_text: string;
+  }[];
 };
 
 type ApiOwnerAdjustmentDetail = {
@@ -171,7 +176,13 @@ type ApiReviewItem = {
   plain_explanation: string; source_page: number | null;
   source_text: string | null; source_confidence: number | null; basis_text: string;
   suggestion_accept: string; suggestion_compromise: string; suggestion_request: string;
+  related_extracted_term_ids: string[];
   user_choice: SuggestionChoice | null;
+};
+
+type ApiAnalysisExtractedTerm = {
+  id: string;
+  field: string;
 };
 
 type ApiDocumentClause = {
@@ -192,6 +203,7 @@ type ApiAnalysisTask = {
   error_code: string | null;
   result: {
     document_clauses?: ApiDocumentClause[];
+    extracted_terms: ApiAnalysisExtractedTerm[];
     review_items: ApiReviewItem[];
   } | null;
 };
@@ -301,6 +313,7 @@ export type LiveReviewItem = {
   suggestionAccept: string;
   suggestionCompromise: string;
   suggestionRequest: string;
+  relatedExtractedFields: string[];
   userChoice: SuggestionChoice | null;
 };
 
@@ -1123,7 +1136,7 @@ class MockAdapter implements DataAdapter {
       supporting_document_ids: [],
       status: "COMPLETED",
       error_code: null,
-      result: { document_clauses: [], review_items: [] },
+      result: { document_clauses: [], extracted_terms: [], review_items: [] },
     };
   }
 
@@ -1734,6 +1747,9 @@ class ApiAdapter extends MockAdapter {
         + `${encodeURIComponent(task.document_id)}/access`,
       { headers: await this.ownerHeaders() },
     );
+    const extractedFieldById = new Map(
+      task.result.extracted_terms.map((term) => [term.id, term.field]),
+    );
     return {
       title: contract.title,
       counterpartyName: contract.counterparty_name,
@@ -1764,6 +1780,9 @@ class ApiAdapter extends MockAdapter {
         sourcePage: item.source_page, sourceText: item.source_text, sourceConfidence: item.source_confidence,
         basisText: item.basis_text, suggestionAccept: item.suggestion_accept,
         suggestionCompromise: item.suggestion_compromise, suggestionRequest: item.suggestion_request,
+        relatedExtractedFields: item.related_extracted_term_ids
+          .map((termId) => extractedFieldById.get(termId))
+          .filter((field): field is string => Boolean(field)),
         userChoice: item.user_choice,
       })),
     };
@@ -2150,6 +2169,8 @@ class ApiAdapter extends MockAdapter {
       status: data.status,
       items: data.items.map((item) => ({
         clauseId: item.item_id,
+        beforeText: item.before_text ?? undefined,
+        sourcePage: item.source_page ?? undefined,
         requestText: item.request_text,
         officialBasis: null,
       })),

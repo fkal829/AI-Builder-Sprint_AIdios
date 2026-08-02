@@ -149,6 +149,8 @@ export interface ClauseCard {
   original: SourceRef;
   /** ② 내가 이해한 조건 (사용자 기억) */
   understood: string | null;
+  /** 이해조건 5문항과 직접 연결된 불일치일 때만 설정하는 구조화 키 */
+  understoodKey?: keyof Omit<UnderstoodTerm, "sourceType">;
   /** ③ 무엇이 다른지 쉬운 설명 (AI 추정) */
   aiExplanation: string;
   confidence: number; // 확신도
@@ -249,8 +251,9 @@ export interface AdjustmentRequestPublic {
     clauseId: string;
     requestText: string;
     officialBasis: string | null;
-    /** 원계약 문구와 그 페이지 — 목업에서만 채운다. 공개 API에는 아직 없다. */
+    /** 조정 요청과 직접 관련된 원계약 문구. 기존 요청에는 없을 수 있다. */
     beforeText?: string;
+    /** 원계약 문구가 확인된 1-based 페이지. 근거가 없으면 생략한다. */
     sourcePage?: number;
   }[];
 }

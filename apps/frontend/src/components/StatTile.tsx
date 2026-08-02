@@ -7,29 +7,47 @@ export function StatTile({
   label,
   emphasis,
   size = "sm",
+  fitValue = false,
 }: {
   value: ReactNode;
   label: string;
   /** 만료 임박 등 강조 — 유일한 솔리드 타일 */
   emphasis?: boolean;
   size?: "sm" | "lg";
+  /** 축약 후에도 긴 값이면 카드 안에서 한 단계씩 작게 표시한다. */
+  fitValue?: boolean;
 }) {
   const pad = size === "lg" ? "px-4 py-5" : "px-3 py-2.5";
-  const num = size === "lg" ? "text-3xl" : "text-lg";
+  const num = valueTextSize(value, size, fitValue);
   return (
     <div
-      className={`card text-center ${pad} ${
+      className={`card min-w-0 text-center ${pad} ${
         emphasis ? "border-brand200 bg-brand50" : ""
       }`}
     >
       <div
-        className={`font-black tabular-nums ${num} ${emphasis ? "text-brand700" : "text-ink"}`}
+        className={`whitespace-nowrap font-black leading-none tabular-nums ${num} ${emphasis ? "text-brand700" : "text-ink"}`}
       >
         {value}
       </div>
       <div className="mt-1 text-[11px] text-neutral500">{label}</div>
     </div>
   );
+}
+
+function valueTextSize(value: ReactNode, size: "sm" | "lg", fitValue: boolean): string {
+  if (!fitValue || (typeof value !== "string" && typeof value !== "number")) {
+    return size === "lg" ? "text-3xl" : "text-lg";
+  }
+
+  const length = [...String(value)].length;
+  if (size === "lg") {
+    if (length >= 10) return "text-lg";
+    if (length >= 8) return "text-xl";
+    if (length >= 7) return "text-2xl";
+    return "text-3xl";
+  }
+  return length >= 10 ? "text-base" : "text-lg";
 }
 
 /** 좌우 라벨/값 한 줄 지표 */

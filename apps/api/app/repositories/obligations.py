@@ -97,5 +97,6 @@ class ObligationRepository(Protocol):
         contract_id: UUID,
         obligation_id: UUID,
         decision: ObligationStatus,
+        evidence_url: str | None,
         reviewed_at: datetime,
     ) -> EvidenceReviewResult: ...

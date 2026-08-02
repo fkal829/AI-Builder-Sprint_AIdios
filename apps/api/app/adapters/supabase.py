@@ -2576,6 +2576,7 @@ class SupabaseAdapter:
         contract_id: UUID,
         obligation_id: UUID,
         decision: ObligationStatus,
+        evidence_url: str | None,
         reviewed_at: datetime,
     ) -> EvidenceReviewResult:
         if decision not in {ObligationStatus.APPROVED, ObligationStatus.DISPUTED}:
@@ -2594,7 +2595,25 @@ class SupabaseAdapter:
                         outcome=EvidenceReviewOutcome.NOT_FOUND,
                         obligation=None,
                     )
-                if obligation.status != ObligationStatus.SUBMITTED:
+                contract = self._mock_contracts.get(contract_id)
+                direct_check_not_allowed = (
+                    obligation.status == ObligationStatus.PENDING
+                    and (
+                        contract is None
+                        or contract.status
+                        not in {ContractStatus.SIGNED, ContractStatus.IN_PROGRESS}
+                    )
+                )
+                submitted_url_override = (
+                    obligation.status == ObligationStatus.SUBMITTED
+                    and evidence_url is not None
+                )
+                if (
+                    obligation.status
+                    not in {ObligationStatus.PENDING, ObligationStatus.SUBMITTED}
+                    or direct_check_not_allowed
+                    or submitted_url_override
+                ):
                     return EvidenceReviewResult(
                         outcome=EvidenceReviewOutcome.INVALID_STATUS_TRANSITION,
                         obligation=_obligation_record_from_mock(obligation),
@@ -2603,6 +2622,17 @@ class SupabaseAdapter:
                 reviewed = replace(
                     obligation,
                     status=decision,
+                    evidence_url=(
+                        evidence_url
+                        if obligation.status == ObligationStatus.PENDING
+                        else obligation.evidence_url
+                    ),
+                    submitted_at=(
+                        reviewed_at
+                        if obligation.status == ObligationStatus.PENDING
+                        and evidence_url is not None
+                        else obligation.submitted_at
+                    ),
                     reviewed_at=reviewed_at,
                     payment_condition_met=decision == ObligationStatus.APPROVED,
                     updated_at=reviewed_at,
@@ -2614,9 +2644,9 @@ class SupabaseAdapter:
                     else "EVIDENCE_DISPUTED"
                 )
                 summary = (
-                    "소유자가 산출물 증빙을 승인했습니다."
+                    "소유자가 산출물 완료를 확인했습니다."
                     if decision == ObligationStatus.APPROVED
-                    else "소유자가 산출물 증빙에 이의를 제기했습니다."
+                    else "소유자가 산출물에 문제가 있음을 기록했습니다."
                 )
                 self._mock_audit_events.append(
                     MockAuditEvent(
@@ -2639,12 +2669,13 @@ class SupabaseAdapter:
             "p_contract_id": str(contract_id),
             "p_obligation_id": str(obligation_id),
             "p_decision": decision.value,
+            "p_evidence_url": evidence_url,
             "p_reviewed_at": reviewed_at.isoformat(),
         }
         try:
             response = await asyncio.to_thread(
                 lambda: client.rpc(
-                    "review_obligation_evidence_with_audit",
+                    "check_obligation_with_audit",
                     params,
                 ).execute()
             )

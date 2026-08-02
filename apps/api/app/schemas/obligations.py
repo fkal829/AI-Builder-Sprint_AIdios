@@ -62,14 +62,15 @@ class Obligation(BaseModel):
                 raise ValueError("PENDING 이행 항목에는 제출 또는 검토 결과가 없어야 합니다.")
             return self
 
-        if self.evidence_url is None or self.submitted_at is None:
-            raise ValueError("제출된 이행 항목에는 증빙 URL과 제출 시각이 필요합니다.")
-
         if self.status == ObligationStatus.SUBMITTED:
+            if self.evidence_url is None or self.submitted_at is None:
+                raise ValueError("제출된 이행 항목에는 증빙 URL과 제출 시각이 필요합니다.")
             if self.reviewed_at is not None or self.payment_condition_met:
                 raise ValueError("SUBMITTED 이행 항목에는 검토 결과가 없어야 합니다.")
             return self
 
+        if (self.evidence_url is None) != (self.submitted_at is None):
+            raise ValueError("직접 확인한 증빙 URL과 제출 시각은 함께 존재해야 합니다.")
         if self.reviewed_at is None:
             raise ValueError("검토가 끝난 이행 항목에는 검토 시각이 필요합니다.")
         if self.payment_condition_met != (self.status == ObligationStatus.APPROVED):
@@ -117,3 +118,5 @@ class EvidenceReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: Literal["APPROVED", "DISPUTED"]
+    confirmed: Literal[True]
+    evidence_url: EvidenceUrl | None = None

@@ -134,13 +134,15 @@ class ObligationService:
             contract_id=contract_id,
             obligation_id=obligation_id,
             decision=ObligationStatus(payload.decision),
+            evidence_url=(str(payload.evidence_url) if payload.evidence_url is not None else None),
             reviewed_at=self._utc_now(),
         )
         if result.outcome == EvidenceReviewOutcome.NOT_FOUND:
             raise ResourceNotFound()
         if result.outcome == EvidenceReviewOutcome.INVALID_STATUS_TRANSITION:
             raise InvalidStatusTransition(
-                "SUBMITTED 상태의 이행 항목만 승인하거나 이의를 제기할 수 있습니다."
+                "서명 완료 또는 이행 중 계약의 확인 전 항목이나 제출된 증빙만 "
+                "완료 또는 문제 있음으로 기록할 수 있습니다."
             )
         if result.obligation is None:
             raise RuntimeError("증빙 검토 저장 결과가 없습니다.")

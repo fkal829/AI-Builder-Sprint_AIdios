@@ -8,8 +8,9 @@ from httpx import ASGITransport, AsyncClient
 
 from app.adapters.supabase import MockObligation, SupabaseAdapter
 from app.api.dependencies import get_obligation_service, get_supabase_adapter
-from app.core.enums import ObligationStatus
+from app.core.enums import ContractStatus, ObligationStatus
 from app.main import app
+from app.repositories.contracts import ContractRecord
 from app.repositories.obligations import EvidenceReviewOutcome
 from app.services.obligations import ObligationService
 
@@ -23,7 +24,7 @@ MIGRATION = (
     Path(__file__).resolve().parents[3]
     / "supabase"
     / "migrations"
-    / "20260730320000_review_obligation_evidence.sql"
+    / "20260803010000_add_owner_obligation_checklist.sql"
 )
 
 
@@ -51,6 +52,27 @@ def submitted_obligation() -> MockObligation:
     )
 
 
+def contract_record(*, status: ContractStatus = ContractStatus.SIGNED) -> ContractRecord:
+    return ContractRecord(
+        id=CONTRACT_ID,
+        owner_id=OWNER_ID,
+        title="광안리 카페 SNS 광고대행 계약",
+        counterparty_name="부산홍보대행",
+        status=status,
+        signed_date=None,
+        start_date=None,
+        end_date=None,
+        termination_notice_date=None,
+        renewal_type=None,
+        total_amount=None,
+        understood_term=None,
+        renewal_decision=None,
+        modusign_document_id=None,
+        created_at=SUBMITTED_AT,
+        updated_at=SUBMITTED_AT,
+    )
+
+
 @pytest.fixture
 async def evidence_review_context():
     adapter = SupabaseAdapter(
@@ -63,6 +85,7 @@ async def evidence_review_context():
         demo_bearer_token=BEARER_TOKEN,
     )
     obligation = submitted_obligation()
+    adapter._mock_contracts[CONTRACT_ID] = contract_record()
     adapter._mock_obligations[CONTRACT_ID] = obligation
     service = ObligationService(adapter, now=lambda: REVIEWED_AT)
 
@@ -101,7 +124,7 @@ async def test_reviews_submitted_evidence_and_records_audit(
     response = await client.patch(
         f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}",
         headers=auth_headers(),
-        json={"decision": decision},
+        json={"decision": decision, "confirmed": True, "evidence_url": None},
     )
 
     assert response.status_code == 200
@@ -129,7 +152,7 @@ async def test_requires_owner_and_hides_unowned_resources(
 ) -> None:
     client, adapter, obligation = evidence_review_context
     path = f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}"
-    payload = {"decision": "APPROVED"}
+    payload = {"decision": "APPROVED", "confirmed": True, "evidence_url": None}
 
     unauthorized = await client.patch(path, json=payload)
     wrong_bearer = await client.patch(
@@ -156,7 +179,53 @@ async def test_requires_owner_and_hides_unowned_resources(
     assert adapter.mock_audit_events == ()
 
 
-async def test_rejects_non_submitted_and_repeated_reviews(
+@pytest.mark.parametrize(
+    ("decision", "evidence_url", "expected_submitted_at", "expected_payment"),
+    [
+        ("APPROVED", EVIDENCE_URL, REVIEWED_AT, True),
+        ("APPROVED", None, None, True),
+        ("DISPUTED", None, None, False),
+    ],
+)
+async def test_owner_checks_pending_obligation_directly(
+    evidence_review_context,
+    decision: str,
+    evidence_url: str | None,
+    expected_submitted_at: datetime | None,
+    expected_payment: bool,
+) -> None:
+    client, adapter, obligation = evidence_review_context
+    adapter._mock_obligations[CONTRACT_ID] = replace(
+        obligation,
+        status=ObligationStatus.PENDING,
+        evidence_url=None,
+        submitted_at=None,
+    )
+
+    response = await client.patch(
+        f"/api/v1/contracts/{CONTRACT_ID}/obligations/{obligation.id}",
+        headers=auth_headers(),
+        json={
+            "decision": decision,
+            "confirmed": True,
+            "evidence_url": evidence_url,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == decision
+    assert data["evidence_url"] == evidence_url
+    assert data["submitted_at"] == (
+        expected_submitted_at.isoformat().replace("+00:00", "Z")
+        if expected_submitted_at is not None
+        else None
+    )
+    assert data["reviewed_at"] == REVIEWED_AT.isoformat().replace("+00:00", "Z")
+    assert data["payment_condition_met"] is expected_payment
+
+
+async def test_rejects_pending_before_signature_and_repeated_reviews(
     evidence_review_context,
 ) -> None:
     client, adapter, obligation = evidence_review_context
@@ -167,11 +236,12 @@ async def test_rejects_non_submitted_and_repeated_reviews(
         evidence_url=None,
         submitted_at=None,
     )
+    adapter._mock_contracts[CONTRACT_ID] = contract_record(status=ContractStatus.NEGOTIATING)
 
     pending = await client.patch(
         path,
         headers=auth_headers(),
-        json={"decision": "APPROVED"},
+        json={"decision": "APPROVED", "confirmed": True, "evidence_url": None},
     )
 
     assert pending.status_code == 409
@@ -179,15 +249,16 @@ async def test_rejects_non_submitted_and_repeated_reviews(
     assert adapter.mock_audit_events == ()
 
     adapter._mock_obligations[CONTRACT_ID] = obligation
+    adapter._mock_contracts[CONTRACT_ID] = contract_record()
     approved = await client.patch(
         path,
         headers=auth_headers(),
-        json={"decision": "APPROVED"},
+        json={"decision": "APPROVED", "confirmed": True, "evidence_url": None},
     )
     repeated = await client.patch(
         path,
         headers=auth_headers(),
-        json={"decision": "DISPUTED"},
+        json={"decision": "DISPUTED", "confirmed": True, "evidence_url": None},
     )
 
     assert approved.status_code == 200
@@ -207,6 +278,8 @@ async def test_rejects_non_submitted_and_repeated_reviews(
         {"decision": "UNKNOWN"},
         {"decision": None},
         {"decision": "APPROVED", "unexpected": True},
+        {"decision": "APPROVED", "confirmed": False},
+        {"decision": "APPROVED", "confirmed": True, "evidence_url": "ftp://invalid"},
     ],
 )
 async def test_rejects_invalid_review_requests_without_mutation(
@@ -281,6 +354,7 @@ async def test_live_adapter_calls_atomic_review_rpc(monkeypatch) -> None:
         contract_id=CONTRACT_ID,
         obligation_id=obligation.id,
         decision=ObligationStatus.APPROVED,
+        evidence_url=None,
         reviewed_at=REVIEWED_AT,
     )
 
@@ -290,26 +364,29 @@ async def test_live_adapter_calls_atomic_review_rpc(monkeypatch) -> None:
     assert result.obligation.payment_condition_met is True
     assert fake_client.calls == [
         (
-            "review_obligation_evidence_with_audit",
+            "check_obligation_with_audit",
             {
                 "p_owner_id": str(OWNER_ID),
                 "p_contract_id": str(CONTRACT_ID),
                 "p_obligation_id": str(obligation.id),
                 "p_decision": "APPROVED",
+                "p_evidence_url": None,
                 "p_reviewed_at": REVIEWED_AT.isoformat(),
             },
         )
     ]
 
 
-def test_review_migration_enforces_owner_state_and_atomic_audit() -> None:
+def test_owner_check_migration_enforces_owner_state_and_atomic_audit() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
 
-    assert "function public.review_obligation_evidence_with_audit" in sql
+    assert "function public.check_obligation_with_audit" in sql
     assert "contract.owner_id = p_owner_id" in sql
     assert "obligation.id = p_obligation_id" in sql
     assert "for update of obligation" in sql
-    assert "v_obligation.status <> 'SUBMITTED'" in sql
+    assert "v_obligation.status not in ('PENDING', 'SUBMITTED')" in sql
+    assert "v_contract_status not in ('SIGNED', 'IN_PROGRESS')" in sql
+    assert "p_evidence_url" in sql
     assert "status = p_decision" in sql
     assert "reviewed_at = p_reviewed_at" in sql
     assert "payment_condition_met = p_decision = 'APPROVED'" in sql
@@ -333,3 +410,6 @@ def test_openapi_exposes_obligation_evidence_review_contract() -> None:
         "properties"
     ]["decision"]
     assert decision_schema["enum"] == ["APPROVED", "DISPUTED"]
+    request_component = openapi["components"]["schemas"]["EvidenceReviewRequest"]
+    assert set(request_component["required"]) == {"decision", "confirmed"}
+    assert request_component["properties"]["confirmed"]["const"] is True

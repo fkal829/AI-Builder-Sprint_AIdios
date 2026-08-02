@@ -529,8 +529,10 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
   근거의 검증된 채널·유형·수량을 결정적 코드로 조합하고 `confidence`는 사용한
   `VERIFIED ExtractedTerm.confidence`의 최솟값이다. 명확한 근거가 없으면 임의로
   만들지 않고 확인 신호를 유지한다.
-- 자동 생성 후 별도 endpoint에서 사용자의 명시적 요청으로
-  `OBLIGATION_EVIDENCE` scope 제출 링크를 만든다.
+- 자동 생성 후 소유자가 인증된 체크리스트 API에서 직접 완료 또는 문제 있음을 기록한다.
+  증빙 URL은 선택 사항이며 서버가 URL을 가져오거나 진위를 판정하지 않는다.
+- 기존 `OBLIGATION_EVIDENCE` scope 제출 링크는 호환 경로로 유지하지만 기본 소유자
+  화면에서는 생성하거나 상대방에게 요청하지 않는다.
 - 증빙 제출 링크는 계약 상태가 `SIGNED` 또는 `IN_PROGRESS`이고 대표 의무가
   `PENDING`일 때만 만든다. 링크 생성은 계약 상태를 자동으로 전환하지 않는다.
 - 증빙 제출 링크는 멱등 예약·요청 검증, 공개 토큰, 감사 이벤트, 안전한 재생값을 한
@@ -549,8 +551,8 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 | --- | --- | --- |
 | `PENDING` | `evidence_url`, `submitted_at`, `reviewed_at` 모두 `null` | `false` |
 | `SUBMITTED` | URL과 `submitted_at` 존재, `reviewed_at=null` | `false` |
-| `APPROVED` | URL과 제출·검토 시각 모두 존재 | `true` |
-| `DISPUTED` | URL과 제출·검토 시각 모두 존재 | `false` |
+| `APPROVED` | `reviewed_at` 존재. 선택적 URL과 `submitted_at`은 둘 다 존재하거나 둘 다 `null` | `true` |
+| `DISPUTED` | `reviewed_at` 존재. 선택적 URL과 `submitted_at`은 둘 다 존재하거나 둘 다 `null` | `false` |
 
 ## 10. 대시보드 집계 계약
 
@@ -621,7 +623,7 @@ PROCESSING_FAILED`다.
 
 ### 이행 항목
 
-`PENDING → SUBMITTED → APPROVED / DISPUTED`
+`PENDING → APPROVED / DISPUTED` 또는 `PENDING → SUBMITTED → APPROVED / DISPUTED`
 
 P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨다.
 
@@ -648,6 +650,7 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 | Signature `EDITING / SIGNING → ABORTED / FAILED`, `SIGNING → COMPLETED` | SYSTEM의 외부 상태 반영 | 인증 이벤트와 최신 종료 상태 | 종료 상태를 과거 이벤트로 되돌리지 않음 |
 | Signature `EDITING → COMPLETED`, Contract `READY_TO_SIGN → SIGNED` | SYSTEM의 순서 역전 보정 | `COMPLETED` 최신 조회가 `ON_GOING`보다 먼저 처리됨 | `SIGNATURE_COMPLETED`를 한 트랜잭션으로 기록 |
 | Obligation `PENDING → SUBMITTED` | AGENCY의 증빙 제출 | 유효한 scope·resource·만료, 최초 제출 | URL·`submitted_at`, `AuditEvent` |
+| Obligation `PENDING → APPROVED / DISPUTED` | OWNER의 직접 체크리스트 확인 | 소유권, Contract `SIGNED`·`IN_PROGRESS`, `confirmed=true`, 선택적 URL 형식 | 선택적 URL·`submitted_at`, `reviewed_at`, 지급 조건 표시, `AuditEvent` |
 | Obligation `SUBMITTED → APPROVED / DISPUTED` | OWNER의 명시적 검토 API 호출 | 소유권과 유효한 decision | `reviewed_at`, 지급 조건 표시, `AuditEvent` |
 
 `SIGNED → IN_PROGRESS → COMPLETED / RENEWAL_DUE`의 정확한 시점은 계약 시작·종료일과

@@ -44,8 +44,9 @@ cd apps/api
 
 Solar 검토 문구 live 검증은 외부 호출과 비용이 발생하므로 일반 평가와 분리한다.
 `apps/api/.env`에 `UPSTAGE_API_KEY`를 설정하고 명시적으로 실행한다.
-실행기는 production과 같은 `SolarReviewAdapter` 기본 1건 chunk 전략으로 세 입력을
-처리하며, 전체 출력 ID와 순서가 일치한 경우에만 보고서를 생성한다.
+실행기는 production과 같은 `SolarReviewAdapter` 경계를 사용한다. 현재 기본 chunk는
+최대 4건이며, 전체 출력 ID와 순서가 일치한 경우에만 보고서를 생성한다. 2026-07-31에
+기록한 성공 결과는 당시 기본이던 1건 chunk로 세 입력을 각각 호출한 결과다.
 
 ```bash
 cd apps/api

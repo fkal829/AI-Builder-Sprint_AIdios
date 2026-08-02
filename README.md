@@ -180,6 +180,5 @@ Supabase Auth의 Site URL과 Redirect URL에는 Vercel 운영 주소 및
 
 ## AI 활용
 
-사용 모델·API 위치·프롬프트/설정·테스트 검증 산출물은
-[docs/AI_활용_증빙.md](docs/AI_활용_증빙.md)에 요약했고, 기술 상세는
+사용 모델·API 위치·프롬프트/설정·테스트 검증 산출물과 기술 상세는 단일 기준 문서인
 [AI_USAGE.md](AI_USAGE.md)에 있습니다.

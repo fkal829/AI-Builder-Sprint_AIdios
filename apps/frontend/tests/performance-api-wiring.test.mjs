@@ -40,7 +40,8 @@ test("performance page uses evidence-backed API data and keeps inquiry delivery 
   assert.match(page, /candidate\.sourcePage/);
   assert.match(page, /candidate\.sourceText/);
   assert.match(page, /candidate\.confidence/);
-  assert.match(page, /계약서를 기준으로 확인해요/);
+  // QA 결과 '계약서를 기준으로 확인해요' 안내 카드는 중복이라 삭제했다(재추가 방지).
+  assert.doesNotMatch(page, /계약서를 기준으로 확인해요/);
   assert.match(page, /border-2 border-dashed border-neutral300/);
   assert.match(page, /① 대행사 리포트 올리기/);
   assert.match(page, /setCorrectionReason/);

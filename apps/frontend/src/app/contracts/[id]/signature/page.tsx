@@ -7,6 +7,11 @@ import { Timeline } from "@/components/Timeline";
 import { useAsync } from "@/lib/hooks";
 import { adapter, isUsingMock, type LiveSignature, type LiveSignatureView } from "@/lib/adapter";
 import { MODUSIGN_STATUS_LABEL, modusignStep } from "@/lib/status";
+import { useSession } from "@/lib/useSession";
+
+/** 모두싸인 공식 도움말 — 서명 방법을 모를 때 새 창으로 안내한다. */
+const MODUSIGN_HELP_URL =
+  "https://support.modusign.co.kr/ko/articles/서명하는-방법-f5065227";
 
 const TERMINAL_SIGNATURE_STATUSES: LiveSignature["status"][] = [
   "COMPLETED",
@@ -35,6 +40,7 @@ const EMPTY_SIGNERS: SignerFields = {
 export default function SignaturePage() {
   const { id } = useParams<{ id: string }>();
   const state = useAsync(() => adapter.getSignatureView(id), [id]);
+  const { session } = useSession();
   const [liveView, setLiveView] = useState<LiveSignatureView | null>(null);
   const [signers, setSigners] = useState<SignerFields>(EMPTY_SIGNERS);
   const [creating, setCreating] = useState(false);
@@ -46,6 +52,14 @@ export default function SignaturePage() {
   // 진행 중일 때 배경에서 다시 조회해 타임라인·상태를 갱신한다.
   const view: LiveSignatureView | null =
     liveView ?? (state.status === "ready" ? state.data : null);
+
+  // 사장님 이메일은 가입한 계정 주소로 채워둔다(직접 수정 가능). 이미 입력한 값은 덮지 않는다.
+  useEffect(() => {
+    const email = session?.email;
+    if (!email || session?.guest || !email.includes("@")) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSigners((prev) => (prev.ownerEmail ? prev : { ...prev, ownerEmail: email }));
+  }, [session]);
 
   const refreshView = async () => {
     try {
@@ -159,11 +173,16 @@ export default function SignaturePage() {
             ) : (
               <a
                 href={editorUrl}
-                className="mt-3 flex h-11 items-center justify-center rounded-lg bg-ink text-sm font-bold text-white"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 flex h-11 items-center justify-center gap-1.5 rounded-lg bg-ink text-sm font-bold text-white"
               >
-                모두싸인 편집기 열기
+                모두싸인 편집기 열기 <span aria-hidden="true">↗</span>
               </a>
             )}
+            <p className="mt-2 text-[11px] text-neutral500">
+              편집기는 새 창에서 열립니다. 이 화면은 그대로 두셔도 됩니다.
+            </p>
           </div>
         )}
 
@@ -248,6 +267,19 @@ function SignatureDraftForm({
       </button>
       <p className="mt-2 text-[10px] leading-relaxed text-neutral500">
         이 버튼은 서명 요청을 자동 발송하지 않습니다.
+      </p>
+
+      {/* 편집기를 열기 전에 서명 방법부터 확인할 수 있게 한다 */}
+      <a
+        href={MODUSIGN_HELP_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-3 flex h-11 items-center justify-center gap-1.5 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-ink hover:bg-subtle"
+      >
+        모두싸인 서명 방법 안내 보기 <span aria-hidden="true">↗</span>
+      </a>
+      <p className="mt-2 text-[10px] leading-relaxed text-neutral500">
+        모두싸인 사용이 처음이시면 초안을 만들기 전에 먼저 읽어보세요. 새 창에서 열립니다.
       </p>
     </section>
   );

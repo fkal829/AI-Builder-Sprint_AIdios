@@ -81,7 +81,7 @@ export function AppScreen({
         {children}
 
         {footer && (
-          <div className="mt-8 max-w-[440px] border-t border-neutral200 pt-5">
+          <div className="mx-auto mt-8 max-w-[440px] border-t border-neutral200 pt-5">
             {footer}
           </div>
         )}

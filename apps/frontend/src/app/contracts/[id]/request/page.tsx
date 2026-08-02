@@ -146,41 +146,50 @@ export default function RequestPreviewPage() {
         )
       }
     >
-      {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
-      )}
+      {state.status === "loading" && <PreviewSkeleton />}
 
       {state.status === "ready" && (
-        <div className="flex flex-col gap-4">
-          <div className="text-sm font-black text-ink">
-            요청서 미리보기 — 조항 {items.length}건
+        <div className="flex flex-col gap-5">
+          <div>
+            <div className="text-[15px] font-black text-ink">
+              대행사에 보낼 요청 {items.length}건
+            </div>
+            <p className="mt-1 text-[13px] text-neutral500">
+              아래 문장 그대로 대행사에게 전달됩니다. 내용을 한 번 더 확인해주세요.
+            </p>
           </div>
 
-          <div className="flex flex-col gap-2">
-            {items.map((it) => (
-              <div
+          <ol className="flex flex-col gap-3">
+            {items.map((it, index) => (
+              <li
                 key={it.id}
-                className="flex items-start justify-between gap-2 rounded-lg bg-subtle px-3.5 py-3 text-[13px]"
+                className="rounded-xl border border-neutral200 bg-white p-4 shadow-[0_1px_2px_rgba(16,54,90,0.04)]"
               >
-                <div>
-                  <span className="font-bold text-ink">{it.title}</span>
-                  <span className="text-neutral500"> → </span>
-                  <span className="text-neutral700">“{it.text}”</span>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand800 text-[11px] font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <span className="truncate text-[14px] font-black text-ink">{it.title}</span>
+                  </div>
+                  {it.manual && (
+                    <button
+                      type="button"
+                      onClick={() => removeManualItem(it.id)}
+                      className="flex-none rounded-md px-1.5 py-0.5 text-[12px] font-bold text-neutral500 hover:bg-subtle hover:text-brand700"
+                    >
+                      ✕ 삭제
+                    </button>
+                  )}
                 </div>
-                {it.manual && (
-                  <button
-                    type="button"
-                    onClick={() => removeManualItem(it.id)}
-                    className="flex-none text-[11px] font-bold text-neutral500 hover:text-brand700"
-                  >
-                    ✕ 삭제
-                  </button>
-                )}
-              </div>
+                <p className="mt-3 border-l-2 border-brand300 pl-3.5 text-[15px] leading-loose text-neutral700">
+                  {it.text}
+                </p>
+              </li>
             ))}
-          </div>
+          </ol>
 
-          <p className="text-[11px] leading-relaxed text-neutral500">
+          <p className="text-[13px] leading-loose text-neutral500">
             링크 생성 전 미리보기예요. 링크를 만든 뒤 기존 이메일이나 메신저로 직접
             전달해주세요. 대행사는 회원가입 없이 요청서를 열람합니다.
           </p>
@@ -210,5 +219,31 @@ export default function RequestPreviewPage() {
         onConfirm={sendRequest}
       />
     </AppScreen>
+  );
+}
+
+/** 요청서를 불러오는 동안 보여줄 자리 — '불러오는 중…' 문구 대신 최종 레이아웃을 그대로 흉내낸다. */
+function PreviewSkeleton() {
+  return (
+    <div className="flex animate-pulse flex-col gap-5" aria-hidden="true">
+      <div>
+        <div className="h-4 w-44 rounded bg-neutral200" />
+        <div className="mt-2.5 h-3 w-72 rounded bg-neutral100" />
+      </div>
+      <div className="flex flex-col gap-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="rounded-xl border border-neutral200 bg-white p-4">
+            <div className="flex items-center gap-2.5">
+              <div className="h-6 w-6 flex-none rounded-full bg-neutral200" />
+              <div className="h-3.5 w-32 rounded bg-neutral200" />
+            </div>
+            <div className="mt-4 flex flex-col gap-2 pl-3.5">
+              <div className="h-3 w-full rounded bg-neutral100" />
+              <div className="h-3 w-4/5 rounded bg-neutral100" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

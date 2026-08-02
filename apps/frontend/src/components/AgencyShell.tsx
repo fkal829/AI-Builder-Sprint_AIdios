@@ -3,6 +3,7 @@
    데스크탑·모바일 양쪽 지원(반응형 중앙 카드). 계정 유도 없음.
    =========================================================================== */
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { Logo } from "./Logo";
 
 export function AgencyShell({
@@ -17,13 +18,12 @@ export function AgencyShell({
 }) {
   return (
     <div className="min-h-dvh bg-white">
-      {/* 무가입 안내 바 */}
+      {/* 상단 바 — 로고를 누르면 서비스 소개로 이동 */}
       <div className="border-b border-neutral200 bg-white">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-5 py-3">
-          <Logo size={20} />
-          <span className="rounded-full bg-neutral100 px-2.5 py-1 text-[11px] font-medium text-neutral700">
-            회원가입 없이 · 토큰 접근
-          </span>
+        <div className="mx-auto flex max-w-2xl items-center px-5 py-3">
+          <Link href="/" aria-label="단디계약 소개 보기">
+            <Logo size={20} />
+          </Link>
         </div>
       </div>
 

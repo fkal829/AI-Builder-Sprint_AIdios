@@ -14,7 +14,7 @@ import { Logo } from "@/components/Logo";
 import { useSession } from "@/lib/useSession";
 import { signInAsGuest } from "@/lib/auth";
 import { isUsingMock } from "@/lib/adapter";
-import { DEMO_CONTRACT_ID } from "@/lib/mock";
+import { DEMO_CONTRACT_ID, DEMO_TOKEN } from "@/lib/mock";
 
 export default function LandingPage() {
   const router = useRouter();
@@ -123,11 +123,17 @@ export default function LandingPage() {
         {/* ── ③ 사용 방법 : 벤토 2×2 (비대칭) ───────────────────── */}
         <section id="steps" className="mx-auto max-w-[1160px] px-6 py-20 lg:px-8 lg:py-24">
           <h2 className="text-3xl font-black tracking-tight text-ink">네 번이면 끝납니다.</h2>
-          <p className="mt-3.5 text-[17px] text-neutral500">처음 쓰시는 분 기준으로 10분 정도 걸립니다.</p>
+          <p className="mt-3.5 text-[17px] text-neutral500">처음 쓰시는 분 기준으로 15분 정도 걸립니다.</p>
 
           <div className="mt-14 grid gap-5">
             <div className="grid gap-5 lg:grid-cols-[1fr_1.45fr]">
-              <StepCard n={1} title="올립니다" tint>
+              <StepCard
+                n={1}
+                title="올립니다"
+                tint
+                slot="계약서 PDF 업로드"
+                previewSrc="/contracts/new?preview=1"
+              >
                 대행사에서 받은 계약서 PDF를 그대로 올립니다. 사진으로 찍은 파일도 됩니다.
               </StepCard>
               <StepCard
@@ -150,7 +156,13 @@ export default function LandingPage() {
                 사장님이 이해한 조건과 계약서에 적힌 조건을 나란히 놓고 비교합니다. 어긋난 곳마다
                 확인 표시가 붙습니다.
               </StepCard>
-              <StepCard n={4} title="요청서를 보냅니다" tint>
+              <StepCard
+                n={4}
+                title="요청서를 보냅니다"
+                tint
+                slot="대행사가 링크를 열면 보이는 화면"
+                previewSrc={`/r/${DEMO_TOKEN}`}
+              >
                 조정 요청서를 만들어 링크로 드립니다. 대행사는 가입 없이 링크만 열면 되고, 보내는 것은
                 사장님이 직접 하십니다.
               </StepCard>
@@ -287,12 +299,13 @@ export default function LandingPage() {
               <a href="#steps" className="hover:text-ink">사용 방법</a>
               <a href="#faq" className="hover:text-ink">자주 묻는 질문</a>
               <Link href="/demo" className="hover:text-ink">화면 둘러보기</Link>
+              <Link href="/terms" className="hover:text-ink">이용약관</Link>
+              <Link href="/privacy" className="hover:text-ink">개인정보처리방침</Link>
             </div>
           </div>
           <p className="mt-9 max-w-3xl text-[13px] leading-loose text-neutral400">
             단디계약은 법률 자문을 제공하지 않으며, 계약의 위법 여부를 판정하지 않습니다.
             확인이 필요한 부분을 표시하고 사장님의 요청을 정리해 전달하는 것까지가 이 서비스의 역할입니다.
-            표시된 계약 정보는 모두 가상 데이터입니다.
           </p>
         </div>
       </footer>

@@ -99,31 +99,6 @@ export default function NewContractPage() {
               className="h-11 rounded-lg border border-neutral300 bg-white px-3 text-sm text-ink outline-none focus:border-ink"
             />
           </label>
-
-          <a
-            href="/sample-contract.pdf"
-            target="_blank"
-            rel="noreferrer"
-            className="text-center text-[11px] text-brand700 underline underline-offset-2"
-          >
-            예시 계약서(광안리 카페 SNS광고) 미리보기 →
-          </a>
-
-          {/* 선택 첨부 — P1 부가 경로 (접힘) */}
-          <details className="rounded-lg bg-subtle px-3.5 py-3">
-            <summary className="flex cursor-pointer items-center justify-between text-xs text-neutral500">
-              <span>
-                제안서·견적서 / 메시지 첨부
-                <span className="ml-1.5 rounded bg-brand200 px-1.5 py-0.5 text-[10px] font-bold text-brand800">
-                  P1
-                </span>
-              </span>
-              <span>펼치기</span>
-            </summary>
-            <div className="mt-3 flex h-20 items-center justify-center rounded-lg border border-dashed border-neutral300 text-[11px] text-neutral500">
-              문서로 확인된 설명이 있으면 근거로 함께 대조해요 (선택)
-            </div>
-          </details>
         </div>
       </AppScreen>
     );

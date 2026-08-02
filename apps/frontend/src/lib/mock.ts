@@ -35,12 +35,12 @@ export const UNDERSTOOD_QUESTIONS: UnderstoodQuestion[] = [
   {
     key: "refundText",
     title: "환불 조건은\n어떻게 안내받으셨어요?",
-    options: ["효과 없으면 전액 환불", "부분 환불", "환불 안 됨", "잘 기억 안 나요"],
+    options: ["효과 없으면 전액 환불해줘요", "부분 환불만 돼요", "환불 안 돼요", "잘 기억 안 나요"],
   },
   {
     key: "terminationText",
     title: "중도 해지는\n가능하다고 들으셨나요?",
-    options: ["언제든 가능", "위약금 있음", "안 된다고 들음", "잘 기억 안 나요"],
+    options: ["언제든 가능해요", "위약금 있어요", "안 된다고 들었어요", "잘 기억 안 나요"],
   },
 ];
 
@@ -235,8 +235,8 @@ export const DEMO_CONTRACT: ContractDetail = {
     durationText: "1년",
     monthlyAmount: "5만원",
     totalAmount: "300만원 정도",
-    refundText: "효과 없으면 전액 환불",
-    terminationText: "언제든 가능",
+    refundText: "효과 없으면 전액 환불해줘요",
+    terminationText: "언제든 가능해요",
     sourceType: "USER_MEMORY",
   },
   signalCounts: { mismatch: 3, noBasis: 1, unclear: 2 },
@@ -399,9 +399,9 @@ export const DEMO_CONTRACT: ContractDetail = {
         page: 3,
         text: '"갑"이 귀책사유 없이 중도 해지하려는 경우 30일 전 서면 통지하여야 하며, 이미 집행·확정된 매체비와 제작비는 환불하지 않고, 잔여 계약기간에 해당하는 대행수수료의 70%를 중도해지 정산금으로 지급한다.',
       },
-      understood: "중도 해지 언제든 가능으로 이해",
+      understood: "중도 해지 언제든 가능하다고 이해",
       aiExplanation:
-        "중도 해지 시 잔여 대행수수료의 70%를 정산금으로 내고, 이미 집행된 비용은 돌려받지 못해요. ‘언제든 가능’으로 이해하신 것과 달라요.",
+        "중도 해지 시 잔여 대행수수료의 70%를 정산금으로 내고, 이미 집행된 비용은 돌려받지 못해요. ‘언제든 가능해요’로 이해하신 것과 달라요.",
       confidence: 0.9,
       officialBasis: "중도해지 정산금 비율은 분쟁 사례집에서 확인이 필요한 항목으로 다뤄집니다.",
       suggestions: [

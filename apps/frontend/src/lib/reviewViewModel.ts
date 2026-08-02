@@ -5,7 +5,32 @@ import type {
 } from "./adapter";
 import { displayText } from "./displayText";
 import { SIGNAL_META } from "./status";
+import type { UnderstoodKey } from "./understood";
 import type { ClauseCard, ContractDetail, DocClause } from "./types";
+
+const UNDERSTOOD_KEY_BY_EXTRACTED_FIELD: Partial<Record<string, UnderstoodKey>> = {
+  contract_start_date: "durationText",
+  contract_end_date: "durationText",
+  monthly_amount: "monthlyAmount",
+  contract_total_amount: "totalAmount",
+  refund_condition: "refundText",
+  early_termination_allowed: "terminationText",
+};
+
+function understoodKeyFor(item: LiveReviewItem): UnderstoodKey | undefined {
+  if (
+    item.type !== "MISMATCH"
+    || !/(사용자|사장님|내가).{0,16}(이해|알고|기억)/.test(item.plainExplanation)
+  ) {
+    return undefined;
+  }
+  const keys = new Set(
+    item.relatedExtractedFields
+      .map((field) => UNDERSTOOD_KEY_BY_EXTRACTED_FIELD[field])
+      .filter((key): key is UnderstoodKey => Boolean(key)),
+  );
+  return keys.size === 1 ? [...keys][0] : undefined;
+}
 
 export type ReviewDashboardData = Pick<
   ContractDetail,
@@ -42,6 +67,7 @@ export function liveReviewItemToClause(
         : "원문 근거를 찾지 못했습니다.",
     },
     understood: null,
+    understoodKey: understoodKeyFor(item),
     aiExplanation: item.plainExplanation,
     confidence: item.sourceConfidence ?? 0,
     officialBasis: item.basisText,

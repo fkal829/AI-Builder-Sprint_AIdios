@@ -3601,7 +3601,8 @@ class SupabaseAdapter:
                     client.table("review_items")
                     .select(
                         "id,contract_id,status,user_choice,"
-                        "suggestion_compromise,suggestion_request,category,original_text"
+                        "suggestion_compromise,suggestion_request,category,original_text,"
+                        "source_page,source_text"
                     )
                     .eq("contract_id", str(contract_id))
                     .in_("id", [str(item_id) for item_id in review_item_ids])
@@ -3664,6 +3665,7 @@ class SupabaseAdapter:
                         suggestion_request=item.request_text,
                         category=AgreementClauseCategory.OTHER,
                         original_text=item.source_text,
+                        source_page=item.source_page,
                     )
                 self._mock_adjustment_requests[record.id] = record
                 self._mock_audit_events.append(
@@ -3810,7 +3812,27 @@ class SupabaseAdapter:
         if not response.data:
             return None
         row = response.data[0] if isinstance(response.data, list) else response.data
-        return _public_adjustment_record_from_row(row)
+        public = _public_adjustment_record_from_row(row)
+        missing_original_ids = [
+            item.review_item_id
+            for item in public.request.items
+            if item.before_text == "원계약에서 확인되지 않아 추가 확인 필요"
+            or item.source_page is None
+        ]
+        if not missing_original_ids:
+            return public
+        try:
+            source_response = await asyncio.to_thread(
+                lambda: (
+                    client.table("review_items")
+                    .select("id,source_page,source_text")
+                    .in_("id", [str(item_id) for item_id in missing_original_ids])
+                    .execute()
+                )
+            )
+        except Exception as error:
+            raise ExternalStorageFailure("공개 조정 원문 조회에 실패했습니다.") from error
+        return _public_adjustment_with_source_text(public, source_response.data or [])
 
     async def open_public_adjustment_request(
         self,
@@ -5860,6 +5882,10 @@ def _review_item_for_adjustment(item: ReviewItem) -> ReviewItemForAdjustment:
         user_choice=item.user_choice,
         suggestion_compromise=item.suggestion_compromise,
         suggestion_request=item.suggestion_request,
+        original_text=(
+            item.source_text or "원계약에서 확인되지 않아 추가 확인 필요"
+        ),
+        source_page=item.source_page,
     )
 
 
@@ -5872,7 +5898,12 @@ def _review_item_for_adjustment_from_row(row: dict) -> ReviewItemForAdjustment:
         suggestion_compromise=row["suggestion_compromise"],
         suggestion_request=row["suggestion_request"],
         category=AgreementClauseCategory(row.get("category", "OTHER")),
-        original_text=row.get("original_text", "원계약에서 확인되지 않아 추가 확인 필요"),
+        original_text=(
+            row.get("source_text")
+            or row.get("original_text")
+            or "원계약에서 확인되지 않아 추가 확인 필요"
+        ),
+        source_page=(int(row["source_page"]) if row.get("source_page") is not None else None),
     )
 
 
@@ -5884,6 +5915,9 @@ def _adjustment_request_record_from_row(row: dict) -> AdjustmentRequestRecord:
             request_text=item["request_text"],
             category=AgreementClauseCategory(item.get("category", "OTHER")),
             before_text=item.get("before_text", "원계약에서 확인되지 않아 추가 확인 필요"),
+            source_page=(
+                int(item["source_page"]) if item.get("source_page") is not None else None
+            ),
         )
         for item in row["items"]
     )
@@ -5925,6 +5959,29 @@ def _public_adjustment_record_from_row(row: dict) -> PublicAdjustmentRecord:
         contract_title=row["contract_title"],
         request=_adjustment_request_record_from_row(row["request"]),
     )
+
+
+def _public_adjustment_with_source_text(
+    public: PublicAdjustmentRecord,
+    source_rows: Sequence[dict],
+) -> PublicAdjustmentRecord:
+    source_by_id = {
+        UUID(str(row["id"])): (
+            row["source_text"],
+            int(row["source_page"]) if row.get("source_page") is not None else None,
+        )
+        for row in source_rows
+        if isinstance(row.get("source_text"), str) and row["source_text"].strip()
+    }
+    items = tuple(
+        replace(
+            item,
+            before_text=source_by_id.get(item.review_item_id, (item.before_text, None))[0],
+            source_page=source_by_id.get(item.review_item_id, ("", item.source_page))[1],
+        )
+        for item in public.request.items
+    )
+    return replace(public, request=replace(public.request, items=items))
 
 
 def _final_clause_record_from_row(row: dict) -> FinalClauseRecord:

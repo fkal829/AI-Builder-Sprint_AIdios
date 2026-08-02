@@ -12,6 +12,9 @@ ORDINALITY_FIX_MIGRATION = MIGRATION.with_name(
 UNLIMITED_ITEMS_MIGRATION = MIGRATION.with_name(
     "20260802040000_remove_adjustment_item_count_limit.sql"
 )
+ORIGINAL_TEXT_SYNC_MIGRATION = MIGRATION.with_name(
+    "20260802050000_sync_adjustment_original_text.sql"
+)
 
 
 def test_user_selected_adjustment_migration_preserves_server_evidence() -> None:
@@ -73,3 +76,14 @@ def test_adjustment_item_limit_migration_preserves_nonempty_atomic_flow() -> Non
     assert "jsonb_array_length(items) >= 1" in sql
     assert "jsonb_array_length(items) between 1 and 4" not in sql
     assert "to service_role" in sql
+
+
+def test_adjustment_original_text_migration_backfills_and_syncs_source_evidence() -> None:
+    sql = ORIGINAL_TEXT_SYNC_MIGRATION.read_text(encoding="utf-8").lower()
+
+    assert "update public.review_items" in sql
+    assert "set original_text = source_text" in sql
+    assert "source_text is not null" in sql
+    assert "before insert on public.review_items" in sql
+    assert "new.original_text := new.source_text" in sql
+    assert "review_items_original_text_sync" in sql

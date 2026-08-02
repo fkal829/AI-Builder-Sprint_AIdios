@@ -95,6 +95,45 @@ test("live contract review keeps the five answers beside original-clause evidenc
   assert.match(viewer, /await selectionQueue\.current/);
 });
 
+test("understood answers only compare against their structured extracted field", async () => {
+  const [viewer, adapter, viewModel] = await Promise.all([
+    source("src/app/contracts/[id]/page.tsx"),
+    source("src/lib/adapter.ts"),
+    source("src/lib/reviewViewModel.ts"),
+  ]);
+
+  assert.match(adapter, /related_extracted_term_ids/);
+  assert.match(adapter, /extractedFieldById/);
+  assert.match(viewModel, /UNDERSTOOD_KEY_BY_EXTRACTED_FIELD/);
+  assert.match(viewModel, /item\.type !== "MISMATCH"/);
+  assert.match(viewModel, /item\.relatedExtractedFields/);
+  assert.match(viewer, /signal\.understoodKey/);
+  assert.doesNotMatch(viewer, /signal\.title[^;]*clause\.body/);
+  assert.doesNotMatch(viewer, /const candidates: Array<\[UnderstoodKey, RegExp\]>/);
+});
+
+test("public adjustment response renders the stored original clause text", async () => {
+  const [adapter, landingPage, respondPage, types] = await Promise.all([
+    source("src/lib/adapter.ts"),
+    source("src/app/r/[token]/page.tsx"),
+    source("src/app/r/[token]/respond/page.tsx"),
+    source("src/lib/types.ts"),
+  ]);
+
+  assert.match(adapter, /before_text: string \| null/);
+  assert.match(adapter, /source_page: number \| null/);
+  assert.match(adapter, /beforeText: item\.before_text \?\? undefined/);
+  assert.match(adapter, /sourcePage: item\.source_page \?\? undefined/);
+  assert.match(landingPage, /item\.beforeText/);
+  assert.match(landingPage, /원계약 해당 문구/);
+  assert.match(landingPage, /원계약 \{item\.sourcePage\}쪽/);
+  assert.match(landingPage, /item\.requestText/);
+  assert.match(respondPage, /it\.beforeText/);
+  assert.match(respondPage, /원본 계약서/);
+  assert.match(types, /조정 요청과 직접 관련된 원계약 문구/);
+  assert.doesNotMatch(adapter, /file_url[^]*ApiPublicAdjustment/);
+});
+
 test("live comparison shows every parsed clause on the left and selected requests on the right", async () => {
   const [viewer, request] = await Promise.all([
     source("src/app/contracts/[id]/page.tsx"),

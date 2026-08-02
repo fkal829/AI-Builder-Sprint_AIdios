@@ -2319,11 +2319,19 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [item_id, request_text]
+            required: [item_id, before_text, source_page, request_text]
             properties:
               item_id:
                 type: string
                 description: 공개 요청 범위에서만 유효한 불투명 항목 식별자
+              before_text:
+                type: [string, "null"]
+                minLength: 1
+                description: 조정 요청과 직접 관련된 원계약 문구. 기존 요청에 저장된 문구가 없으면 null
+              source_page:
+                type: [integer, "null"]
+                minimum: 1
+                description: before_text가 확인된 원계약의 1-based 페이지. 근거가 없으면 null
               request_text: {type: string}
     PublicAdjustmentResponse:
       allOf:

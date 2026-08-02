@@ -722,11 +722,7 @@ function ClauseOriginal({
 
                       {relatedSignals.length > 0 ? (
                         relatedSignals.map((signal) => {
-                          const comparison = understoodComparisonFor(
-                            clause,
-                            signal,
-                            understoodAnswers,
-                          );
+                          const comparison = understoodComparisonFor(signal, understoodAnswers);
                           return (
                             <section
                               key={signal.id}
@@ -822,26 +818,15 @@ type UnderstoodComparison = { label: string; value: string };
 
 /** 5문항 답변 중 해당 조항·확인 신호와 직접 관련된 답만 원문과 나란히 보여준다. */
 function understoodComparisonFor(
-  clause: DocClause,
   signal: ClauseData,
   answers: Partial<Record<UnderstoodKey, string>> | null,
 ): UnderstoodComparison | null {
-  const context = `${signal.title} ${signal.aiExplanation} ${clause.title} ${clause.body}`;
-  const candidates: Array<[UnderstoodKey, RegExp]> = [
-    ["refundText", /환불|반환|환급/],
-    ["terminationText", /중도.{0,3}(해지|해약)|해지 가능|해지 조건/],
-    ["monthlyAmount", /월 납부|월 금액|매달|월별|월 광고|월 이용/],
-    ["totalAmount", /총 계약금액|총액|전체 금액|총 부담/],
-    ["durationText", /계약.{0,4}기간|시작일|종료일|자동.{0,3}(갱신|연장)/],
-  ];
-  const matchedKey = candidates.find(([, pattern]) => pattern.test(context))?.[0];
-
-  if (matchedKey && answers) {
-    const answer = answers[matchedKey];
+  if (signal.understoodKey && answers) {
+    const answer = answers[signal.understoodKey];
     if (answer !== undefined) {
       const value = answer.trim();
       if (!value || value === UNKNOWN_ANSWER) return null;
-      return { label: UNDERSTOOD_LABELS[matchedKey], value };
+      return { label: UNDERSTOOD_LABELS[signal.understoodKey], value };
     }
   }
 

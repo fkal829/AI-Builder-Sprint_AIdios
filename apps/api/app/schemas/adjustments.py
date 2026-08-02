@@ -117,6 +117,8 @@ class AdjustmentResponseItem(BaseModel):
 
 class PublicAdjustmentItem(BaseModel):
     item_id: str = Field(min_length=1)
+    before_text: str | None = Field(min_length=1)
+    source_page: int | None = Field(ge=1)
     request_text: str = Field(min_length=1)
 
 

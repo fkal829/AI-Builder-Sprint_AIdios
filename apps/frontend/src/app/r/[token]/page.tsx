@@ -63,6 +63,34 @@ export default function AgencyRequestPage() {
             {req.contractTitle} · 조항 {req.items.length}건
           </p>
         </div>
+        <div className="flex flex-col gap-3 border-b border-neutral200 bg-subtle px-5 py-4">
+          <h2 className="text-[12px] font-black text-ink">조정 요청 내용</h2>
+          {req.items.map((item) => (
+            <section
+              key={item.clauseId}
+              className="rounded-lg border border-neutral200 bg-white p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold text-neutral500">원계약 해당 문구</p>
+                {item.sourcePage && (
+                  <span className="text-[10px] text-neutral500">
+                    원계약 {item.sourcePage}쪽
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[12px] leading-relaxed text-neutral700">
+                {item.beforeText
+                  ? `“${item.beforeText}”`
+                  : "원계약에서 확인되지 않아 추가 확인이 필요합니다."}
+              </p>
+              <div className="py-1 text-center text-[11px] text-neutral400">↓</div>
+              <p className="text-[10px] font-bold text-brand700">요청받은 변경사항</p>
+              <p className="mt-1 text-[12px] font-bold leading-relaxed text-ink">
+                “{item.requestText}”
+              </p>
+            </section>
+          ))}
+        </div>
         <div className="px-5 py-4">
           <button
             onClick={startResponse}

@@ -118,12 +118,12 @@ export default function PerformancePage() {
       .then((data) => {
         if (!alive) return;
         setPerformance(data);
-        const unfinished = [...data.reports]
-          .reverse()
-          .find((report) => report.status === "UPLOADED" || report.status === "EXTRACTED");
+        const unfinished = oldestUnfinishedReport(data.reports);
         if (unfinished) {
           setActiveReport(unfinished);
           setForm(formFromReport(unfinished));
+        } else {
+          setPeriod(suggestedUploadPeriod(data.reports));
         }
       })
       .catch((cause: unknown) => {
@@ -199,9 +199,11 @@ export default function PerformancePage() {
         issueNote: hasIssue ? issueNote.trim() : null,
         correctionReason: activeReport.revisionCount > 0 ? correctionReason.trim() : null,
       });
-      await reload();
-      setActiveReport(null);
-      setForm(emptyMetricForm());
+      const refreshed = await reload();
+      const nextUnfinished = oldestUnfinishedReport(refreshed.reports);
+      setActiveReport(nextUnfinished);
+      setForm(nextUnfinished ? formFromReport(nextUnfinished) : emptyMetricForm());
+      if (!nextUnfinished) setPeriod(suggestedUploadPeriod(refreshed.reports));
       setHasIssue(false);
       setIssueNote("");
       setCorrectionReason("");
@@ -233,7 +235,7 @@ export default function PerformancePage() {
     <AppScreen
       title="이행·광고효과 관리"
       size="wide"
-      backHref="/dashboard"
+      backHref="/manage"
       right={
         <span className="rounded bg-brand100 px-2 py-1 text-[10px] font-bold text-brand800">
           {isUsingMock ? "데모 데이터 모드" : "실 API 연결"}
@@ -287,7 +289,7 @@ export default function PerformancePage() {
                     type="month"
                     value={period}
                     onChange={(event) => setPeriod(event.target.value)}
-                    disabled={Boolean(working)}
+                    disabled={Boolean(working) || Boolean(activeReport)}
                     className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 text-[13px] text-ink disabled:opacity-50"
                   />
                 </label>
@@ -297,7 +299,7 @@ export default function PerformancePage() {
                     type="file"
                     accept="application/pdf,image/png,image/jpeg"
                     onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                    disabled={Boolean(working)}
+                    disabled={Boolean(working) || Boolean(activeReport)}
                     className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 py-2 text-[12px] text-neutral700 file:mr-3 file:border-0 file:bg-transparent file:font-bold"
                   />
                 </label>
@@ -305,7 +307,7 @@ export default function PerformancePage() {
               <button
                 type="button"
                 onClick={uploadAndExtract}
-                disabled={Boolean(working) || !period || !file}
+                disabled={Boolean(working) || Boolean(activeReport) || !period || !file}
                 className="h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white hover:bg-ink/90 disabled:opacity-40"
               >
                 {working === "uploading"
@@ -315,6 +317,11 @@ export default function PerformancePage() {
                     : "리포트 올리고 숫자 읽기"}
               </button>
               {file && <p className="text-[11px] font-bold text-neutral700">선택됨 · {file.name}</p>}
+              {activeReport && (
+                <p className="text-[11px] font-bold text-brand800">
+                  먼저 {activeReport.period} 리포트 확인을 마치면 다음 월을 등록할 수 있어요.
+                </p>
+              )}
             </div>
             <p className="mt-2 text-[11px] text-neutral500">
               원본은 비공개로 저장되며 월마다 한 건만 등록할 수 있어요. 분석 시작은 버튼을
@@ -892,6 +899,23 @@ function reportStatusLabel(status: PerformanceReport["status"]): string {
     FLAGGED: "확인 신호 있음",
   } satisfies Record<PerformanceReport["status"], string>;
   return labels[status];
+}
+
+function oldestUnfinishedReport(reports: PerformanceReport[]): PerformanceReport | null {
+  return [...reports]
+    .filter((report) => report.status === "UPLOADED" || report.status === "EXTRACTED")
+    .sort((left, right) => left.period.localeCompare(right.period))[0] ?? null;
+}
+
+function suggestedUploadPeriod(reports: PerformanceReport[]): string {
+  const latest = [...reports]
+    .sort((left, right) => left.period.localeCompare(right.period))
+    .at(-1);
+  if (!latest) return defaultPeriod();
+  const [year, month] = latest.period.split("-").map(Number);
+  return month === 12
+    ? `${String(year + 1).padStart(4, "0")}-01`
+    : `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}`;
 }
 
 function errorMessage(cause: unknown, fallback: string): string {

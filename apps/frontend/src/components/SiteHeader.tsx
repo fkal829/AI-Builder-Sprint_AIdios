@@ -15,7 +15,7 @@ const navItems = (contractId: string | null) => [
   {
     key: "manage",
     label: "이행 관리",
-    href: contractId ? `/contracts/${contractId}/performance` : "/dashboard",
+    href: "/manage",
   },
   { key: "performance", label: "광고효과", href: "/performance" },
   {
@@ -27,7 +27,11 @@ const navItems = (contractId: string | null) => [
 
 function activeKey(pathname: string): string {
   if (pathname.startsWith("/performance")) return "performance";
-  if (pathname.includes("/performance") || pathname.includes("/obligations")) return "manage";
+  if (
+    pathname.startsWith("/manage")
+    || pathname.includes("/performance")
+    || pathname.includes("/obligations")
+  ) return "manage";
   if (pathname.includes("/renewal")) return "renewal";
   if (pathname.startsWith("/dashboard") || pathname.startsWith("/contracts")) {
     return "contracts";

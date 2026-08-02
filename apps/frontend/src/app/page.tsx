@@ -7,14 +7,13 @@
    섹션마다 레이아웃을 달리해 반복 인상을 피한다. 데스크탑 우선 + 반응형.
    세션이 있으면 CTA를 '내 계약 보기'로 바꾼다.
    =========================================================================== */
-import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Logo";
 import { useSession } from "@/lib/useSession";
 import { signInAsGuest } from "@/lib/auth";
 import { isUsingMock } from "@/lib/adapter";
-import { DEMO_CONTRACT_ID, DEMO_TOKEN } from "@/lib/mock";
 
 export default function LandingPage() {
   const router = useRouter();
@@ -89,10 +88,11 @@ export default function LandingPage() {
           </div>
 
           <Preview
-            src={`/contracts/${DEMO_CONTRACT_ID}?preview=1`}
+            src="/previews/hero-viewer.png"
             label="계약서 원문(좌) · 분석 결과(우) 2단 뷰어"
-            w={1440}
-            h={1080}
+            w={2880}
+            h={2160}
+            priority
           />
         </section>
 
@@ -132,7 +132,9 @@ export default function LandingPage() {
                 title="올립니다"
                 tint
                 slot="계약서 PDF 업로드"
-                previewSrc="/contracts/new?preview=1"
+                previewSrc="/previews/step1-upload.png"
+                previewW={1104}
+                previewH={1136}
               >
                 대행사에서 받은 계약서 PDF를 그대로 올립니다. 사진으로 찍은 파일도 됩니다.
               </StepCard>
@@ -140,7 +142,9 @@ export default function LandingPage() {
                 n={2}
                 title="다섯 문항에 답합니다"
                 slot="계약 이해도 설문 5문항"
-                previewSrc="/contracts/new?phase=questions&preview=1"
+                previewSrc="/previews/step2-questions.png"
+                previewW={1800}
+                previewH={1400}
               >
                 총 얼마인지, 언제까지인지, 중간에 그만두면 어떻게 되는지. 모르시면 &lsquo;잘 모르겠다&rsquo;로
                 답하셔도 됩니다. 오히려 그게 중요한 신호입니다.
@@ -151,7 +155,9 @@ export default function LandingPage() {
                 n={3}
                 title="다른 곳을 짚어드립니다"
                 slot="확인 필요 조항 강조 + 하단 트레이"
-                previewSrc={`/contracts/${DEMO_CONTRACT_ID}?preview=1`}
+                previewSrc="/previews/step3-viewer.png"
+                previewW={2880}
+                previewH={1920}
               >
                 사장님이 이해한 조건과 계약서에 적힌 조건을 나란히 놓고 비교합니다. 어긋난 곳마다
                 확인 표시가 붙습니다.
@@ -161,7 +167,9 @@ export default function LandingPage() {
                 title="요청서를 보냅니다"
                 tint
                 slot="대행사가 링크를 열면 보이는 화면"
-                previewSrc={`/r/${DEMO_TOKEN}`}
+                previewSrc="/previews/step4-agency.png"
+                previewW={1344}
+                previewH={1260}
               >
                 조정 요청서를 만들어 링크로 드립니다. 대행사는 가입 없이 링크만 열면 되고, 보내는 것은
                 사장님이 직접 하십니다.
@@ -315,91 +323,42 @@ export default function LandingPage() {
 
 /* ── 서브 컴포넌트 ────────────────────────────────────────────── */
 
-/** 예시 화면 자리 — 실제 캡처가 들어갈 위치. 발표용으로 '예시 화면'임을 명시한다. */
-function ScreenPlaceholder({ label, className = "" }: { label: string; className?: string }) {
-  return (
-    <div className={`relative flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-brand300 bg-brand50 p-6 text-center ${className}`}>
-      <span className="absolute left-3.5 top-3.5 inline-flex items-center gap-1.5 rounded-full bg-brand800 px-3 py-1 text-[11px] font-bold text-white">
-        <span className="h-1.5 w-1.5 rounded-full bg-brand300" />
-        예시 화면
-      </span>
-      <span className="mt-4 text-sm font-bold text-neutral700">{label}</span>
-      <span className="text-xs text-neutral500">실제 화면이 이 자리에 들어갑니다</span>
-    </div>
-  );
-}
-
 /**
- * 실제 화면 미리보기 — mock 모드에서 실제 라우트를 iframe으로 축소해 보여준다.
- * iframe은 데스크탑 폭(w×h)으로 렌더한 뒤 컨테이너 폭에 맞춰 비율 축소한다.
- * 클릭은 막고(pointer-events-none) 안내용 배지를 얹는다.
- * mock이 아니거나 src가 없으면 정적 '예시 화면' 자리로 대체한다.
+ * 예시 화면 — public/previews에 저장한 실제 화면 캡처를 그대로 보여준다.
+ * 목업·실 API 어느 환경에서도 같은 이미지가 나오도록 정적 캡처만 쓴다.
+ * 화면을 크게 고치면 캡처도 다시 떠서 교체해야 한다.
  */
-function LivePreview({
-  src,
-  label,
-  w,
-  h,
-}: {
-  src: string;
-  label: string;
-  w: number;
-  h: number;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const update = () => setScale(el.clientWidth / w);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [w]);
-
-  return (
-    <div
-      ref={ref}
-      className="relative overflow-hidden rounded-2xl border border-neutral200 bg-white shadow-[0_1px_2px_rgba(16,54,90,0.04)]"
-      style={{ aspectRatio: `${w} / ${h}` }}
-    >
-      <span className="absolute left-3.5 top-3.5 z-10 inline-flex items-center gap-1.5 rounded-full bg-brand800 px-3 py-1 text-[11px] font-bold text-white shadow-sm">
-        <span className="h-1.5 w-1.5 rounded-full bg-brand300" />
-        예시 화면
-      </span>
-      {scale > 0 && (
-        <iframe
-          src={src}
-          title={label}
-          aria-label={`예시 화면 · ${label}`}
-          tabIndex={-1}
-          scrolling="no"
-          className="pointer-events-none absolute left-0 top-0 origin-top-left border-0"
-          style={{ width: w, height: h, transform: `scale(${scale})` }}
-        />
-      )}
-    </div>
-  );
-}
-
-/** 미리보기 자리 — mock+src면 실제 화면 iframe, 아니면 정적 '예시 화면' */
 function Preview({
   src,
   label,
   w,
   h,
-  className = "",
+  priority = false,
 }: {
   src: string;
   label: string;
   w: number;
   h: number;
-  className?: string;
+  /** 히어로처럼 첫 화면에 바로 보이는 이미지에만 켠다 */
+  priority?: boolean;
 }) {
-  if (isUsingMock) return <LivePreview src={src} label={label} w={w} h={h} />;
-  return <ScreenPlaceholder label={label} className={className || "aspect-[4/3]"} />;
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-neutral200 bg-white shadow-[0_1px_2px_rgba(16,54,90,0.04)]">
+      <span className="absolute left-3.5 top-3.5 z-10 inline-flex items-center gap-1.5 rounded-full bg-brand800 px-3 py-1 text-[11px] font-bold text-white shadow-sm">
+        <span className="h-1.5 w-1.5 rounded-full bg-brand300" />
+        예시 화면
+      </span>
+      <Image
+        src={src}
+        alt={`예시 화면 · ${label}`}
+        width={w}
+        height={h}
+        priority={priority}
+        sizes="(min-width: 1024px) 720px, 100vw"
+        className="block h-auto w-full"
+      />
+    </div>
+  );
 }
 
 function StepCard({
@@ -409,27 +368,26 @@ function StepCard({
   tint,
   slot,
   previewSrc,
+  previewW,
+  previewH,
 }: {
   n: number;
   title: string;
   children: React.ReactNode;
   tint?: boolean;
   slot?: string;
-  previewSrc?: string;
+  previewSrc: string;
+  previewW: number;
+  previewH: number;
 }) {
   return (
     <div className={`flex flex-col rounded-2xl border p-8 ${tint ? "border-brand200 bg-brand50" : "border-neutral200 bg-white shadow-[0_1px_2px_rgba(16,54,90,0.04)]"}`}>
       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand800 text-sm font-bold text-white">{n}</span>
       <h3 className="mt-4 text-xl font-black tracking-tight text-ink">{title}</h3>
       <p className="mt-2.5 text-[15px] leading-loose text-neutral700">{children}</p>
-      {slot &&
-        (previewSrc ? (
-          <div className="mt-6 flex-1">
-            <Preview src={previewSrc} label={slot} w={1440} h={960} />
-          </div>
-        ) : (
-          <ScreenPlaceholder label={slot} className="mt-6 min-h-[200px] flex-1" />
-        ))}
+      <div className="mt-6">
+        <Preview src={previewSrc} label={slot ?? title} w={previewW} h={previewH} />
+      </div>
     </div>
   );
 }

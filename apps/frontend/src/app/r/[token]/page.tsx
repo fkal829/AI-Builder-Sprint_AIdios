@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AgencyShell } from "@/components/AgencyShell";
 import { EmptyState } from "@/components/EmptyState";
-import { useAsync } from "@/lib/hooks";
 import { adapter } from "@/lib/adapter";
+import { displayText } from "@/lib/displayText";
+import { useAsync } from "@/lib/hooks";
 
 /* 대행사 ① 조정 요청서 열람 — 무가입·토큰 접근. */
 export default function AgencyRequestPage() {
@@ -80,13 +81,13 @@ export default function AgencyRequestPage() {
               </div>
               <p className="mt-1 text-[12px] leading-relaxed text-neutral700">
                 {item.beforeText
-                  ? `“${item.beforeText}”`
+                  ? `“${displayText(item.beforeText)}”`
                   : "원계약에서 확인되지 않아 추가 확인이 필요합니다."}
               </p>
               <div className="py-1 text-center text-[11px] text-neutral400">↓</div>
               <p className="text-[10px] font-bold text-brand700">요청받은 변경사항</p>
               <p className="mt-1 text-[12px] font-bold leading-relaxed text-ink">
-                “{item.requestText}”
+                “{displayText(item.requestText)}”
               </p>
             </section>
           ))}

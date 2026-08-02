@@ -174,16 +174,36 @@ test("live comparison shows every parsed clause on the left and selected request
 });
 
 test("live contract text decodes escaped quotation marks without rendering HTML", async () => {
-  const [viewModel, textFormatter] = await Promise.all([
+  const [
+    viewModel,
+    textFormatter,
+    revisionPage,
+    landingPage,
+    respondPage,
+    performancePage,
+  ] = await Promise.all([
     source("src/lib/reviewViewModel.ts"),
     source("src/lib/displayText.ts"),
+    source("src/app/contracts/[id]/revision/page.tsx"),
+    source("src/app/r/[token]/page.tsx"),
+    source("src/app/r/[token]/respond/page.tsx"),
+    source("src/app/contracts/[id]/performance/page.tsx"),
   ]);
 
   assert.match(textFormatter, /String\.fromCodePoint/);
   assert.match(textFormatter, /quot: '\"'/);
+  assert.match(textFormatter, /pass < 2/);
   assert.match(viewModel, /displayText\(clause\.sourceText\)/);
   assert.match(viewModel, /displayText\(item\.sourceText\)/);
-  assert.doesNotMatch(viewModel, /dangerouslySetInnerHTML/);
+  assert.match(revisionPage, /displayText\(item\.sourceText\)/);
+  assert.match(landingPage, /displayText\(item\.beforeText\)/);
+  assert.match(respondPage, /displayText\(it\.beforeText\)/);
+  assert.match(performancePage, /displayText\(candidate\.sourceText\)/);
+  assert.match(performancePage, /displayText\(basis\.sourceText\)/);
+  assert.match(performancePage, /displayText\(obligation\.sourceText\)/);
+  for (const page of [viewModel, revisionPage, landingPage, respondPage, performancePage]) {
+    assert.doesNotMatch(page, /dangerouslySetInnerHTML/);
+  }
 });
 
 test("public adjustment links are restored, copied explicitly, and never auto-sent", async () => {

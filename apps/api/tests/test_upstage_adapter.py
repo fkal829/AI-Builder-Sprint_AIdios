@@ -236,6 +236,38 @@ def test_document_parse_keeps_pages_elements_and_coordinates() -> None:
     assert parsed.elements[0].coordinates[0] == (0.1, 0.1)
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        '제1조 &quot;업무&quot;',
+        {"text": '제1조 &#34;업무&#34;'},
+        {"markdown": '제1조 &amp;quot;업무&amp;quot;'},
+        {"html": '<p>제1조 &quot;업무&quot;</p>'},
+    ],
+)
+def test_document_parse_decodes_escaped_quotation_marks(content: object) -> None:
+    parsed = _parsed_document_from_document_parse(
+        {
+            "model": "document-parse",
+            "elements": [
+                {
+                    "page": 1,
+                    "content": content,
+                    "coordinates": [
+                        {"x": 0.1, "y": 0.1},
+                        {"x": 0.9, "y": 0.1},
+                        {"x": 0.9, "y": 0.2},
+                        {"x": 0.1, "y": 0.2},
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert parsed.pages[0].text == '제1조 "업무"'
+    assert parsed.elements[0].text == '제1조 "업무"'
+
+
 async def test_live_extract_uses_single_pdf_item_and_builtin_evidence_metadata(
     monkeypatch,
     caplog,

@@ -4,6 +4,7 @@ import logging
 import re
 from collections import defaultdict
 from datetime import UTC, datetime
+from html import unescape
 from time import perf_counter
 from typing import Any, Literal
 
@@ -456,15 +457,25 @@ def _parsed_document_from_document_parse(payload: dict[str, Any]) -> ParsedDocum
 
 def _content_text(content: Any) -> str:
     if isinstance(content, str):
-        return content.strip()
+        return _unescape_content_text(content)
     if isinstance(content, dict):
         for key in ("text", "markdown", "html"):
             value = content.get(key)
             if isinstance(value, str) and value.strip():
                 if key == "html":
-                    return re.sub(r"<[^>]+>", " ", value).strip()
-                return value.strip()
+                    value = re.sub(r"<[^>]+>", " ", value)
+                return _unescape_content_text(value)
     return ""
+
+
+def _unescape_content_text(value: str) -> str:
+    decoded = value
+    for _ in range(2):
+        unescaped = unescape(decoded)
+        if unescaped == decoded:
+            break
+        decoded = unescaped
+    return decoded.strip()
 
 
 def _mock_terms(

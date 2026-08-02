@@ -12,7 +12,7 @@ const NAMED_HTML_ENTITIES: Record<string, string> = {
  * This returns an ordinary string for React to render as a text node. It must not
  * be paired with dangerouslySetInnerHTML: contract text is untrusted content.
  */
-export function displayText(value: string): string {
+function decodeHtmlEntities(value: string): string {
   return value.replace(
     /&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi,
     (
@@ -39,4 +39,14 @@ export function displayText(value: string): string {
       return NAMED_HTML_ENTITIES[named?.toLowerCase() ?? ""] ?? entity;
     },
   );
+}
+
+export function displayText(value: string): string {
+  let decoded = value;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const next = decodeHtmlEntities(decoded);
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded;
 }

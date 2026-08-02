@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { AppScreen, CTAButton } from "@/components/AppScreen";
 import { FileDropzone } from "@/components/FileDropzone";
 import { adapter, isUsingMock, type RevisedContractReview } from "@/lib/adapter";
+import { displayText } from "@/lib/displayText";
 
 export default function RevisedContractPage() {
   const { id } = useParams<{ id: string }>();
@@ -153,11 +154,11 @@ export default function RevisedContractPage() {
                     </span>
                   </span>
                   <span className="mt-1 block text-[13px] font-bold leading-relaxed text-ink">
-                    “{item.expectedText}”
+                    “{displayText(item.expectedText)}”
                   </span>
                   {item.sourceText ? (
                     <span className="mt-2 block rounded-md bg-subtle px-3 py-2 text-[11px] leading-relaxed text-neutral700">
-                      수정본 {item.sourcePage}쪽: “{item.sourceText}”
+                      수정본 {item.sourcePage}쪽: “{displayText(item.sourceText)}”
                     </span>
                   ) : (
                     <span className="mt-2 block text-[11px] text-neutral500">

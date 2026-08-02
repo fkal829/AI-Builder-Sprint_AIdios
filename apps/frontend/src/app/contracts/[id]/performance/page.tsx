@@ -26,6 +26,7 @@ import {
   type PerformanceMetricUnit,
   type PerformanceReport,
 } from "@/lib/adapter";
+import { displayText } from "@/lib/displayText";
 
 type EvidenceMetricField = {
   key: string;
@@ -546,7 +547,7 @@ function MetricConfirmation({
                   </div>
                   {candidate.sourceText ? (
                     <p className="mt-1 text-[11px] leading-relaxed text-neutral600">
-                      {candidate.sourcePage}쪽 “{candidate.sourceText}”
+                      {candidate.sourcePage}쪽 “{displayText(candidate.sourceText)}”
                     </p>
                   ) : (
                     <p className="mt-1 text-[11px] text-neutral500">리포트 원문에서 확인하지 못했어요.</p>
@@ -883,7 +884,7 @@ function FlagCard({ flag, inquiry }: { flag: PerformanceFlag; inquiry: string | 
       </div>
       {flag.basisSnapshots.map((basis) => (
         <p key={`${basis.sourcePage}-${basis.sourceText}`} className="mt-2 text-[10px] leading-relaxed text-neutral500">
-          계약서 {basis.sourcePage}쪽 “{basis.sourceText}” · 근거 확신도 {Math.round(basis.confidence * 100)}%
+          계약서 {basis.sourcePage}쪽 “{displayText(basis.sourceText)}” · 근거 확신도 {Math.round(basis.confidence * 100)}%
         </p>
       ))}
       {inquiry && (
@@ -991,7 +992,7 @@ function ObligationPanel({ contractId }: { contractId: string }) {
       <div className="mt-2 rounded-lg bg-subtle p-3.5">
         <div className="text-[11px] text-neutral500">기한 {obligation.dueDate}</div>
         <p className="mt-2 text-[12px] leading-relaxed text-neutral700">
-          계약서 {obligation.sourcePage}쪽: “{obligation.sourceText}”
+          계약서 {obligation.sourcePage}쪽: “{displayText(obligation.sourceText)}”
         </p>
         <div className="mt-1 text-[10px] text-neutral500">
           원문 근거 확신도 {Math.round(obligation.confidence * 100)}%

@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AgencyShell } from "@/components/AgencyShell";
-import { useAsync } from "@/lib/hooks";
 import { adapter } from "@/lib/adapter";
+import { displayText } from "@/lib/displayText";
+import { useAsync } from "@/lib/hooks";
 import type { AgencyDecision } from "@/lib/types";
 
 type ItemState = { decision: AgencyDecision | null; reason: string; counter: string };
@@ -105,7 +106,7 @@ export default function AgencyRespondPage() {
                   </div>
                   <p className="mt-1 text-[12px] leading-relaxed text-neutral700">
                     {it.beforeText
-                      ? `“${it.beforeText}”`
+                      ? `“${displayText(it.beforeText)}”`
                       : "원계약에서 확인되지 않아 추가 확인이 필요합니다."}
                   </p>
                 </div>
@@ -121,7 +122,7 @@ export default function AgencyRespondPage() {
                       변경사항 확인
                     </span>
                     <p className="mt-1 text-[13px] font-bold text-ink">
-                      “{it.requestText}”
+                      “{displayText(it.requestText)}”
                     </p>
                   </div>
                   {it.officialBasis && (
@@ -132,7 +133,7 @@ export default function AgencyRespondPage() {
                 </div>
                 {it.officialBasis && (
                   <p className="mt-1.5 text-[11px] text-neutral500">
-                    {it.officialBasis}
+                    {displayText(it.officialBasis)}
                   </p>
                 )}
 

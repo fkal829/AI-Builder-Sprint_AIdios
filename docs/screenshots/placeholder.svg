@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" role="img" aria-labelledby="title description">
+  <title id="title">단디계약 실제 화면 캡처 자리</title>
+  <desc id="description">실제 운영 화면 캡처로 교체할 위치를 나타내는 placeholder</desc>
+  <rect width="1440" height="900" rx="32" fill="#f7f9fb" />
+  <rect x="2" y="2" width="1436" height="896" rx="30" fill="none" stroke="#d8e0e8" stroke-width="4" stroke-dasharray="18 14" />
+  <circle cx="690" cy="370" r="58" fill="#10365a" />
+  <circle cx="750" cy="370" r="58" fill="#4d9bdb" />
+  <path d="M720 318a58 58 0 0 0 0 104a58 58 0 0 0 0-104Z" fill="#9ed8f7" />
+  <text x="720" y="505" text-anchor="middle" fill="#10365a" font-family="Arial, sans-serif" font-size="42" font-weight="700">실제 화면 캡처</text>
+  <text x="720" y="565" text-anchor="middle" fill="#60758a" font-family="Arial, sans-serif" font-size="28">지정된 PNG 파일로 교체해 주세요</text>
+</svg>

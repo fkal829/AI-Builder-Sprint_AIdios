@@ -83,6 +83,18 @@ def confirmed_payload() -> PerformanceConfirmedPayload:
         inquiries=None,
         reservations=None,
         purchases=None,
+        metric_items=[
+            {"key": "ad_spend", "label": "광고비", "value": 10_001, "unit": "KRW"},
+            {
+                "key": "impressions",
+                "label": "노출",
+                "value": 10_000,
+                "unit": "COUNT",
+            },
+            {"key": "clicks", "label": "클릭", "value": 300, "unit": "COUNT"},
+            {"key": "ctr", "label": "클릭률", "value": None, "unit": "PERCENT"},
+            {"key": "cpc", "label": "클릭당 비용", "value": None, "unit": "KRW"},
+        ],
     )
 
 
@@ -207,6 +219,12 @@ async def test_live_confirm_returns_the_rpc_snapshot_without_followup_reads(monk
     assert result.report is not None
     assert result.report.current_revision == stored_revision
     assert len(client.calls) == 1
+    rpc_items = {
+        item["key"]: item
+        for item in client.calls[0][1]["p_confirmed_payload"]["metric_items"]
+    }
+    assert rpc_items["ctr"]["value"] == 3
+    assert rpc_items["cpc"]["value"] == 33
 
 
 @pytest.mark.asyncio

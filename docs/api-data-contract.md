@@ -792,6 +792,11 @@ timeout·HTTP·Parse·AI 스키마 실패를 고정 샘플로 대체하지 않�
 노출하지 않는다. 추출 후보 각 필드는 `value`, `source_page`,
 `source_text`, `confidence`, `verification_status`를 가진다. 원문에서 찾지 못한
 `published_content_count`나 다른 지표를 행·URL 수로 추정하지 않고 `NOT_FOUND`로 둔다.
+기존 8개 required 후보는 그대로 두고 `ad_spend`와 `clicks`를 optional 후보로 추가해
+이전 추출 payload도 계속 유효하게 읽는다. AI는 스키마에 없는 임의의 사용자 정의 지표를
+발견했다는 이유만으로 추출 payload에 추가하지 않는다. 다만 v2 Solar strict output은
+10개 후보를 모두 요구하고, 광고비·클릭이 원문에 없으면 해당 후보도 `NOT_FOUND`로
+반환한다. optional은 저장된 v1 payload 역직렬화를 위한 공개 계약 규칙이다.
 
 ### 14.4 확정 지표·반응률 결정 규칙
 
@@ -804,7 +809,23 @@ timeout·HTTP·Parse·AI 스키마 실패를 고정 샘플로 대체하지 않�
 | 리포트 선택 | `follower_net_change` | nullable 정수, 음수 허용 |
 | 계약 대조 | `published_content_count` | nullable 0 이상 정수, `0`과 `null` 구분 |
 | 소유자 선택 | `inquiries`, `reservations`, `purchases` | nullable 0 이상 정수 |
+| 편집 지표 | `metric_items` | 입력에서 생략 시 `[]`, 최대 50개; 응답 직렬화에는 `[]`도 포함 |
 | 서버 파생 | `engagement_rate` | 클라이언트 입력 금지 |
+
+`metric_items`의 항목은 정확히 `{key,label,value,unit}` 네 필드만 가진다. `key`는
+1~64자의 소문자 snake_case slug, `label`은 trim 후 1~50자이며 제어문자를 허용하지
+않는다. 같은 배열에서 key와 대소문자를 무시한 label은 각각 고유해야 한다. `value`는
+nullable 0 이상 숫자이고 소수점 이하 최대 6자리이며, `unit`은
+`KRW|COUNT|PERCENT|NUMBER` 중 하나다. `COUNT`와 `KRW` 값은 정수만 허용한다.
+
+기본 표시 순서와 canonical 단위는 `ad_spend/KRW` → `impressions/COUNT` →
+`clicks/COUNT` → `ctr/PERCENT` → `cpc/KRW` →
+`published_content_count/COUNT`다. `ctr`은 `clicks / impressions * 100`을 소수
+2자리 `ROUND_HALF_UP`, `cpc`는 `ad_spend / clicks`를 1원 단위 `ROUND_HALF_UP`으로
+결정 계산한다. 필요한 값이 `null`이거나 분모가 0이면 해당 파생값은 `null`이다.
+클라이언트가 보낸 `ctr`·`cpc` 값을 그대로 확정하지 않는다.
+`metric_items.impressions`와 `metric_items.published_content_count`에 non-null 값을
+보내면 각각 기존 confirmed field의 값과 같아야 한다.
 
 `published_content_count`는 리포트에 명시되었거나 소유자가 확인·입력한 값만 저장한다.
 AI 후보가 있더라도 소유자가 확정한 값만 비교한다. `null`이면 수량 신호를 만들지 않는다.
@@ -840,6 +861,8 @@ OpenAPI에 반영하되, 신호 계산과 DB 검증은 직렬화 전 `Decimal` �
   비어 있지 않은 정정 사유가 있을 때 version N+1을 만든다.
 - version 2 이상은 같은 report의 바로 전 revision을 `corrected_from_revision_id`로
   참조한다. 기존 revision·flag·문의 문안을 UPDATE·DELETE하지 않는다.
+- `metric_items` 추가와 이름·값 수정, 현재 목록에서 삭제하는 작업도 같은 PATCH가 만드는
+  새 confirmed payload snapshot에만 반영한다. 삭제된 항목은 과거 revision에 남는다.
 - 가장 최근에 확정된 월만 정정한다. 더 뒤의 확정 report가 있으면
   `409 REPORT_CORRECTION_DEPENDENCY_EXISTS`이며 연쇄 재계산하지 않는다.
 - `expected_revision`이 다르면 `409 REPORT_REVISION_CONFLICT`이고 새 revision을 만들지
@@ -863,6 +886,10 @@ terminal 값을 전이하거나 덮어쓰지 않고 새 revision을 추가한다
 최신 revision에 따라 `CONFIRMED`와 `FLAGGED` 사이에서 바뀔 수 있다. 조회·집계·대조에는
 각 월의 최신 non-superseded revision만 한 번 포함하고 과거 revision은 감사 이력으로
 보존한다.
+
+사용자 추가 `metric_items`는 일반 기록·조회 대상일 뿐 `engagement_rate`, 계약 확인 신호,
+문의 문안에 자동 반영하지 않는다. 해당 의미를 제품 규칙으로 승격하는 별도 계약 변경이
+있기 전에는 key 이름만 보고 계산이나 flag를 추론하지 않는다.
 
 공통 코드는 `PerformanceReportStatus`와
 `PerformanceStateEntityType.PERFORMANCE_REPORT`를 별도로 선언한다. 16.4는 범용
@@ -917,6 +944,12 @@ PERFORMANCE_REPORT_CORRECTED, PERFORMANCE_REPORT_EXTRACTION_RECOVERED
 업로드는 Document·report·감사 이벤트, 추출은 현재 attempt의 payload·상태·감사 이벤트,
 확정·정정은 revision·flag·문의 snapshot·현재 projection·감사 이벤트를 각각 원자적으로
 저장한다. 멱등 재생은 revision·flag·문안·감사 이벤트를 중복 생성하지 않는다.
+
+`performance_report_revisions.confirmed_payload`에 `metric_items`가 있으면 DB의 immutable
+검증 helper와 CHECK가 배열 shape·최대 50개·key/label 중복·unit·숫자 기본 제약을
+검사한다. 기존 revision에 키가 없는 경우는 legacy payload로 허용하고 읽기 경계에서
+빈 배열로 정규화한다. append-only 감사 이력을 지키기 위해 과거 row를 backfill하거나
+UPDATE하지 않으며, 기존 confirmation RPC는 JSONB snapshot 저장 경계를 그대로 사용한다.
 
 원본 리포트, 전체 OCR 텍스트, AI 입출력, 확정 지표, 정정 사유, 사용자 이상 사유와 문의
 문안을 로그에 남기지 않는다. Storage 경로·서명 URL·개인 연락처에 적용하던 기존 마스킹과

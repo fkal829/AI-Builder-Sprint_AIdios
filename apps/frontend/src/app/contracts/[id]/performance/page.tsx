@@ -10,88 +10,168 @@ import { StatTile } from "@/components/StatTile";
 import { useAsync } from "@/lib/hooks";
 import {
   adapter,
+  calculatePerformanceCpc,
+  calculatePerformanceCtr,
+  createPerformanceBaseMetricItems,
   isUsingMock,
+  performanceMetricValue,
+  PERFORMANCE_BASE_METRICS,
   type ContractPerformance,
   type LiveObligation,
+  type PerformanceCanonicalMetricKey,
   type PerformanceConfirmedPayload,
   type PerformanceFlag,
+  type PerformanceMetricItem,
   type PerformanceMetricKey,
+  type PerformanceMetricUnit,
   type PerformanceReport,
 } from "@/lib/adapter";
 
-type MetricField = {
-  key: keyof PerformanceConfirmedPayload;
-  extractedKey?: PerformanceMetricKey;
+type EvidenceMetricField = {
+  key: string;
+  extractedKey: PerformanceMetricKey;
   label: string;
-  required?: boolean;
-  signed?: boolean;
 };
 
-const METRIC_FIELDS: MetricField[] = [
-  { key: "impressions", extractedKey: "impressions", label: "노출", required: true },
-  { key: "likes", extractedKey: "likes", label: "좋아요", required: true },
-  { key: "comments", extractedKey: "comments", label: "댓글", required: true },
-  { key: "reach", extractedKey: "reach", label: "도달" },
-  { key: "saves", extractedKey: "saves", label: "저장" },
-  { key: "shares", extractedKey: "shares", label: "공유" },
+const EVIDENCE_METRIC_FIELDS: EvidenceMetricField[] = [
+  { key: "ad_spend", extractedKey: "adSpend", label: "집행 광고비" },
+  { key: "impressions", extractedKey: "impressions", label: "노출 수" },
+  { key: "clicks", extractedKey: "clicks", label: "클릭 수" },
   {
-    key: "followerNetChange",
-    extractedKey: "followerNetChange",
-    label: "팔로워 순증",
-    signed: true,
-  },
-  {
-    key: "publishedContentCount",
+    key: "published_content_count",
     extractedKey: "publishedContentCount",
     label: "게시물 수",
   },
-  { key: "inquiries", label: "문의" },
-  { key: "reservations", label: "예약" },
-  { key: "purchases", label: "구매" },
 ];
 
-type MetricForm = Record<keyof PerformanceConfirmedPayload, string>;
+type MetricFormItem = Omit<PerformanceMetricItem, "value"> & { value: string };
+type MetricForm = MetricFormItem[];
 type WorkingAction = "loading" | "uploading" | "extracting" | "saving" | null;
 
+const CANONICAL_UNITS = new Map<string, PerformanceMetricUnit>(
+  PERFORMANCE_BASE_METRICS.map((metric) => [metric.key, metric.unit] as const),
+);
+const DERIVED_METRIC_KEYS = new Set(["ctr", "cpc"]);
+const METRIC_UNIT_LABELS = {
+  KRW: "원",
+  COUNT: "개수",
+  PERCENT: "%",
+  NUMBER: "숫자",
+} satisfies Record<PerformanceMetricUnit, string>;
+const METRIC_UNIT_OPTIONS = Object.entries(METRIC_UNIT_LABELS) as [
+  PerformanceMetricUnit,
+  string,
+][];
+
+function toFormItems(items: readonly PerformanceMetricItem[]): MetricForm {
+  return applyDerivedMetrics(items.map((item): MetricFormItem => ({
+    ...item,
+    unit: CANONICAL_UNITS.get(item.key) ?? item.unit,
+    value: item.value === null ? "" : String(item.value),
+  })));
+}
+
 function emptyMetricForm(): MetricForm {
-  return Object.fromEntries(METRIC_FIELDS.map((field) => [field.key, ""])) as MetricForm;
+  return toFormItems(createPerformanceBaseMetricItems());
+}
+
+function rawMetricValue(form: MetricForm, key: string): number | null {
+  const raw = form.find((item) => item.key === key)?.value.trim() ?? "";
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function applyDerivedMetrics(form: MetricForm): MetricForm {
+  const ctr = calculatePerformanceCtr(
+    rawMetricValue(form, "clicks"),
+    rawMetricValue(form, "impressions"),
+  );
+  const cpc = calculatePerformanceCpc(
+    rawMetricValue(form, "ad_spend"),
+    rawMetricValue(form, "clicks"),
+  );
+  return form.map((item): MetricFormItem => {
+    if (item.key === "ctr") {
+      return { ...item, unit: "PERCENT", value: ctr === null ? "" : ctr.toFixed(2) };
+    }
+    if (item.key === "cpc") {
+      return { ...item, unit: "KRW", value: cpc === null ? "" : String(cpc) };
+    }
+    return item;
+  });
 }
 
 function formFromReport(report: PerformanceReport): MetricForm {
   if (report.currentRevision) {
-    return Object.fromEntries(
-      METRIC_FIELDS.map((field) => {
-        const value = report.currentRevision!.confirmedPayload[field.key];
-        return [field.key, value === null ? "" : String(value)];
-      }),
-    ) as MetricForm;
+    return toFormItems(report.currentRevision.confirmedPayload.metricItems);
   }
-  return Object.fromEntries(
-    METRIC_FIELDS.map((field) => {
-      const value = field.extractedKey
-        ? report.extractedPayload?.[field.extractedKey].value ?? null
-        : null;
-      return [field.key, value === null ? "" : String(value)];
-    }),
-  ) as MetricForm;
+  return toFormItems(createPerformanceBaseMetricItems({
+    ad_spend: report.extractedPayload?.adSpend.value ?? null,
+    impressions: report.extractedPayload?.impressions.value ?? null,
+    clicks: report.extractedPayload?.clicks.value ?? null,
+    published_content_count: report.extractedPayload?.publishedContentCount.value ?? null,
+  }));
 }
 
 function parseMetricForm(form: MetricForm): PerformanceConfirmedPayload {
-  const parsed = Object.fromEntries(
-    METRIC_FIELDS.map((field) => {
-      const raw = form[field.key].trim();
-      if (!raw) {
-        if (field.required) throw new Error(`${field.label} 값을 입력해주세요.`);
-        return [field.key, null];
-      }
-      if (!/^-?\d+$/.test(raw)) throw new Error(`${field.label}은 정수로 입력해주세요.`);
-      const value = Number(raw);
-      if (!Number.isSafeInteger(value)) throw new Error(`${field.label} 값이 너무 큽니다.`);
-      if (!field.signed && value < 0) throw new Error(`${field.label}은 0 이상이어야 합니다.`);
-      return [field.key, value];
-    }),
-  );
-  return parsed as PerformanceConfirmedPayload;
+  if (form.length === 0) throw new Error("하나 이상의 지표를 추가해주세요.");
+  const seenKeys = new Set<string>();
+  const seenLabels = new Set<string>();
+  const metricItems = applyDerivedMetrics(form).map((item): PerformanceMetricItem => {
+    const normalizedKey = item.key.trim().toLowerCase();
+    if (seenKeys.has(normalizedKey)) throw new Error("지표 key는 중복될 수 없습니다.");
+    seenKeys.add(normalizedKey);
+    const label = item.label.trim();
+    if (!label) throw new Error("지표 이름을 입력해주세요.");
+    if (label.length > 50) throw new Error("지표 이름은 50자 이하로 입력해주세요.");
+    const normalizedLabel = label.toLocaleLowerCase();
+    if (seenLabels.has(normalizedLabel)) throw new Error("지표 이름은 중복될 수 없습니다.");
+    seenLabels.add(normalizedLabel);
+    const unit = CANONICAL_UNITS.get(item.key) ?? item.unit;
+    const raw = item.value.trim();
+    if (!raw) return { ...item, label, unit, value: null };
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error(`${label} 값을 숫자로 입력해주세요.`);
+    if ((unit === "KRW" || unit === "COUNT") && !Number.isSafeInteger(value)) {
+      throw new Error(`${label}은 정수로 입력해주세요.`);
+    }
+    if (value < 0) {
+      throw new Error(`${label}은 0 이상이어야 합니다.`);
+    }
+    return {
+      ...item,
+      label,
+      unit,
+      value,
+    };
+  });
+  const impressions = performanceMetricValue(metricItems, "impressions");
+  const publishedContentCount = performanceMetricValue(metricItems, "published_content_count");
+  return {
+    impressions: impressions ?? 0,
+    likes: 0,
+    comments: 0,
+    reach: null,
+    saves: null,
+    shares: null,
+    followerNetChange: null,
+    publishedContentCount,
+    inquiries: null,
+    reservations: null,
+    purchases: null,
+    metricItems,
+  };
+}
+
+function sumConfirmedMetric(
+  points: ContractPerformance["confirmedSeries"],
+  key: PerformanceCanonicalMetricKey,
+): number | null {
+  return points.reduce<number | null>((sum, point) => {
+    const value = performanceMetricValue(point.confirmedPayload.metricItems, key);
+    return sum === null || value === null ? null : sum + value;
+  }, 0);
 }
 
 function defaultPeriod(): string {
@@ -415,6 +495,28 @@ function MetricConfirmation({
   onCancel?: () => void;
 }) {
   const correcting = report.revisionCount > 0;
+  const updateMetric = (
+    key: string,
+    patch: Partial<Pick<MetricFormItem, "label" | "value" | "unit">>,
+  ) => {
+    setForm(applyDerivedMetrics(form.map((item) => (
+      item.key === key ? { ...item, ...patch } : item
+    ))));
+  };
+  const removeMetric = (key: string) => {
+    setForm(applyDerivedMetrics(form.filter((item) => item.key !== key)));
+  };
+  const addMetric = () => {
+    setForm(applyDerivedMetrics([
+      ...form,
+      {
+        key: `custom_${crypto.randomUUID().replaceAll("-", "_")}`,
+        label: "새 지표",
+        value: "",
+        unit: "NUMBER",
+      },
+    ]));
+  };
   return (
     <section className="flex flex-col gap-2">
       <SectionTitle>
@@ -423,8 +525,8 @@ function MetricConfirmation({
       <Card>
         {report.extractedPayload && !correcting && (
           <div className="mb-4 grid gap-2 lg:grid-cols-2">
-            {METRIC_FIELDS.filter((field) => field.extractedKey).map((field) => {
-              const candidate = report.extractedPayload![field.extractedKey!];
+            {EVIDENCE_METRIC_FIELDS.map((field) => {
+              const candidate = report.extractedPayload![field.extractedKey];
               return (
                 <div key={field.key} className="rounded-lg border border-neutral200 bg-subtle p-3">
                   <div className="flex items-center justify-between gap-3">
@@ -448,21 +550,89 @@ function MetricConfirmation({
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {METRIC_FIELDS.map((field) => (
-            <label key={field.key} className="text-[11px] font-bold text-neutral700">
-              {field.label}{field.required ? " *" : ""}
-              <input
-                inputMode="numeric"
-                value={form[field.key]}
-                onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
-                placeholder={field.required ? "필수" : "없으면 비워두기"}
-                disabled={working}
-                className="mt-1 h-10 w-full rounded-lg border border-neutral300 px-3 text-[13px] font-bold text-ink disabled:opacity-50"
-              />
-            </label>
-          ))}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {form.map((item) => {
+            const canonicalUnit = CANONICAL_UNITS.get(item.key);
+            const derived = DERIVED_METRIC_KEYS.has(item.key);
+            return (
+              <div key={item.key} className="rounded-lg border border-neutral200 bg-white p-3">
+                <div className="flex items-start gap-2">
+                  <label className="min-w-0 flex-1 text-[10px] font-bold text-neutral500">
+                    지표 이름
+                    <input
+                      value={item.label}
+                      onChange={(event) => updateMetric(item.key, { label: event.target.value })}
+                      maxLength={50}
+                      disabled={working}
+                      className="mt-1 h-9 w-full rounded-lg border border-neutral300 px-2.5 text-[12px] font-bold text-ink disabled:opacity-50"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => removeMetric(item.key)}
+                    disabled={working}
+                    className="mt-5 h-9 rounded-lg border border-neutral300 px-2.5 text-[11px] font-bold text-neutral500 disabled:opacity-40"
+                  >
+                    삭제
+                  </button>
+                </div>
+                <div className="mt-2 grid grid-cols-[minmax(0,1fr)_5rem] gap-2">
+                  <label className="text-[10px] font-bold text-neutral500">
+                    값
+                    <input
+                      inputMode="decimal"
+                      value={item.value}
+                      onChange={(event) => updateMetric(item.key, { value: event.target.value })}
+                      placeholder={derived ? "자동 계산" : "없으면 비워두기"}
+                      readOnly={derived}
+                      disabled={working}
+                      className="mt-1 h-9 w-full rounded-lg border border-neutral300 px-2.5 text-[12px] font-bold text-ink read-only:bg-subtle disabled:opacity-50"
+                    />
+                  </label>
+                  {canonicalUnit ? (
+                    <div className="text-[10px] font-bold text-neutral500">
+                      단위
+                      <div className="mt-1 flex h-9 items-center rounded-lg border border-neutral200 bg-subtle px-2.5 text-[11px] text-neutral700">
+                        {METRIC_UNIT_LABELS[canonicalUnit]}
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="text-[10px] font-bold text-neutral500">
+                      단위
+                      <select
+                        value={item.unit}
+                        onChange={(event) => updateMetric(item.key, {
+                          unit: event.target.value as PerformanceMetricUnit,
+                        })}
+                        disabled={working}
+                        className="mt-1 h-9 w-full rounded-lg border border-neutral300 bg-white px-2 text-[11px] text-ink disabled:opacity-50"
+                      >
+                        {METRIC_UNIT_OPTIONS.map(([unit, label]) => (
+                          <option key={unit} value={unit}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
+                {derived && (
+                  <p className="mt-1.5 text-[10px] text-neutral500">
+                    {item.key === "ctr"
+                      ? "클릭 수 ÷ 노출 수 × 100을 소수 둘째 자리로 계산해요."
+                      : "집행 광고비 ÷ 클릭 수를 1원 단위로 반올림해요."}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
+        <button
+          type="button"
+          onClick={addMetric}
+          disabled={working}
+          className="mt-3 h-10 w-full rounded-lg border border-dashed border-brand400 bg-brand50 text-[12px] font-bold text-brand800 disabled:opacity-40"
+        >
+          + 지표 추가
+        </button>
 
         <label className="mt-4 flex items-center gap-2 text-[12px] font-bold text-neutral700">
           <input
@@ -536,21 +706,16 @@ function PerformanceDashboard({
   onCorrect: (report: PerformanceReport) => void;
 }) {
   const totals = useMemo(() => {
-    const result = performance.confirmedSeries.reduce(
-      (sum, point) => ({
-        impressions: sum.impressions + point.confirmedPayload.impressions,
-        reactions: sum.reactions
-          + point.confirmedPayload.likes
-          + point.confirmedPayload.comments
-          + (point.confirmedPayload.saves ?? 0)
-          + (point.confirmedPayload.shares ?? 0),
-        posts: sum.posts + (point.confirmedPayload.publishedContentCount ?? 0),
-      }),
-      { impressions: 0, reactions: 0, posts: 0 },
-    );
+    const result = {
+      adSpend: sumConfirmedMetric(performance.confirmedSeries, "ad_spend"),
+      impressions: sumConfirmedMetric(performance.confirmedSeries, "impressions"),
+      clicks: sumConfirmedMetric(performance.confirmedSeries, "clicks"),
+      posts: sumConfirmedMetric(performance.confirmedSeries, "published_content_count"),
+    };
     return {
       ...result,
-      rate: result.impressions === 0 ? null : result.reactions / result.impressions,
+      ctr: calculatePerformanceCtr(result.clicks, result.impressions),
+      cpc: calculatePerformanceCpc(result.adSpend, result.clicks),
     };
   }, [performance.confirmedSeries]);
 
@@ -566,15 +731,33 @@ function PerformanceDashboard({
           </Card>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-              <StatTile size="lg" value={totals.impressions.toLocaleString()} label="누적 노출" />
-              <StatTile size="lg" value={totals.reactions.toLocaleString()} label="누적 반응" />
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
               <StatTile
                 size="lg"
-                value={totals.rate === null ? "—" : `${(totals.rate * 100).toFixed(2)}%`}
-                label="전체 반응률"
+                value={totals.adSpend === null ? "—" : `${totals.adSpend.toLocaleString()}원`}
+                label="누적 광고비"
               />
-              <StatTile size="lg" value={`${totals.posts.toLocaleString()}건`} label="누적 게시물" />
+              <StatTile
+                size="lg"
+                value={totals.impressions?.toLocaleString() ?? "—"}
+                label="누적 노출"
+              />
+              <StatTile
+                size="lg"
+                value={totals.clicks?.toLocaleString() ?? "—"}
+                label="누적 클릭"
+              />
+              <StatTile
+                size="lg"
+                value={totals.ctr === null ? "—" : `${totals.ctr.toFixed(2)}%`}
+                label="전체 CTR"
+              />
+              <StatTile size="lg" value={totals.cpc === null ? "—" : `${totals.cpc.toLocaleString()}원`} label="전체 CPC" />
+              <StatTile
+                size="lg"
+                value={totals.posts === null ? "—" : `${totals.posts.toLocaleString()}건`}
+                label="누적 게시물"
+              />
             </div>
             <Card>
               <div className="mb-3 text-[12px] font-bold text-neutral700">월별 노출 추이</div>
@@ -639,28 +822,40 @@ function PerformanceDashboard({
 }
 
 function MonthlyChart({ points }: { points: ContractPerformance["confirmedSeries"] }) {
-  const max = Math.max(...points.map((point) => point.confirmedPayload.impressions), 1);
+  const max = Math.max(
+    ...points.map((point) => (
+      performanceMetricValue(point.confirmedPayload.metricItems, "impressions") ?? 0
+    )),
+    1,
+  );
   return (
     <div className="flex min-h-40 items-end gap-3 overflow-x-auto pb-1">
-      {points.map((point) => (
-        <div key={point.reportId} className="flex min-w-24 flex-1 flex-col items-center gap-1.5">
-          <span className="text-[11px] font-bold text-ink">
-            {point.confirmedPayload.impressions.toLocaleString()}
-          </span>
-          <div className="flex h-28 w-full items-end">
-            <div
-              className={`w-full rounded-t-lg ${point.status === "FLAGGED" ? "bg-brand400" : "bg-neutral200"}`}
-              style={{ height: `${Math.max((point.confirmedPayload.impressions / max) * 100, 2)}%` }}
-            />
+      {points.map((point) => {
+        const items = point.confirmedPayload.metricItems;
+        const adSpend = performanceMetricValue(items, "ad_spend");
+        const impressions = performanceMetricValue(items, "impressions") ?? 0;
+        const clicks = performanceMetricValue(items, "clicks");
+        const ctr = calculatePerformanceCtr(clicks, impressions);
+        const cpc = calculatePerformanceCpc(adSpend, clicks);
+        const posts = performanceMetricValue(items, "published_content_count");
+        return (
+          <div key={point.reportId} className="flex min-w-36 flex-1 flex-col items-center gap-1.5">
+            <span className="text-[11px] font-bold text-ink">{impressions.toLocaleString()}</span>
+            <div className="flex h-28 w-full items-end">
+              <div
+                className={`w-full rounded-t-lg ${point.status === "FLAGGED" ? "bg-brand400" : "bg-neutral200"}`}
+                style={{ height: `${Math.max((impressions / max) * 100, 2)}%` }}
+              />
+            </div>
+            <span className="text-[11px] font-medium text-neutral700">{point.period.slice(2)}</span>
+            <span className="text-center text-[10px] leading-relaxed text-neutral500">
+              광고비 {adSpend === null ? "—" : `${adSpend.toLocaleString()}원`} · 클릭 {clicks ?? "—"}
+              <br />
+              CTR {ctr === null ? "—" : `${ctr.toFixed(2)}%`} · CPC {cpc === null ? "—" : `${cpc.toLocaleString()}원`} · 게시 {posts ?? "—"}건
+            </span>
           </div>
-          <span className="text-[11px] font-medium text-neutral700">{point.period.slice(2)}</span>
-          <span className="text-[10px] text-neutral500">
-            게시 {point.confirmedPayload.publishedContentCount ?? "—"}건 · 반응률{
-              point.engagementRate === null ? " —" : ` ${(point.engagementRate * 100).toFixed(2)}%`
-            }
-          </span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

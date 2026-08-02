@@ -263,6 +263,34 @@ def confirmation_payload(**overrides) -> dict:
     return payload
 
 
+def editable_metric_items(
+    *, custom_label: str | None = "맞춤 지표", custom_value: float = 1.25
+) -> list[dict]:
+    items = [
+        {"key": "ad_spend", "label": "광고비", "value": 10_001, "unit": "KRW"},
+        {"key": "impressions", "label": "노출", "value": 10_000, "unit": "COUNT"},
+        {"key": "clicks", "label": "클릭", "value": 300, "unit": "COUNT"},
+        {"key": "ctr", "label": "클릭률", "value": None, "unit": "PERCENT"},
+        {"key": "cpc", "label": "클릭당 비용", "value": None, "unit": "KRW"},
+        {
+            "key": "published_content_count",
+            "label": "게시물 수",
+            "value": None,
+            "unit": "COUNT",
+        },
+    ]
+    if custom_label is not None:
+        items.append(
+            {
+                "key": "custom_metric",
+                "label": custom_label,
+                "value": custom_value,
+                "unit": "NUMBER",
+            }
+        )
+    return items
+
+
 async def confirm(
     client: AsyncClient,
     *,
@@ -303,6 +331,86 @@ async def test_first_confirmation_creates_version_one(performance_context) -> No
     assert data["current_revision"]["version"] == 1
     assert isinstance(data["current_revision"]["engagement_rate"], int | float)
     assert data["current_revision"]["flags"] == []
+
+
+async def test_metric_items_are_derived_and_preserved_across_edit_and_delete_revisions(
+    performance_context,
+) -> None:
+    client, adapter, _now = performance_context
+    contract_id = uuid4()
+    seed_contract(adapter, contract_id=contract_id)
+    report_id = seed_extracted_report(adapter, contract_id=contract_id, period="2026-07")
+
+    first_payload = confirmation_payload()["confirmed_payload"]
+    first_payload["metric_items"] = editable_metric_items()
+    first = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(confirmed_payload=first_payload),
+    )
+    assert first.status_code == 200
+    first_response_items = first.json()["data"]["current_revision"]["confirmed_payload"][
+        "metric_items"
+    ]
+    first_items = {
+        item["key"]: item
+        for item in first_response_items
+    }
+    assert first_items["ctr"]["value"] == 3
+    assert first_items["cpc"]["value"] == 33
+    assert first_items["custom_metric"]["label"] == "맞춤 지표"
+
+    edited_payload = confirmation_payload()["confirmed_payload"]
+    edited_payload["metric_items"] = editable_metric_items(
+        custom_label="수정한 지표", custom_value=2.5
+    )
+    edited = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(
+            expected_revision=1,
+            correction_reason="맞춤 지표 수정",
+            confirmed_payload=edited_payload,
+        ),
+    )
+    assert edited.status_code == 200
+
+    deleted_payload = confirmation_payload()["confirmed_payload"]
+    deleted_payload["metric_items"] = editable_metric_items(custom_label=None)
+    deleted = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(
+            expected_revision=2,
+            correction_reason="맞춤 지표 삭제",
+            confirmed_payload=deleted_payload,
+        ),
+    )
+
+    assert deleted.status_code == 200
+    revisions = deleted.json()["data"]["revisions"]
+    assert [revision["version"] for revision in revisions] == [1, 2, 3]
+    first_history = {
+        item["key"]: item for item in revisions[0]["confirmed_payload"]["metric_items"]
+    }
+    edited_history = {
+        item["key"]: item for item in revisions[1]["confirmed_payload"]["metric_items"]
+    }
+    current_items = {
+        item["key"]: item for item in revisions[2]["confirmed_payload"]["metric_items"]
+    }
+    assert first_history["custom_metric"] == {
+        "key": "custom_metric",
+        "label": "맞춤 지표",
+        "value": 1.25,
+        "unit": "NUMBER",
+    }
+    assert edited_history["custom_metric"]["label"] == "수정한 지표"
+    assert edited_history["custom_metric"]["value"] == 2.5
+    assert "custom_metric" not in current_items
 
 
 async def test_first_confirmation_flags_deliverable_shortfall(performance_context) -> None:

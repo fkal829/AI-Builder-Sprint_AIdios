@@ -23,6 +23,11 @@ test("performance adapter covers upload, extraction, confirmation, correction, a
   assert.match(apiAdapter, /expected_revision: input\.expectedRevision/);
   assert.match(apiAdapter, /correction_reason: input\.correctionReason/);
   assert.match(apiAdapter, /"Idempotency-Key": crypto\.randomUUID\(\)/);
+  assert.match(adapter, /adSpend: data\.ad_spend/);
+  assert.match(adapter, /clicks: data\.clicks/);
+  assert.match(adapter, /missingPerformanceCandidate\(\)/);
+  assert.match(adapter, /metric_items: data\.metricItems\.map/);
+  assert.match(adapter, /Array\.isArray\(data\.metric_items\) && data\.metric_items\.length > 0/);
 });
 
 test("performance page uses evidence-backed API data and keeps inquiry delivery manual", async () => {
@@ -45,6 +50,52 @@ test("performance page uses evidence-backed API data and keeps inquiry delivery 
   assert.doesNotMatch(page, /const JULY_POSTS/);
 });
 
+test("performance metric editor keeps six defaults, dynamic rows, and deterministic derived values", async () => {
+  const [page, adapter] = await Promise.all([
+    source("src/app/contracts/[id]/performance/page.tsx"),
+    source("src/lib/adapter.ts"),
+  ]);
+  const definitions = adapter.slice(
+    adapter.indexOf("export const PERFORMANCE_BASE_METRICS"),
+    adapter.indexOf("export function calculatePerformanceCtr"),
+  );
+  let previous = -1;
+  for (const definition of [
+    'key: "ad_spend", label: "집행 광고비", unit: "KRW"',
+    'key: "impressions", label: "노출 수", unit: "COUNT"',
+    'key: "clicks", label: "클릭 수", unit: "COUNT"',
+    'key: "ctr", label: "CTR", unit: "PERCENT"',
+    'key: "cpc", label: "CPC", unit: "KRW"',
+    'key: "published_content_count", label: "게시물 수", unit: "COUNT"',
+  ]) {
+    const index = definitions.indexOf(definition);
+    assert.ok(index > previous, `${definition} must keep its default order`);
+    previous = index;
+  }
+
+  assert.match(page, /type MetricForm = MetricFormItem\[\]/);
+  assert.match(page, /const updateMetric =/);
+  assert.match(page, /const removeMetric =/);
+  assert.match(page, /const addMetric =/);
+  assert.match(page, /\+ 지표 추가/);
+  assert.match(page, /replaceAll\("-", "_"\)/);
+  assert.match(page, /maxLength=\{50\}/);
+  assert.match(page, /readOnly=\{derived\}/);
+  assert.match(page, /METRIC_UNIT_OPTIONS\.map/);
+  assert.match(page, /form\.length === 0/);
+  assert.match(page, /seenKeys/);
+  assert.match(page, /seenLabels/);
+  assert.match(page, /unit === "KRW" \|\| unit === "COUNT"/);
+  assert.match(page, /if \(value < 0\)/);
+  assert.match(page, /likes: 0/);
+  assert.match(page, /comments: 0/);
+  assert.match(page, /metricItems,/);
+  assert.match(adapter, /Math\.round\(\(clicks \/ impressions\) \* 10_000\) \/ 100/);
+  assert.match(adapter, /Math\.round\(adSpend \/ clicks\)/);
+  assert.match(adapter, /createPerformanceBaseMetricItems\(\{/);
+  assert.doesNotMatch(page, /label: "좋아요"|label: "댓글"|label: "저장"/);
+});
+
 test("aggregate performance and integrated obligation use live adapter data", async () => {
   const [aggregate, contractPage] = await Promise.all([
     source("src/app/performance/page.tsx"),
@@ -53,11 +104,24 @@ test("aggregate performance and integrated obligation use live adapter data", as
 
   assert.match(aggregate, /adapter\.getDashboard/);
   assert.match(aggregate, /adapter\.getContractPerformance/);
-  assert.match(aggregate, /월별 노출 추이 — 전체 계약 합계/);
+  assert.match(aggregate, /월별 광고효과 추이 — 전체 계약 합계/);
   assert.match(aggregate, /<MonthlyChart months=\{months\}/);
+  assert.match(aggregate, /총 광고비/);
+  assert.match(aggregate, /총 노출/);
+  assert.match(aggregate, /총 클릭/);
+  assert.match(aggregate, /전체 CTR/);
+  assert.match(aggregate, /전체 CPC/);
+  assert.match(aggregate, /총 게시물/);
   assert.match(aggregate, /<SectionTitle>계약별 성과<\/SectionTitle>/);
   assert.match(aggregate, /<SectionTitle>짚어볼 점<\/SectionTitle>/);
   assert.doesNotMatch(aggregate, /const CONTRACTS|화면 목업 · 개발 예정|reportDemo/);
+  assert.match(contractPage, /누적 광고비/);
+  assert.match(contractPage, /누적 노출/);
+  assert.match(contractPage, /누적 클릭/);
+  assert.match(contractPage, /전체 CTR/);
+  assert.match(contractPage, /전체 CPC/);
+  assert.match(contractPage, /누적 게시물/);
+  assert.doesNotMatch(contractPage, /누적 반응|전체 반응률/);
   assert.match(contractPage, /adapter\.getObligation/);
   assert.match(contractPage, /adapter\.createObligationEvidenceLink/);
   assert.match(contractPage, /obligation\.status === "SUBMITTED"/);

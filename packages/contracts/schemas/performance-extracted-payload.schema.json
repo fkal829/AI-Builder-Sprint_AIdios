@@ -15,7 +15,9 @@
     "published_content_count"
   ],
   "properties": {
+    "ad_spend": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
     "impressions": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
+    "clicks": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
     "likes": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
     "comments": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},
     "reach": {"$ref": "#/$defs/PerformanceNonNegativeMetricCandidate"},

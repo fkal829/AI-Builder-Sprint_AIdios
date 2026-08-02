@@ -1582,6 +1582,13 @@ Document·report UUID로 응답 유실과 멱등 응답 저장 실패를 복구�
 행 수·URL 수 등으로 추정하지 않고 `NOT_FOUND`로 반환해 소상공인이 확인 단계에서
 입력하게 한다.
 
+기존 8개 후보의 required 계약은 유지한다. `ad_spend`와 `clicks`는 원문에 명시된 경우를
+위한 optional 후보이므로 이전 8개 필드 payload도 유효하다. Solar가 스키마 밖의 지표를
+발견해도 임의 사용자 정의 항목으로 만들지 않으며, 사용자 추가 항목은 16.4 확인 단계에서만
+구조화한다. v2 Solar strict output 자체는 10개 후보를 모두 요구하고 새 두 후보가
+원문에 없으면 `NOT_FOUND`로 반환한다. 여기서 optional은 저장된 v1 payload를 계속 읽기
+위한 공개 응답 호환 규칙이다.
+
 성공하면 `EXTRACTED`로 전이하고 `current_revision=null`, `revision_count=0`을 유지한다.
 이 값을 대시보드·비교에 사용하거나 이 단계에서 문의 문안을 생성하지 않는다.
 timeout·HTTP 오류·Parse 실패·AI 스키마 오류는 고정 샘플로 대체하지 않고
@@ -1650,7 +1657,15 @@ Solar 일시적 전송 실패에 대한 최대 1회 재전송만 위 예외로 �
     "published_content_count": 4,
     "inquiries": 16,
     "reservations": 7,
-    "purchases": null
+    "purchases": null,
+    "metric_items": [
+      {"key": "ad_spend", "label": "광고비", "value": 1200000, "unit": "KRW"},
+      {"key": "impressions", "label": "노출", "value": 12500, "unit": "COUNT"},
+      {"key": "clicks", "label": "클릭", "value": 340, "unit": "COUNT"},
+      {"key": "ctr", "label": "클릭률", "value": null, "unit": "PERCENT"},
+      {"key": "cpc", "label": "클릭당 비용", "value": null, "unit": "KRW"},
+      {"key": "published_content_count", "label": "게시물 수", "value": 4, "unit": "COUNT"}
+    ]
   },
   "has_issue": false,
   "issue_note": null,
@@ -1680,6 +1695,21 @@ revision이 다르면 `409 REPORT_REVISION_CONFLICT`를 반환한다. 기존 rev
 명시되었거나 소상공인이 확인·입력한 경우에만 저장하며, `0`과 알 수 없음을 뜻하는
 `null`을 구분한다.
 
+기존 11개 confirmed field는 유지한다. `metric_items`는 입력에서 생략하면 `[]`이고,
+응답 snapshot에는 항상 존재하는 최대 50개 배열이다. 항목은 정확히
+`{key,label,value,unit}`이며 key는 1~64자 소문자 snake_case slug, label은 trim한
+1~50자 제어문자 없는 문자열이다. 배열 안에서 key와 대소문자를 무시한 label은 각각
+고유하다. value는 nullable 0 이상 숫자이고 소수점 이하 최대 6자리이며 unit은
+`KRW|COUNT|PERCENT|NUMBER`만 허용한다. `COUNT`와 `KRW`는 정수다.
+
+기본 6개 표시 순서는 `ad_spend/KRW`, `impressions/COUNT`, `clicks/COUNT`,
+`ctr/PERCENT`, `cpc/KRW`, `published_content_count/COUNT`다. `ctr`은
+`clicks / impressions * 100`을 소수 2자리 `ROUND_HALF_UP`, `cpc`는
+`ad_spend / clicks`를 1원 단위 `ROUND_HALF_UP`으로 서버가 다시 계산한다. 필요한 원본
+값이 `null`이거나 분모가 0이면 파생값은 `null`이며 클라이언트 입력값을 그대로 믿지 않는다.
+`metric_items.impressions`와 `metric_items.published_content_count`의 non-null 값은
+각각 기존 confirmed field와 일치해야 한다.
+
 `engagement_rate`는 요청으로 받지 않고 서버가
 `(likes + comments + saves + shares) / impressions`로 결정 계산한다. nullable 세부
 지표는 0으로 계산하고 `impressions=0`이면 0으로 단정하지 않고
@@ -1700,6 +1730,11 @@ IEEE-754 직렬화 상한 `36893488147419103232`를 OpenAPI 응답 경계로 사
 report의 `current_revision_id`·현재 상태와 감사 이벤트를 같은 트랜잭션에 저장한다.
 응답의 `current_revision`은 방금 생성한 revision이고 `revision_count`는 새 version과
 같다.
+
+사용자 지표 추가, label·value 수정, 삭제도 이 PATCH가 만드는 새 revision의
+`metric_items` 전체 snapshot으로 기록한다. 삭제는 새 배열에서 해당 key를 제외하는 것이며
+과거 revision을 UPDATE·DELETE하지 않는다. 사용자 추가 항목과 AI가 임의로 발견한 지표는
+`engagement_rate`, flag, 문의 문안에 자동 반영하지 않는다.
 
 ### 16.5 월별 기록·대조 조회 — P2-C
 
@@ -1728,6 +1763,8 @@ report의 `current_revision_id`·현재 상태와 감사 이벤트를 같은 트
 `source_document_id`를 기존 문서 접근 API에 전달해 열람한다. 문의 문안은 저장된
 snapshot만 응답으로 제공하고 서버가 외부로 발송하지 않는다. owner 확인과 전체
 report/revision/flag/문의 문안은 단일 DB statement snapshot으로 읽는다.
+각 revision과 `confirmed_series`의 confirmed payload는 그 revision의 `metric_items`
+snapshot을 함께 반환하며, 조회 과정에서 사용자 항목을 재계산하거나 삭제하지 않는다.
 
 ## 17. 데이터·상태·비교 규칙 — P2-0 확정값
 
@@ -1740,10 +1777,24 @@ report/revision/flag/문의 문안은 단일 DB statement snapshot으로 읽는�
 | 리포트 선택 | `follower_net_change` | nullable 정수, 감소는 음수 허용 |
 | 계약 대조 | `published_content_count` | 정식 제품 필드, nullable 0 이상 정수; `0`과 알 수 없음인 `null` 구분 |
 | 소상공인 선택 입력 | `inquiries`, `reservations`, `purchases` | nullable, 0 이상 정수 |
+| 편집 지표 | `metric_items` | 입력 기본 `[]`, 응답 직렬화에 포함, 최대 50개 `{key,label,value,unit}` snapshot |
 | 서버 파생 | `engagement_rate` | 확정값으로만 `Decimal` 계산, 클라이언트 입력 금지 |
 
-요청·AI 출력 스키마는 `additionalProperties=false`로 제한하여 CPA·ROAS·매출
-기여도·성과 점수가 실수로 저장되지 않게 한다.
+요청·AI 출력 스키마는 `additionalProperties=false`로 제한한다. 사용자 항목은 오직
+검증된 `metric_items` 배열로만 받고, AI가 CPA·ROAS·매출 기여도·성과 점수나 임의 custom
+지표를 자동 추가하지 않는다.
+
+`metric_items` key는 1~64자 소문자 snake_case, label은 trim한 1~50자 문자열이며
+제어문자를 허용하지 않는다. 같은 snapshot에서 key와 case-insensitive label은 각각
+고유하다. nullable value는 0 이상·소수 6자리 이내이고 unit은
+`KRW|COUNT|PERCENT|NUMBER`다. `COUNT`·`KRW`는 정수다. canonical 기본 6개와 순서는
+`ad_spend/KRW` → `impressions/COUNT` → `clicks/COUNT` → `ctr/PERCENT` →
+`cpc/KRW` → `published_content_count/COUNT`다.
+
+`ctr = clicks / impressions * 100`은 소수 2자리 `ROUND_HALF_UP`,
+`cpc = ad_spend / clicks`는 1원 단위 `ROUND_HALF_UP`으로 결정 계산하며 분모 0 또는
+필요 값 누락 시 `null`이다. 사용자 추가 항목은 명시적인 후속 제품 규칙 없이는
+반응률·계약 flag·문의 문안에 사용하지 않는다.
 
 `published_content_count`는 원문 근거가 있으면 AI 추출 후보로 제공할 수 있지만
 소유자가 확정한 값만 계약 대조에 사용한다. 값이 `null`이면 수량 신호를 만들지 않는다.
@@ -1776,6 +1827,8 @@ payload, 결정 계산한 반응률, 상태, nullable `corrected_from_revision_i
 `correction_reason`, `confirmed_at`을 보존한다. `(report_id, version)`은 고유하며,
 version 2 이상에는 직전 revision과 비어 있지 않은 정정 사유가 필요하다. API의
 `expected_revision`과 현재 version이 다르면 새 revision을 만들지 않는다.
+`metric_items`의 추가·label 또는 value 수정·삭제도 새 revision payload에만 반영하며,
+이전 snapshot은 변경하지 않는다.
 
 DB는 다음 관계를 제약 또는 원자 RPC로 강제한다.
 
@@ -1883,7 +1936,7 @@ report revision은 flag에서 유도한다. 조회 시 다시 만들거나 외�
   남기지 않는다.
 - Upstage·Solar는 지표 추출에만 사용하고 기존 Adapter 규칙에 따라 `mock`/`live`를
   분리한다. private 원본 다운로드 → Upstage Parse →
-  `performance-report-metrics-v1` Solar strict-schema 매핑을 내부 조합기로
+  `performance-report-metrics-v2` Solar strict-schema 매핑을 내부 조합기로
   제공한다. 문의 문안은 결정적 템플릿으로 만들며, 일반 `pytest`는 외부
   네트워크를 호출하지 않는다.
 - 반응률·월 정렬·수량 비교·상태 전이는 AI가 아닌 결정적 코드와 DB 제약으로

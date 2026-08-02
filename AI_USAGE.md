@@ -147,10 +147,15 @@ mock Solar 문구는 항목별 필드와 신호를 반영하지만 실제 모델
 
 17.5/P2-B-5 기반은 `apps/api/app/adapters/performance_metrics.py`의
 `SolarPerformanceMetricMapper`로 분리한다. Upstage Document Parse가 만든
-페이지별 원문을 입력받아 Solar가 아래 8개 지표 후보만
-`performance-report-metrics-v1` strict JSON Schema로 매핑한다.
+페이지별 원문을 입력받아 Solar가 strict JSON Schema로 지표 후보를 매핑한다.
+공유 추출 계약은 기존 8개 required 후보를 유지하고 `ad_spend`와 `clicks`를 optional로
+추가해 이전 payload도 계속 허용한다. 현재 구현의 prompt/schema version은
+`performance-report-metrics-v2`다. v2 Solar strict output에서는 아래 10개를 모두
+required로 요청하며, 원문에 없으면 새 두 후보도 생략하지 않고 `NOT_FOUND`로 반환한다.
+즉 optional은 저장된 v1 payload를 읽는 공개 계약의 호환 규칙이고 Solar 출력 규칙이 아니다.
 
-- `impressions`, `likes`, `comments`, `reach`, `saves`, `shares`
+- `ad_spend`, `impressions`, `clicks`
+- `likes`, `comments`, `reach`, `saves`, `shares`
 - `follower_net_change`
 - `published_content_count`
 
@@ -159,7 +164,9 @@ HTTP client를 생성하지 않는다. `live`는 Solar Chat에 strict structured
 요청한 뒤 Pydantic 스키마와 `source_page`/`source_text`의 실제 페이지
 포함 여부를 다시 검증한다. 인용문의 해당 지표 라벨과 그 라벨 구간의
 정수가 같은지도 검증해 페이지 전체에서 다른 지표 숫자를 고르는 결과를 거부한다.
-비율·기간·비용 문맥과 `%`·기간·금액 단위를 실적 건수로 인정하지 않는다.
+광고비는 명시적인 `ad_spend` 금액 후보로, 클릭은 명시적인 `clicks` 건수 후보로만
+취급한다. 비율·기간·비용 문맥과 `%`·기간·금액 단위를 다른 실적 건수로 인정하지 않는다.
+스키마 밖에서 발견한 표현을 임의 사용자 정의 지표로 만들거나 확정하지 않는다.
 원문에 없는 지표는 `NOT_FOUND`/`null`/
 `confidence=0`이고, 원문의 명시적인 `0`은 누락으로 바꾸지 않는다.
 `게시물 수`가 없으면 행이나 URL 수로 `published_content_count`를 추정하지
@@ -189,6 +196,10 @@ endpoint에 연결됐다. 일반 자동 테스트는 mock parser·mapper나 고�
 기대 정수값과 일치했다. API key·PDF 원문·`source_text`·외부 raw 응답은 결과에
 기록하지 않았고 Supabase DB·Storage에는 쓰지 않았다. 이 결과는 Adapter live
 연결 증거이며 아래 수직 E2E와 분리해 기록한다.
+
+이 live 증거는 계약 확장 전 8개 required 후보에 대한 것이다. 새 `ad_spend`와
+`clicks`까지 포함한 strict 출력은 별도 live 재검증 전이며, 사용자 정의 `metric_items`는
+Solar가 생성하지 않고 소유자 확인 PATCH에서만 추가·수정·삭제한다.
 
 ### 2026-08-01 광고효과 16.2~16.5 live 수직 E2E
 

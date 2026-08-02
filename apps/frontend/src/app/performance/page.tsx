@@ -6,8 +6,12 @@ import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
 import { StatTile } from "@/components/StatTile";
 import {
   adapter,
+  calculatePerformanceCpc,
+  calculatePerformanceCtr,
   isUsingMock,
+  performanceMetricValue,
   type ContractPerformance,
+  type PerformanceCanonicalMetricKey,
   type PerformanceFlag,
 } from "@/lib/adapter";
 import { useAsync } from "@/lib/hooks";
@@ -18,6 +22,20 @@ type ContractPerformanceRow = {
   counterparty: string;
   performance: ContractPerformance;
 };
+
+function sumConfirmedMetric(
+  points: ContractPerformance["confirmedSeries"],
+  key: PerformanceCanonicalMetricKey,
+): number | null {
+  return points.reduce<number | null>((sum, point) => {
+    const value = performanceMetricValue(point.confirmedPayload.metricItems, key);
+    return sum === null || value === null ? null : sum + value;
+  }, 0);
+}
+
+function addKnownMetric(total: number | null, value: number | null): number | null {
+  return total === null || value === null ? null : total + value;
+}
 
 export default function AllPerformancePage() {
   const state = useAsync(async () => {
@@ -34,29 +52,49 @@ export default function AllPerformancePage() {
 
   const rows = state.status === "ready" ? state.data : [];
   const points = rows.flatMap((row) => row.performance.confirmedSeries);
-  const totalImpressions = points.reduce(
-    (sum, point) => sum + point.confirmedPayload.impressions,
-    0,
-  );
-  const totalReactions = points.reduce(
-    (sum, point) => sum
-      + point.confirmedPayload.likes
-      + point.confirmedPayload.comments
-      + (point.confirmedPayload.saves ?? 0)
-      + (point.confirmedPayload.shares ?? 0),
-    0,
-  );
-  const rate = totalImpressions === 0 ? null : totalReactions / totalImpressions;
-  const reportedContracts = rows.filter((row) => row.performance.confirmedSeries.length > 0);
+  const totalAdSpend = sumConfirmedMetric(points, "ad_spend");
+  const totalImpressions = sumConfirmedMetric(points, "impressions");
+  const totalClicks = sumConfirmedMetric(points, "clicks");
+  const totalPosts = sumConfirmedMetric(points, "published_content_count");
+  const ctr = calculatePerformanceCtr(totalClicks, totalImpressions);
+  const cpc = calculatePerformanceCpc(totalAdSpend, totalClicks);
   const months = Array.from(
     points.reduce((totals, point) => {
-      totals.set(point.period, (totals.get(point.period) ?? 0) + point.confirmedPayload.impressions);
+      const current = totals.get(point.period) ?? {
+        adSpend: 0,
+        impressions: 0,
+        clicks: 0,
+        posts: 0,
+      };
+      totals.set(point.period, {
+        adSpend: addKnownMetric(
+          current.adSpend,
+          performanceMetricValue(point.confirmedPayload.metricItems, "ad_spend"),
+        ),
+        impressions: addKnownMetric(
+          current.impressions,
+          performanceMetricValue(point.confirmedPayload.metricItems, "impressions"),
+        ),
+        clicks: addKnownMetric(
+          current.clicks,
+          performanceMetricValue(point.confirmedPayload.metricItems, "clicks"),
+        ),
+        posts: addKnownMetric(
+          current.posts,
+          performanceMetricValue(point.confirmedPayload.metricItems, "published_content_count"),
+        ),
+      });
       return totals;
-    }, new Map<string, number>()),
-    ([period, impressions]) => ({
+    }, new Map<string, {
+      adSpend: number | null;
+      impressions: number | null;
+      clicks: number | null;
+      posts: number | null;
+    }>()),
+    ([period, values]) => ({
       period,
       label: `${Number(period.slice(5, 7))}월`,
-      impressions,
+      ...values,
     }),
   ).sort((left, right) => left.period.localeCompare(right.period));
   const findings = rows.flatMap((row) =>
@@ -91,23 +129,37 @@ export default function AllPerformancePage() {
 
         {state.status === "ready" && (
           <>
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-              <StatTile size="lg" value={totalImpressions.toLocaleString()} label="총 노출" />
-              <StatTile size="lg" value={totalReactions.toLocaleString()} label="총 반응" />
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
               <StatTile
                 size="lg"
-                value={rate === null ? "—" : `${(rate * 100).toFixed(2)}%`}
-                label="전체 반응률"
+                value={totalAdSpend === null ? "—" : `${totalAdSpend.toLocaleString()}원`}
+                label="총 광고비"
               />
               <StatTile
                 size="lg"
-                value={`${reportedContracts.length}/${rows.length}건`}
-                label="리포트 확인 계약"
+                value={totalImpressions?.toLocaleString() ?? "—"}
+                label="총 노출"
+              />
+              <StatTile
+                size="lg"
+                value={totalClicks?.toLocaleString() ?? "—"}
+                label="총 클릭"
+              />
+              <StatTile
+                size="lg"
+                value={ctr === null ? "—" : `${ctr.toFixed(2)}%`}
+                label="전체 CTR"
+              />
+              <StatTile size="lg" value={cpc === null ? "—" : `${cpc.toLocaleString()}원`} label="전체 CPC" />
+              <StatTile
+                size="lg"
+                value={totalPosts === null ? "—" : `${totalPosts.toLocaleString()}건`}
+                label="총 게시물"
               />
             </div>
 
             <section className="flex flex-col gap-2">
-              <SectionTitle>월별 노출 추이 — 전체 계약 합계</SectionTitle>
+              <SectionTitle>월별 광고효과 추이 — 전체 계약 합계</SectionTitle>
               <Card>
                 {months.length === 0 ? (
                   <p className="py-8 text-center text-[12px] text-neutral500">
@@ -186,10 +238,13 @@ function ContractRow({ row }: { row: ContractPerformanceRow }) {
     );
   }
 
-  const reactions = latest.confirmedPayload.likes
-    + latest.confirmedPayload.comments
-    + (latest.confirmedPayload.saves ?? 0)
-    + (latest.confirmedPayload.shares ?? 0);
+  const items = latest.confirmedPayload.metricItems;
+  const adSpend = performanceMetricValue(items, "ad_spend");
+  const impressions = performanceMetricValue(items, "impressions");
+  const clicks = performanceMetricValue(items, "clicks");
+  const ctr = calculatePerformanceCtr(clicks, impressions);
+  const cpc = calculatePerformanceCpc(adSpend, clicks);
+  const posts = performanceMetricValue(items, "published_content_count");
 
   return (
     <Link
@@ -202,14 +257,13 @@ function ContractRow({ row }: { row: ContractPerformanceRow }) {
           {row.counterparty} · {latest.period} · 버전 {latest.version}
         </div>
       </div>
-      <div className="flex flex-none items-center gap-4 text-right">
-        <Metric value={latest.confirmedPayload.impressions.toLocaleString()} label="노출" />
-        <Metric value={reactions.toLocaleString()} label="반응" />
-        <Metric
-          value={latest.engagementRate === null ? "—" : `${(latest.engagementRate * 100).toFixed(2)}%`}
-          label="반응률"
-          emphasis
-        />
+      <div className="flex flex-none flex-wrap items-center justify-end gap-x-4 gap-y-2 text-right">
+        <Metric value={adSpend === null ? "—" : `${adSpend.toLocaleString()}원`} label="광고비" />
+        <Metric value={impressions?.toLocaleString() ?? "—"} label="노출" />
+        <Metric value={clicks?.toLocaleString() ?? "—"} label="클릭" />
+        <Metric value={ctr === null ? "—" : `${ctr.toFixed(2)}%`} label="CTR" emphasis />
+        <Metric value={cpc === null ? "—" : `${cpc.toLocaleString()}원`} label="CPC" />
+        <Metric value={posts === null ? "—" : `${posts.toLocaleString()}건`} label="게시물" />
         <span className="text-neutral400">→</span>
       </div>
     </Link>
@@ -228,25 +282,40 @@ function Metric({ value, label, emphasis = false }: { value: string; label: stri
 function MonthlyChart({
   months,
 }: {
-  months: { period: string; label: string; impressions: number }[];
+  months: {
+    period: string;
+    label: string;
+    adSpend: number | null;
+    impressions: number | null;
+    clicks: number | null;
+    posts: number | null;
+  }[];
 }) {
-  const max = Math.max(...months.map((month) => month.impressions), 1);
+  const max = Math.max(...months.map((month) => month.impressions ?? 0), 1);
   return (
     <div className="flex items-end gap-4 overflow-x-auto">
       {months.map((month, index) => {
         const last = index === months.length - 1;
+        const impressions = month.impressions ?? 0;
+        const monthCtr = calculatePerformanceCtr(month.clicks, month.impressions);
+        const monthCpc = calculatePerformanceCpc(month.adSpend, month.clicks);
         return (
-          <div key={month.period} className="flex min-w-20 flex-1 flex-col items-center gap-1.5">
+          <div key={month.period} className="flex min-w-40 flex-1 flex-col items-center gap-1.5">
             <span className="text-[11px] font-bold text-ink">
-              {month.impressions.toLocaleString()}
+              {month.impressions?.toLocaleString() ?? "—"}
             </span>
             <div className="flex h-28 w-full items-end">
               <div
                 className={`w-full rounded-t-lg ${last ? "bg-brand400" : "bg-neutral200"}`}
-                style={{ height: `${Math.max((month.impressions / max) * 100, 2)}%` }}
+                style={{ height: `${Math.max((impressions / max) * 100, 2)}%` }}
               />
             </div>
             <span className="text-[11px] font-medium text-neutral700">{month.label}</span>
+            <span className="text-center text-[10px] leading-relaxed text-neutral500">
+              광고비 {month.adSpend === null ? "—" : `${month.adSpend.toLocaleString()}원`} · 클릭 {month.clicks?.toLocaleString() ?? "—"}
+              <br />
+              CTR {monthCtr === null ? "—" : `${monthCtr.toFixed(2)}%`} · CPC {monthCpc === null ? "—" : `${monthCpc.toLocaleString()}원`} · 게시 {month.posts === null ? "—" : `${month.posts.toLocaleString()}건`}
+            </span>
           </div>
         );
       })}

@@ -217,7 +217,7 @@ async def post_extract(
     )
 
 
-async def test_extracts_eight_grounded_metrics_and_replays_the_complete_response(
+async def test_extracts_ten_grounded_metrics_and_replays_the_complete_response(
     extraction_context,
 ) -> None:
     client, adapter, extractor, _clock = extraction_context
@@ -240,7 +240,9 @@ async def test_extracts_eight_grounded_metrics_and_replays_the_complete_response
     assert "extraction_attempt_id" not in report
     assert "extraction_started_at" not in report
     assert set(report["extracted_payload"]) == {
+        "ad_spend",
         "impressions",
+        "clicks",
         "likes",
         "comments",
         "reach",
@@ -249,6 +251,8 @@ async def test_extracts_eight_grounded_metrics_and_replays_the_complete_response
         "follower_net_change",
         "published_content_count",
     }
+    assert report["extracted_payload"]["ad_spend"]["verification_status"] == "NOT_FOUND"
+    assert report["extracted_payload"]["clicks"]["verification_status"] == "NOT_FOUND"
     assert report["extracted_payload"]["impressions"] == {
         "value": 3200,
         "source_page": 1,

@@ -217,7 +217,9 @@ type ApiPerformanceMetricCandidate = {
 };
 
 type ApiPerformanceExtractedPayload = {
+  ad_spend?: ApiPerformanceMetricCandidate;
   impressions: ApiPerformanceMetricCandidate;
+  clicks?: ApiPerformanceMetricCandidate;
   likes: ApiPerformanceMetricCandidate;
   comments: ApiPerformanceMetricCandidate;
   reach: ApiPerformanceMetricCandidate;
@@ -225,6 +227,13 @@ type ApiPerformanceExtractedPayload = {
   shares: ApiPerformanceMetricCandidate;
   follower_net_change: ApiPerformanceMetricCandidate;
   published_content_count: ApiPerformanceMetricCandidate;
+};
+
+type ApiPerformanceMetricItem = {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: PerformanceMetricUnit;
 };
 
 type ApiPerformanceConfirmedPayload = {
@@ -239,6 +248,7 @@ type ApiPerformanceConfirmedPayload = {
   inquiries: number | null;
   reservations: number | null;
   purchases: number | null;
+  metric_items?: ApiPerformanceMetricItem[];
 };
 
 type ApiPerformanceFlag = {
@@ -446,7 +456,9 @@ export type LiveRenewalView = {
 export type PerformanceReportStatus = "UPLOADED" | "EXTRACTED" | "CONFIRMED" | "FLAGGED";
 export type PerformanceMetricVerificationStatus = "VERIFIED" | "NOT_FOUND" | "NEEDS_CHECK";
 export type PerformanceMetricKey =
+  | "adSpend"
   | "impressions"
+  | "clicks"
   | "likes"
   | "comments"
   | "reach"
@@ -465,6 +477,73 @@ export type PerformanceMetricCandidate = {
 
 export type PerformanceExtractedPayload = Record<PerformanceMetricKey, PerformanceMetricCandidate>;
 
+export type PerformanceMetricUnit = "KRW" | "COUNT" | "PERCENT" | "NUMBER";
+export type PerformanceCanonicalMetricKey =
+  | "ad_spend"
+  | "impressions"
+  | "clicks"
+  | "ctr"
+  | "cpc"
+  | "published_content_count";
+
+export type PerformanceMetricItem = {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: PerformanceMetricUnit;
+};
+
+export const PERFORMANCE_BASE_METRICS = [
+  { key: "ad_spend", label: "집행 광고비", unit: "KRW" },
+  { key: "impressions", label: "노출 수", unit: "COUNT" },
+  { key: "clicks", label: "클릭 수", unit: "COUNT" },
+  { key: "ctr", label: "CTR", unit: "PERCENT" },
+  { key: "cpc", label: "CPC", unit: "KRW" },
+  { key: "published_content_count", label: "게시물 수", unit: "COUNT" },
+] as const satisfies readonly {
+  key: PerformanceCanonicalMetricKey;
+  label: string;
+  unit: PerformanceMetricUnit;
+}[];
+
+export function calculatePerformanceCtr(
+  clicks: number | null,
+  impressions: number | null,
+): number | null {
+  if (clicks === null || impressions === null || impressions <= 0) return null;
+  return Math.round((clicks / impressions) * 10_000) / 100;
+}
+
+export function calculatePerformanceCpc(
+  adSpend: number | null,
+  clicks: number | null,
+): number | null {
+  if (adSpend === null || clicks === null || clicks <= 0) return null;
+  return Math.round(adSpend / clicks);
+}
+
+export function createPerformanceBaseMetricItems(
+  values: Partial<Record<PerformanceCanonicalMetricKey, number | null>> = {},
+): PerformanceMetricItem[] {
+  const ctr = calculatePerformanceCtr(values.clicks ?? null, values.impressions ?? null);
+  const cpc = calculatePerformanceCpc(values.ad_spend ?? null, values.clicks ?? null);
+  return PERFORMANCE_BASE_METRICS.map((definition): PerformanceMetricItem => ({
+    ...definition,
+    value: definition.key === "ctr"
+      ? ctr
+      : definition.key === "cpc"
+        ? cpc
+        : values[definition.key] ?? null,
+  }));
+}
+
+export function performanceMetricValue(
+  items: readonly PerformanceMetricItem[],
+  key: PerformanceCanonicalMetricKey,
+): number | null {
+  return items.find((item) => item.key === key)?.value ?? null;
+}
+
 export type PerformanceConfirmedPayload = {
   impressions: number;
   likes: number;
@@ -477,6 +556,7 @@ export type PerformanceConfirmedPayload = {
   inquiries: number | null;
   reservations: number | null;
   purchases: number | null;
+  metricItems: PerformanceMetricItem[];
 };
 
 export type PerformanceFlag = {
@@ -788,7 +868,13 @@ function mapPerformanceExtractedPayload(
   data: ApiPerformanceExtractedPayload,
 ): PerformanceExtractedPayload {
   return {
+    adSpend: data.ad_spend
+      ? mapPerformanceCandidate(data.ad_spend)
+      : missingPerformanceCandidate(),
     impressions: mapPerformanceCandidate(data.impressions),
+    clicks: data.clicks
+      ? mapPerformanceCandidate(data.clicks)
+      : missingPerformanceCandidate(),
     likes: mapPerformanceCandidate(data.likes),
     comments: mapPerformanceCandidate(data.comments),
     reach: mapPerformanceCandidate(data.reach),
@@ -802,6 +888,12 @@ function mapPerformanceExtractedPayload(
 function mapPerformanceConfirmedPayload(
   data: ApiPerformanceConfirmedPayload,
 ): PerformanceConfirmedPayload {
+  const metricItems = Array.isArray(data.metric_items) && data.metric_items.length > 0
+    ? data.metric_items.map((item) => ({ ...item }))
+    : createPerformanceBaseMetricItems({
+        impressions: data.impressions,
+        published_content_count: data.published_content_count,
+      });
   return {
     impressions: data.impressions,
     likes: data.likes,
@@ -814,6 +906,17 @@ function mapPerformanceConfirmedPayload(
     inquiries: data.inquiries,
     reservations: data.reservations,
     purchases: data.purchases,
+    metricItems,
+  };
+}
+
+function missingPerformanceCandidate(): PerformanceMetricCandidate {
+  return {
+    value: null,
+    sourcePage: null,
+    sourceText: null,
+    confidence: 0,
+    verificationStatus: "NOT_FOUND",
   };
 }
 
@@ -832,6 +935,7 @@ function performanceConfirmedPayloadToApi(
     inquiries: data.inquiries,
     reservations: data.reservations,
     purchases: data.purchases,
+    metric_items: data.metricItems.map((item) => ({ ...item })),
   };
 }
 
@@ -908,43 +1012,44 @@ function mapContractPerformance(data: ApiContractPerformance): ContractPerforman
 }
 
 function mockConfirmedPayload(
+  adSpend: number,
   impressions: number,
-  likes: number,
-  comments: number,
-  saves: number,
-  shares: number,
+  clicks: number,
   publishedContentCount: number,
 ): PerformanceConfirmedPayload {
   return {
     impressions,
-    likes,
-    comments,
+    likes: 0,
+    comments: 0,
     reach: null,
-    saves,
-    shares,
+    saves: null,
+    shares: null,
     followerNetChange: null,
     publishedContentCount,
     inquiries: null,
     reservations: null,
     purchases: null,
+    metricItems: createPerformanceBaseMetricItems({
+      ad_spend: adSpend,
+      impressions,
+      clicks,
+      published_content_count: publishedContentCount,
+    }),
   };
 }
 
 function calculatePerformanceEngagementRate(payload: PerformanceConfirmedPayload): number | null {
-  if (payload.impressions === 0) return null;
-  return (
-    payload.likes
-    + payload.comments
-    + (payload.saves ?? 0)
-    + (payload.shares ?? 0)
-  ) / payload.impressions;
+  const impressions = performanceMetricValue(payload.metricItems, "impressions");
+  const clicks = performanceMetricValue(payload.metricItems, "clicks");
+  if (impressions === null || clicks === null || impressions <= 0) return null;
+  return clicks / impressions;
 }
 
 function createMockContractPerformance(contractId: string): ContractPerformance {
   const points = [
-    { period: "2026-05", payload: mockConfirmedPayload(12400, 400, 50, 30, 6, 4) },
-    { period: "2026-06", payload: mockConfirmedPayload(15200, 500, 60, 40, 12, 4) },
-    { period: "2026-07", payload: mockConfirmedPayload(8300, 180, 20, 40, 0, 2) },
+    { period: "2026-05", payload: mockConfirmedPayload(800_000, 12_400, 620, 4) },
+    { period: "2026-06", payload: mockConfirmedPayload(900_000, 15_200, 760, 4) },
+    { period: "2026-07", payload: mockConfirmedPayload(650_000, 8_300, 249, 2) },
   ];
   const reports = points.map(({ period, payload }, index): PerformanceReport => {
     const reportId = `mock-performance-${period}`;
@@ -1058,7 +1163,9 @@ function mockExtractedPayload(): PerformanceExtractedPayload {
         verificationStatus: "VERIFIED",
       };
   return {
+    adSpend: candidate(720000, "집행 광고비"),
     impressions: candidate(9100, "노출"),
+    clicks: candidate(310, "클릭 수"),
     likes: candidate(230, "좋아요"),
     comments: candidate(32, "댓글"),
     reach: candidate(7400, "도달"),

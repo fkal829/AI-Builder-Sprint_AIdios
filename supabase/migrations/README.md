@@ -147,6 +147,13 @@ constraint trigger가 confirmation RPC 반환 뒤 service-role 트랜잭션의 c
 `original_text`에 동기화한다. 공개 조정 링크와 최종 합의 비교는 이 문구와
 `source_page`를 사용하며 원문 파일 URL이나 계약 전문은 공개하지 않는다.
 
+`20260802060000_add_editable_performance_metric_items.sql`은 광고효과 확정 revision의
+`confirmed_payload.metric_items`가 있으면 최대 50개의 `{key,label,value,unit}` 배열인지
+검증한다. 소문자 slug key와 대소문자를 무시한 label의 고유성, canonical 지표 unit,
+nullable 비음수 숫자의 소수점 6자리 및 `COUNT`·`KRW` 정수 규칙을 강제한다. 기존
+append-only revision에 키가 없으면 legacy payload로 허용하며, 과거 행을 backfill하거나
+기존 confirmation RPC·migration을 수정하지 않는다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

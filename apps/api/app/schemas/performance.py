@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
@@ -62,6 +62,30 @@ EngagementRate = Annotated[
         mode="serialization",
     ),
 ]
+PerformanceMetricValue = Annotated[
+    Decimal,
+    Field(ge=0, decimal_places=6),
+    PlainSerializer(lambda value: float(value), return_type=float, when_used="json"),
+    WithJsonSchema(
+        {
+            "type": "number",
+            "minimum": 0,
+            "x-decimal-places": 6,
+        },
+        mode="serialization",
+    ),
+]
+PerformanceMetricUnit = Literal["KRW", "COUNT", "PERCENT", "NUMBER"]
+
+_CANONICAL_PERFORMANCE_METRIC_UNITS: dict[str, PerformanceMetricUnit] = {
+    "ad_spend": "KRW",
+    "impressions": "COUNT",
+    "clicks": "COUNT",
+    "ctr": "PERCENT",
+    "cpc": "KRW",
+    "published_content_count": "COUNT",
+}
+_DERIVED_PERFORMANCE_METRIC_KEYS = frozenset({"ctr", "cpc"})
 
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -103,8 +127,24 @@ class PerformanceSignedMetricCandidate(_PerformanceMetricCandidate):
     value: SignedMetric | None
 
 
+def _not_found_non_negative_candidate() -> PerformanceNonNegativeMetricCandidate:
+    return PerformanceNonNegativeMetricCandidate(
+        value=None,
+        source_page=None,
+        source_text=None,
+        confidence=0.0,
+        verification_status=PerformanceMetricVerificationStatus.NOT_FOUND,
+    )
+
+
 class PerformanceExtractedPayload(StrictPerformanceModel):
+    ad_spend: PerformanceNonNegativeMetricCandidate = Field(
+        default_factory=_not_found_non_negative_candidate
+    )
     impressions: PerformanceNonNegativeMetricCandidate
+    clicks: PerformanceNonNegativeMetricCandidate = Field(
+        default_factory=_not_found_non_negative_candidate
+    )
     likes: PerformanceNonNegativeMetricCandidate
     comments: PerformanceNonNegativeMetricCandidate
     reach: PerformanceNonNegativeMetricCandidate
@@ -112,6 +152,37 @@ class PerformanceExtractedPayload(StrictPerformanceModel):
     shares: PerformanceNonNegativeMetricCandidate
     follower_net_change: PerformanceSignedMetricCandidate
     published_content_count: PerformanceNonNegativeMetricCandidate
+
+
+class PerformanceMetricItem(StrictPerformanceModel):
+    key: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+    )
+    label: str = Field(min_length=1, max_length=50)
+    value: PerformanceMetricValue | None
+    unit: PerformanceMetricUnit
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def reject_label_control_characters(cls, value: object) -> object:
+        if isinstance(value, str) and _CONTROL_CHARACTERS.search(value):
+            raise ValueError("성과 지표 이름에는 제어문자를 사용할 수 없습니다.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_unit_and_value(self) -> Self:
+        canonical_unit = _CANONICAL_PERFORMANCE_METRIC_UNITS.get(self.key)
+        if canonical_unit is not None and self.unit != canonical_unit:
+            raise ValueError(f"{self.key} 지표의 단위는 {canonical_unit}이어야 합니다.")
+        if (
+            self.value is not None
+            and self.unit in {"COUNT", "KRW"}
+            and self.value != self.value.to_integral_value()
+        ):
+            raise ValueError("COUNT와 KRW 지표 값은 정수여야 합니다.")
+        return self
 
 
 class PerformanceConfirmedPayloadInput(StrictPerformanceModel):
@@ -126,9 +197,66 @@ class PerformanceConfirmedPayloadInput(StrictPerformanceModel):
     inquiries: NonNegativeMetric | None
     reservations: NonNegativeMetric | None
     purchases: NonNegativeMetric | None
+    metric_items: list[PerformanceMetricItem] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_metric_items(self) -> Self:
+        keys = [item.key for item in self.metric_items]
+        if len(keys) != len(set(keys)):
+            raise ValueError("성과 지표 key는 중복될 수 없습니다.")
+
+        labels = [item.label.casefold() for item in self.metric_items]
+        if len(labels) != len(set(labels)):
+            raise ValueError("성과 지표 이름은 대소문자를 구분하지 않고 중복될 수 없습니다.")
+
+        items = {item.key: item for item in self.metric_items}
+        self._validate_legacy_projection(items)
+        derived_values = _calculate_derived_metric_values(items)
+        for key in _DERIVED_PERFORMANCE_METRIC_KEYS:
+            item = items.get(key)
+            if item is not None and item.value is not None and item.value != derived_values[key]:
+                raise ValueError(f"{key} 값은 null이거나 서버 계산값과 정확히 같아야 합니다.")
+        return self
+
+    def _validate_legacy_projection(self, items: dict[str, PerformanceMetricItem]) -> None:
+        impressions = items.get("impressions")
+        if (
+            impressions is not None
+            and impressions.value is not None
+            and impressions.value != Decimal(self.impressions)
+        ):
+            raise ValueError("metric_items.impressions는 legacy impressions와 같아야 합니다.")
+
+        published_content_count = items.get("published_content_count")
+        legacy_published_content_count = (
+            Decimal(self.published_content_count)
+            if self.published_content_count is not None
+            else None
+        )
+        if (
+            published_content_count is not None
+            and published_content_count.value is not None
+            and published_content_count.value != legacy_published_content_count
+        ):
+            raise ValueError(
+                "metric_items.published_content_count는 legacy published_content_count와 "
+                "같아야 합니다."
+            )
 
 
 class PerformanceConfirmedPayload(PerformanceConfirmedPayloadInput):
+    @model_validator(mode="after")
+    def populate_derived_metric_values(self) -> Self:
+        items = {item.key: item for item in self.metric_items}
+        derived_values = _calculate_derived_metric_values(items)
+        self.metric_items = [
+            item.model_copy(update={"value": derived_values[item.key]})
+            if item.key in _DERIVED_PERFORMANCE_METRIC_KEYS
+            else item
+            for item in self.metric_items
+        ]
+        return self
+
     def calculate_engagement_rate(self) -> Decimal | None:
         if self.impressions == 0:
             return None
@@ -138,6 +266,46 @@ class PerformanceConfirmedPayload(PerformanceConfirmedPayloadInput):
             Decimal("0.000001"),
             rounding=ROUND_HALF_UP,
         )
+
+
+def _calculate_derived_metric_values(
+    items: dict[str, PerformanceMetricItem],
+) -> dict[str, Decimal | None]:
+    ad_spend = items.get("ad_spend")
+    impressions = items.get("impressions")
+    clicks = items.get("clicks")
+
+    ctr: Decimal | None = None
+    if (
+        clicks is not None
+        and clicks.value is not None
+        and impressions is not None
+        and impressions.value is not None
+        and impressions.value != 0
+    ):
+        ctr = _rounded_ratio(
+            clicks.value * Decimal(100),
+            impressions.value,
+            quantum=Decimal("0.01"),
+        )
+
+    cpc: Decimal | None = None
+    if (
+        ad_spend is not None
+        and ad_spend.value is not None
+        and clicks is not None
+        and clicks.value is not None
+        and clicks.value != 0
+    ):
+        cpc = _rounded_ratio(ad_spend.value, clicks.value, quantum=Decimal("1"))
+    return {"ctr": ctr, "cpc": cpc}
+
+
+def _rounded_ratio(numerator: Decimal, denominator: Decimal, *, quantum: Decimal) -> Decimal:
+    digit_count = len(numerator.as_tuple().digits) + len(denominator.as_tuple().digits)
+    with localcontext() as context:
+        context.prec = max(28, digit_count + 12)
+        return (numerator / denominator).quantize(quantum, rounding=ROUND_HALF_UP)
 
 
 class PerformanceReportConfirmation(StrictPerformanceModel):

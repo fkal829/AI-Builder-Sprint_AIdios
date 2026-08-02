@@ -30,6 +30,49 @@ Universal Extraction의 `additional_values` 좌표를 같은 페이지의 Docume
 `NEEDS_CHECK`로 처리한다. 이 수치는 별도 확률 보정 결과가 아니며 모델 판단의 범주를
 0~1 필드에 표현하기 위한 내부 매핑이다.
 
+### 2026-08-02 `05-many-blanks` live 필드 격리 문제 발견
+
+고정 평가 케이스 `05-many-blanks`를 Universal Extraction live로 호출하던 중,
+모델이 요청된 날짜 필드 하나에 ISO date 형식이 아닌 값을 반환했다. 응답 JSON
+객체와 나머지 필드는 유효했지만, 단일 후보의 Pydantic 검증 예외가 호출 전체로
+전파돼 정상 후보를 포함한 6개 추출 결과가 모두 폐기되는 문제를 확인했다.
+
+응답이 JSON이 아니거나 최상위 객체가 아닌 경우, 또는 요청하지 않은 필드가 포함된
+구조 오류는 기존처럼 해당 추출 호출 전체를 실패 처리한다. 반면 요청한 필드 하나의
+값만 서버의 타입·형식·enum·범위 검증을 통과하지 못하면 다른 정상 필드를
+보존하고 그 필드만 격리한다. Document Parse location으로 원문 근거를 검증할 수
+있으면 `value=null`과 원문 근거를 가진 `NEEDS_CHECK`, 근거도 검증할 수 없으면
+`value`, `source_page`, `source_text`가 모두 `null`이고 `confidence=0`인 `NOT_FOUND`로
+다룬다. 해당 필드는 Evaluator 2라운드 재추출 대상이며, 두 번째에도 해결되지
+않으면 격리 상태로 분석을 완료한다.
+
+이번 수정의 검증 범위는 고정 fake 응답을 사용한 offline regression까지다. 수정 후
+외부 Upstage를 다시 호출하지 않았으므로, `05-many-blanks` live 재검증은 아직 완료하지
+않았다.
+
+### 2026-08-02 `02-refund-omission` live 명시적 부재 오분류 발견
+
+고정 평가 케이스 `02-refund-omission`을 Universal Extraction live로 호출했을 때,
+모델은 "환불 조건은 계약서에 기재하지 않았다"는 원문을 `refund_condition` 값으로
+반환했다. 반환 위치와 Document Parse 원문이 실제로 일치하고 confidence도 `high`여서
+기존 검증은 이를 `VERIFIED`로 통과시켰다. 이는 근거가 없는 할루시네이션이 아니라,
+필드 설명이 실제 환불 조건과 환불 조건의 명시적 부재를 구분하지 못한 문제다.
+
+그 결과 사용자가 이해한 환불 조건이 있을 때 기대한 `MISSING` 대신, 명시적 부재 문장을
+계약상 환불 조건으로 비교한 `MISMATCH` 검토 항목이 생성될 수 있었다. 수정된 추출
+스키마 설명은 실제 환불 가능 여부·대상·금액·시기·방식만 값으로 추출하고, 계약서에
+환불 조건을 기재·명시·정하지 않았다는 문장은 속성에서 생략하도록 지시한다. 서버도
+검증된 `source_text`에 이 환불 전용 명시적 부재만 있고 실제 환불 조건이 함께 없으면
+모호 표현 판정보다 먼저 `value`, `source_page`, `source_text`를 `null`,
+`confidence=0`으로 정규화한 `NOT_FOUND`로 처리한다. 검증된 원문이 없으면 기존
+`MISSING_EVIDENCE`를 유지하고, 부재 표현과 실제 환불 조건이 한 근거에 섞여 있으면
+근거를 보존한 `NEEDS_CHECK`로 처리한다. 반면 "환불하지 않는다", "환불 불가"처럼 실제
+비환불 조건을 정한 문장은 유효한 계약 조건으로 유지한다.
+
+이번 수정 후 검증은 고정 fake 응답을 사용한 offline regression까지 수행한다. 외부
+Upstage를 다시 호출하지 않았으므로 `02-refund-omission` live 재검증은 아직 완료하지
+않았다.
+
 ## Solar 검토 문구
 
 live 모드는 `UPSTAGE_SOLAR_MODEL=solar-pro3`,
@@ -147,10 +190,15 @@ mock Solar 문구는 항목별 필드와 신호를 반영하지만 실제 모델
 
 17.5/P2-B-5 기반은 `apps/api/app/adapters/performance_metrics.py`의
 `SolarPerformanceMetricMapper`로 분리한다. Upstage Document Parse가 만든
-페이지별 원문을 입력받아 Solar가 아래 8개 지표 후보만
-`performance-report-metrics-v1` strict JSON Schema로 매핑한다.
+페이지별 원문을 입력받아 Solar가 strict JSON Schema로 지표 후보를 매핑한다.
+공유 추출 계약은 기존 8개 required 후보를 유지하고 `ad_spend`와 `clicks`를 optional로
+추가해 이전 payload도 계속 허용한다. 현재 구현의 prompt/schema version은
+`performance-report-metrics-v2`다. v2 Solar strict output에서는 아래 10개를 모두
+required로 요청하며, 원문에 없으면 새 두 후보도 생략하지 않고 `NOT_FOUND`로 반환한다.
+즉 optional은 저장된 v1 payload를 읽는 공개 계약의 호환 규칙이고 Solar 출력 규칙이 아니다.
 
-- `impressions`, `likes`, `comments`, `reach`, `saves`, `shares`
+- `ad_spend`, `impressions`, `clicks`
+- `likes`, `comments`, `reach`, `saves`, `shares`
 - `follower_net_change`
 - `published_content_count`
 
@@ -159,7 +207,9 @@ HTTP client를 생성하지 않는다. `live`는 Solar Chat에 strict structured
 요청한 뒤 Pydantic 스키마와 `source_page`/`source_text`의 실제 페이지
 포함 여부를 다시 검증한다. 인용문의 해당 지표 라벨과 그 라벨 구간의
 정수가 같은지도 검증해 페이지 전체에서 다른 지표 숫자를 고르는 결과를 거부한다.
-비율·기간·비용 문맥과 `%`·기간·금액 단위를 실적 건수로 인정하지 않는다.
+광고비는 명시적인 `ad_spend` 금액 후보로, 클릭은 명시적인 `clicks` 건수 후보로만
+취급한다. 비율·기간·비용 문맥과 `%`·기간·금액 단위를 다른 실적 건수로 인정하지 않는다.
+스키마 밖에서 발견한 표현을 임의 사용자 정의 지표로 만들거나 확정하지 않는다.
 원문에 없는 지표는 `NOT_FOUND`/`null`/
 `confidence=0`이고, 원문의 명시적인 `0`은 누락으로 바꾸지 않는다.
 `게시물 수`가 없으면 행이나 URL 수로 `published_content_count`를 추정하지
@@ -189,6 +239,10 @@ endpoint에 연결됐다. 일반 자동 테스트는 mock parser·mapper나 고�
 기대 정수값과 일치했다. API key·PDF 원문·`source_text`·외부 raw 응답은 결과에
 기록하지 않았고 Supabase DB·Storage에는 쓰지 않았다. 이 결과는 Adapter live
 연결 증거이며 아래 수직 E2E와 분리해 기록한다.
+
+이 live 증거는 계약 확장 전 8개 required 후보에 대한 것이다. 새 `ad_spend`와
+`clicks`까지 포함한 strict 출력은 별도 live 재검증 전이며, 사용자 정의 `metric_items`는
+Solar가 생성하지 않고 소유자 확인 PATCH에서만 추가·수정·삭제한다.
 
 ### 2026-08-01 광고효과 16.2~16.5 live 수직 E2E
 

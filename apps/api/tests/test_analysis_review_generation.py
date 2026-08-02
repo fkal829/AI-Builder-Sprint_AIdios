@@ -17,6 +17,7 @@ from app.schemas.analysis import (
     ExtractedTerm,
     ExtractedTermCandidate,
 )
+from app.schemas.understood_terms import UnderstoodTerm, UnderstoodTermSourceType
 from app.services.analysis import (
     _apply_solar_review_content,
     _build_review_items,
@@ -72,6 +73,35 @@ def make_candidate(
         confidence=0.93 if source_text is not None else 0,
         verification_status=status,
     )
+
+
+def test_not_found_refund_with_understood_condition_creates_only_missing() -> None:
+    refund = make_term(
+        field=ExtractedField.REFUND_CONDITION,
+        value=None,
+        status=VerificationStatus.NOT_FOUND,
+    )
+    understood = UnderstoodTerm(
+        contract_id=CONTRACT_ID,
+        duration_text="12개월",
+        monthly_amount=400_000,
+        total_amount=4_800_000,
+        refund_text="해지 이후 남은 기간 대금은 환불",
+        termination_text="30일 전에 알리면 중도해지 가능",
+        source_type=UnderstoodTermSourceType.USER_MEMORY,
+    )
+
+    reviews = _build_review_items(
+        contract_id=CONTRACT_ID,
+        terms=[refund],
+        understood=understood,
+    )
+
+    refund_reviews = [
+        review for review in reviews if refund.id in review.related_extracted_term_ids
+    ]
+    assert [review.type for review in refund_reviews] == [ReviewSignalType.MISSING]
+    assert all(review.type != ReviewSignalType.MISMATCH for review in reviews)
 
 
 def test_auto_renewal_yes_deterministically_creates_auto_renewal_type() -> None:

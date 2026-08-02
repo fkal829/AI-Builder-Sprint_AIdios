@@ -277,6 +277,43 @@ async def test_confirmed_report_appears_in_series_without_flags(performance_cont
     assert data["inquiry_drafts"] == []
 
 
+async def test_confirmed_series_preserves_editable_metric_items(performance_context) -> None:
+    client, adapter = performance_context
+    contract_id = uuid4()
+    seed_contract(adapter, contract_id=contract_id)
+    report_id = seed_extracted_report(adapter, contract_id=contract_id, period="2026-07")
+    confirmed_payload = confirmation_payload()["confirmed_payload"]
+    confirmed_payload["metric_items"] = [
+        {"key": "impressions", "label": "노출", "value": 10_000, "unit": "COUNT"},
+        {"key": "clicks", "label": "클릭", "value": 300, "unit": "COUNT"},
+        {"key": "ctr", "label": "클릭률", "value": None, "unit": "PERCENT"},
+        {
+            "key": "custom_metric",
+            "label": "맞춤 지표",
+            "value": 1.25,
+            "unit": "NUMBER",
+        },
+    ]
+    confirmed = await confirm(
+        client,
+        contract_id=contract_id,
+        report_id=report_id,
+        body=confirmation_payload(confirmed_payload=confirmed_payload),
+    )
+    assert confirmed.status_code == 200
+
+    response = await get_performance(client, contract_id=contract_id)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    series_items = data["confirmed_series"][0]["confirmed_payload"]["metric_items"]
+    report_items = data["reports"][0]["current_revision"]["confirmed_payload"][
+        "metric_items"
+    ]
+    assert series_items == report_items
+    assert {item["key"]: item["value"] for item in series_items}["ctr"] == 3
+
+
 async def test_flagged_report_surfaces_flags_and_inquiry_drafts(performance_context) -> None:
     client, adapter = performance_context
     contract_id = uuid4()

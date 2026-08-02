@@ -46,6 +46,27 @@ class RecordingComparisonAdapter:
         return self.outputs
 
 
+class EchoComparisonAdapter:
+    def __init__(self) -> None:
+        self.calls: list[list[CounterproposalComparisonInput]] = []
+
+    async def compare_counterproposals(
+        self,
+        *,
+        items: list[CounterproposalComparisonInput],
+    ) -> list[GeneratedCounterproposalComparison]:
+        self.calls.append(items)
+        return [
+            GeneratedCounterproposalComparison(
+                review_item_id=item.review_item_id,
+                changed_summary=f"{item.review_item_id}의 역제안을 비교했습니다.",
+                remaining_checks=["변경 내용을 확인하세요."],
+                final_confirmation="반영 여부를 최종 확인하세요.",
+            )
+            for item in reversed(items)
+        ]
+
+
 def request_item(item_id: UUID, text: str) -> AdjustmentRequestItemRecord:
     return AdjustmentRequestItemRecord(
         review_item_id=item_id,
@@ -135,6 +156,34 @@ async def test_comparator_does_not_call_solar_without_counterproposal() -> None:
 
     assert len(comparisons) == 1
     assert adapter.calls == []
+
+
+async def test_comparator_chunks_more_than_four_counterproposals_and_preserves_order() -> None:
+    item_ids = [UUID(int=index) for index in range(1, 7)]
+    adapter = EchoComparisonAdapter()
+    comparator = CounterproposalComparator(adapter)
+
+    comparisons = await comparator.compare(
+        request_items=tuple(
+            request_item(item_id, f"{index}번 요청 문구")
+            for index, item_id in enumerate(item_ids, start=1)
+        ),
+        responses=tuple(
+            response_item(
+                item_id,
+                AdjustmentResponseDecision.COUNTER,
+                counter_text=f"{index}번 역제안 문구",
+                reason=f"{index}번 역제안 사유",
+            )
+            for index, item_id in enumerate(item_ids, start=1)
+        ),
+    )
+
+    assert [[item.review_item_id for item in call] for call in adapter.calls] == [
+        item_ids[:4],
+        item_ids[4:],
+    ]
+    assert [comparison.review_item_id for comparison in comparisons] == item_ids
 
 
 @pytest.mark.parametrize(

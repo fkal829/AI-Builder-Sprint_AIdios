@@ -21,7 +21,7 @@ class AdjustmentConfirmationItem(BaseModel):
 
 class AdjustmentConfirmation(BaseModel):
     adjustment_request_id: UUID
-    confirmed_items: list[AdjustmentConfirmationItem] = Field(min_length=1, max_length=4)
+    confirmed_items: list[AdjustmentConfirmationItem] = Field(min_length=1)
     confirmed: Literal[True]
 
     @model_validator(mode="after")
@@ -78,7 +78,7 @@ class Agreement(BaseModel):
     title: Literal[AGREEMENT_TITLE]
     original_contract: OriginalContractReference
     condition_summary: AgreementConditionSummary
-    clauses: list[AgreementClause] = Field(min_length=1, max_length=4)
+    clauses: list[AgreementClause] = Field(min_length=1)
     unchanged_terms_policy: str = Field(min_length=1)
     signature_roles: list[Literal["OWNER", "AGENCY"]] = Field(min_length=2, max_length=2)
 

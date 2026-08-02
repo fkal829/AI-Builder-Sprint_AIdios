@@ -651,8 +651,7 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function mockRevisedContractReview(documentId: string): RevisedContractReview {
   const requested = DEMO_CONTRACT.clauses
-    .filter((clause) => clause.userChoice === "REQUEST" || clause.userChoice === "COMPROMISE")
-    .slice(0, 4);
+    .filter((clause) => clause.userChoice === "REQUEST" || clause.userChoice === "COMPROMISE");
   return {
     id: "mock-revised-contract-review",
     documentId,

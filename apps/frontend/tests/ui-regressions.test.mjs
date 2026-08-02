@@ -105,8 +105,9 @@ test("live comparison shows every parsed clause on the left and selected request
   assert.match(viewer, /data\.clauses\.filter\(\(clause\) => drafts\[clause\.id\]\)/);
   assert.match(viewer, /왼쪽 원문에서 조항을 선택해주세요/);
   assert.match(viewer, /goToClause/);
-  assert.match(viewer, /requestCount === 0 \|\| requestCount > 4/);
-  assert.match(viewer, /한 요청서에는 최대 4건만 담을 수 있어요/);
+  assert.match(viewer, /disabled=\{requestCount === 0\}/);
+  assert.doesNotMatch(viewer, /requestCount > 4/);
+  assert.doesNotMatch(viewer, /한 요청서에는 최대 4건만 담을 수 있어요/);
   assert.doesNotMatch(viewer, /<iframe/);
   assert.doesNotMatch(viewer, /contract-pdf-viewer/);
   assert.match(request, /const manualItems = Object\.entries\(draft \?\? \{\}\)/);

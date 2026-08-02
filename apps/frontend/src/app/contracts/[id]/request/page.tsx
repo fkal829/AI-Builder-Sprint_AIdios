@@ -50,8 +50,8 @@ export default function RequestPreviewPage() {
       }));
     if (!isUsingMock) {
       // 서버에는 이전 브라우저/세션에서 선택했던 항목이 남아 있을 수 있다. 현재
-      // 브라우저에서 확정한 초안이 있으면 그 항목만 발송 대상으로 삼아 1~4건 제한과
-      // 사용자가 마지막으로 본 미리보기가 어긋나지 않게 한다.
+      // 브라우저에서 확정한 초안이 있으면 그 항목만 발송 대상으로 삼아
+      // 사용자가 마지막으로 본 미리보기와 어긋나지 않게 한다.
       const automaticItems = state.data.items
         .filter((item) => {
           if (draft === null) return true;
@@ -97,10 +97,6 @@ export default function RequestPreviewPage() {
 
   const sendRequest = async () => {
     if (sending || items.length === 0) return;
-    if (items.length > 4) {
-      setSendError("한 요청서에는 조정 항목을 최대 4건까지 담을 수 있습니다.");
-      return;
-    }
     setSending(true);
     setSendError(null);
     try {
@@ -142,7 +138,7 @@ export default function RequestPreviewPage() {
           </CTAButton>
         ) : (
           <CTAButton
-            disabled={items.length === 0 || items.length > 4}
+            disabled={items.length === 0}
             onClick={() => setConfirm(true)}
           >
             대행사 전달 링크 만들기
@@ -188,11 +184,6 @@ export default function RequestPreviewPage() {
             링크 생성 전 미리보기예요. 링크를 만든 뒤 기존 이메일이나 메신저로 직접
             전달해주세요. 대행사는 회원가입 없이 요청서를 열람합니다.
           </p>
-          {items.length > 4 && (
-            <p className="text-xs font-bold text-red-700">
-              한 요청서에는 최대 4건만 담을 수 있어요. 이전 화면에서 요청 항목을 줄여주세요.
-            </p>
-          )}
           {sentLink && (
             <PublicLinkCard
               link={sentLink}

@@ -137,6 +137,11 @@ constraint trigger가 confirmation RPC 반환 뒤 service-role 트랜잭션의 c
 시점에도 비공개 검증 helper를 호출할 수 있도록, 완전히 한정된 trigger wrapper만
 `SECURITY DEFINER`로 전환한다. helper의 직접 실행 권한은 계속 공개하지 않는다.
 
+`20260802040000_remove_adjustment_item_count_limit.sql`은 조정 요청 초안과
+수정 계약서 대조에서 항목 수 상한을 제거한다. 초안은 한 항목 이상,
+선택·문구·원문 근거·순서·감사 이벤트 검증을 그대로 유지하고, 최신 수정본은
+확정된 모든 조항을 빈 배열 없이 대조할 수 있다.
+
 원격 프로젝트 적용에는 service-role key가 아니라 Supabase CLI 로그인·프로젝트 연결과
 DB 자격 정보가 필요하다.
 

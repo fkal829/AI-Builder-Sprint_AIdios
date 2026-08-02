@@ -26,7 +26,7 @@ class RevisedContractReviewCreate(BaseModel):
 class RevisedContractReviewConfirmation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    confirmed_review_item_ids: list[UUID] = Field(min_length=1, max_length=4)
+    confirmed_review_item_ids: list[UUID] = Field(min_length=1)
     confirmed: Literal[True]
 
 
@@ -47,6 +47,6 @@ class RevisedContractReview(BaseModel):
     document_id: UUID
     document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: RevisedContractReviewStatus
-    items: list[RevisedContractReviewItem] = Field(min_length=1, max_length=4)
+    items: list[RevisedContractReviewItem] = Field(min_length=1)
     created_at: datetime
     confirmed_at: datetime | None = None

@@ -321,7 +321,6 @@ function ViewerBody({
   };
   // 확인 필요 조항이 남아있으면 한 번 더 확인받고, 없으면 바로 진행
   const handleSendClick = () => {
-    if (requestCount > 4) return;
     if (pendingConfirm > 0) setConfirmSendWithPending(true);
     else void createRequest();
   };
@@ -534,13 +533,10 @@ function ViewerBody({
                 )}
               </>
             )}
-            {requestCount > 4 && (
-              <span className="ml-1 font-bold">· 한 요청서에는 최대 4건만 담을 수 있어요</span>
-            )}
           </div>
           <button
             onClick={handleSendClick}
-            disabled={requestCount === 0 || requestCount > 4}
+            disabled={requestCount === 0}
             className="flex-none rounded-lg bg-white px-4 py-2 text-[13px] font-bold transition hover:bg-white/90 disabled:opacity-40"
             style={{ color: barColor }}
           >

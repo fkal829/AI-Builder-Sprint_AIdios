@@ -215,6 +215,26 @@ async def test_draft_previews_selected_request_text_without_public_url(adjustmen
     assert events[-1].event_type == "ADJUSTMENT_DRAFT_CREATED"
 
 
+async def test_draft_accepts_more_than_four_selected_items(adjustment_context) -> None:
+    client, adapter = adjustment_context
+    contract_id = await reviewed_contract(client, adapter)
+    review_items = [
+        selected_review_item(contract_id=contract_id, choice=SuggestionChoice.REQUEST)
+        for _ in range(5)
+    ]
+    adapter._mock_review_items.update({item.id: item for item in review_items})
+
+    draft = await create_draft(
+        client,
+        contract_id,
+        [item.id for item in review_items],
+    )
+
+    assert [item["review_item_id"] for item in draft["items"]] == [
+        str(item.id) for item in review_items
+    ]
+
+
 async def test_draft_preserves_owner_confirmed_request_text_override(adjustment_context) -> None:
     client, adapter = adjustment_context
     contract_id = await reviewed_contract(client, adapter)
@@ -317,13 +337,6 @@ async def test_draft_rejects_unknown_document_clause(adjustment_context) -> None
         {
             "manual_items": [
                 {"document_clause_id": str(uuid4()), "request_text": "   "},
-            ],
-            "expires_in_hours": 72,
-        },
-        {
-            "review_item_ids": [str(uuid4()) for _ in range(4)],
-            "manual_items": [
-                {"document_clause_id": str(uuid4()), "request_text": "기한을 명확히 적어 주세요."},
             ],
             "expires_in_hours": 72,
         },

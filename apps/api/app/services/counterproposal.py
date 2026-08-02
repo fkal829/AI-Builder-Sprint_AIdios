@@ -15,6 +15,8 @@ from app.schemas.adjustments import (
     GeneratedCounterproposalComparison,
 )
 
+COUNTERPROPOSAL_BATCH_SIZE = 4
+
 
 class CounterproposalComparator:
     """Compare persisted agency responses with the owner's actual request copy."""
@@ -70,7 +72,13 @@ class CounterproposalComparator:
         if not items:
             return {}
         try:
-            generated = await self._adapter.compare_counterproposals(items=items)
+            generated = []
+            for start in range(0, len(items), COUNTERPROPOSAL_BATCH_SIZE):
+                generated.extend(
+                    await self._adapter.compare_counterproposals(
+                        items=items[start : start + COUNTERPROPOSAL_BATCH_SIZE]
+                    )
+                )
         except SolarCounterproposalError as error:
             raise CounterproposalComparisonUnavailable() from error
 

@@ -2159,7 +2159,6 @@ components:
         items:
           type: array
           minItems: 1
-          maxItems: 4
           items: {$ref: "#/components/schemas/AdjustmentRequestItem"}
         expires_in_hours: {type: integer, minimum: 1, maximum: 168}
         sent_at: {type: [string, "null"], format: date-time}
@@ -2221,12 +2220,10 @@ components:
       properties:
         review_item_ids:
           type: array
-          maxItems: 4
           uniqueItems: true
           items: {type: string, format: uuid}
         request_text_overrides:
           type: object
-          maxProperties: 4
           propertyNames: {type: string, format: uuid}
           additionalProperties:
             type: string
@@ -2235,15 +2232,14 @@ components:
           description: 사용자가 미리보기에서 직접 확인·수정한 요청 문구. 키는 review_item_ids의 부분집합이어야 한다.
         manual_items:
           type: array
-          maxItems: 4
           items: {$ref: "#/components/schemas/ManualAdjustmentItemCreate"}
-          description: 전체 원문 조항에서 사용자가 직접 선택해 작성한 요청. review_item_ids와 합해 1~4개여야 한다.
+          description: 전체 원문 조항에서 사용자가 직접 선택해 작성한 요청. review_item_ids와 합해 한 개 이상이어야 한다.
         expires_in_hours:
           type: integer
           minimum: 1
           maximum: 168
           description: DRAFT에는 TTL만 저장하며 절대 expires_at은 /send 성공 시 sent_at 기준으로 계산한다.
-      description: review_item_ids와 manual_items를 합해 중복 없이 1~4개를 전송한다.
+      description: review_item_ids와 manual_items를 합해 중복 없이 한 개 이상을 전송한다. 항목 개수에 상한을 두지 않는다.
     AdjustmentCopyPolishRequest:
       type: object
       additionalProperties: false
@@ -2320,7 +2316,6 @@ components:
         items:
           type: array
           minItems: 1
-          maxItems: 4
           items:
             type: object
             additionalProperties: false
@@ -2357,7 +2352,6 @@ components:
         responses:
           type: array
           minItems: 1
-          maxItems: 4
           uniqueItems: true
           description: 공개 요청의 모든 item_id를 빠짐없이 정확히 한 번씩 포함해야 하며 서버가 이를 검증한다.
           items:
@@ -2463,7 +2457,6 @@ components:
         confirmed_items:
           type: array
           minItems: 1
-          maxItems: 4
           uniqueItems: true
           description: 조정 요청의 모든 항목을 빠짐없이 정확히 한 번씩 포함해야 하며 서버가 응답 이력과 대조한다.
           items:
@@ -2495,7 +2488,6 @@ components:
         confirmed_review_item_ids:
           type: array
           minItems: 1
-          maxItems: 4
           uniqueItems: true
           items: {type: string, format: uuid}
         confirmed: {type: boolean, const: true}
@@ -2525,7 +2517,6 @@ components:
         items:
           type: array
           minItems: 1
-          maxItems: 4
           items: {$ref: "#/components/schemas/RevisedContractReviewItem"}
         created_at: {type: string, format: date-time}
         confirmed_at: {type: [string, "null"], format: date-time}
@@ -2811,7 +2802,6 @@ components:
         clauses:
           type: array
           minItems: 1
-          maxItems: 4
           items:
             type: object
             additionalProperties: false

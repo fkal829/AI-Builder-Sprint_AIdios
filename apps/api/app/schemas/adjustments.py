@@ -54,9 +54,9 @@ class ManualAdjustmentItemCreate(BaseModel):
 
 
 class AdjustmentRequestCreate(BaseModel):
-    review_item_ids: list[UUID] = Field(default_factory=list, max_length=4)
-    request_text_overrides: dict[UUID, str] = Field(default_factory=dict, max_length=4)
-    manual_items: list[ManualAdjustmentItemCreate] = Field(default_factory=list, max_length=4)
+    review_item_ids: list[UUID] = Field(default_factory=list)
+    request_text_overrides: dict[UUID, str] = Field(default_factory=dict)
+    manual_items: list[ManualAdjustmentItemCreate] = Field(default_factory=list)
     expires_in_hours: int = Field(ge=1, le=168)
 
     @model_validator(mode="after")
@@ -67,8 +67,8 @@ class AdjustmentRequestCreate(BaseModel):
         if len(set(manual_clause_ids)) != len(manual_clause_ids):
             raise ValueError("manual_items의 document_clause_id는 중복될 수 없습니다.")
         item_count = len(self.review_item_ids) + len(self.manual_items)
-        if not 1 <= item_count <= 4:
-            raise ValueError("조정 요청 항목은 모두 합해 1~4개여야 합니다.")
+        if item_count < 1:
+            raise ValueError("조정 요청 항목은 1개 이상이어야 합니다.")
         if not set(self.request_text_overrides).issubset(self.review_item_ids):
             raise ValueError("request_text_overrides 키는 review_item_ids에 포함되어야 합니다.")
         if any(
@@ -89,7 +89,7 @@ class AdjustmentRequest(BaseModel):
     id: UUID
     contract_id: UUID
     status: AdjustmentRequestStatus
-    items: list[AdjustmentRequestItem] = Field(min_length=1, max_length=4)
+    items: list[AdjustmentRequestItem] = Field(min_length=1)
     expires_in_hours: int = Field(ge=1, le=168)
     sent_at: datetime | None = None
     expires_at: datetime | None = None
@@ -129,7 +129,7 @@ class PublicAdjustment(BaseModel):
         AdjustmentRequestStatus.CONFIRMED,
     ]
     expires_at: datetime
-    items: list[PublicAdjustmentItem] = Field(min_length=1, max_length=4)
+    items: list[PublicAdjustmentItem] = Field(min_length=1)
 
 
 class PublicAdjustmentOpen(BaseModel):
@@ -157,7 +157,7 @@ class AdjustmentResponseSubmitItem(BaseModel):
 
 
 class AdjustmentResponsesSubmit(BaseModel):
-    responses: list[AdjustmentResponseSubmitItem] = Field(min_length=1, max_length=4)
+    responses: list[AdjustmentResponseSubmitItem] = Field(min_length=1)
 
     @model_validator(mode="after")
     def item_ids_are_unique(self) -> "AdjustmentResponsesSubmit":

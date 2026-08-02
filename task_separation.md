@@ -84,7 +84,7 @@ POST /contracts/{contract_id}/adjustment-requests/{adjustment_request_id}/send
 
 구현 기능:
 
-- B가 만든 `ReviewItem` 중 `SELECTED` 상태의 절충안/요청안만 1~4개 선택한다.
+- B가 만든 `ReviewItem` 중 `SELECTED` 상태의 절충안/요청안을 한 개 이상 선택하며 개수 상한을 두지 않는다.
 - 발송 전 조정 요청 초안과 실제 요청 문구를 미리보기로 제공한다.
 - 소상공인이 `confirmed=true`로 확인한 뒤 공개 링크를 활성화한다.
 - 발송 시 선택된 ReviewItem을 `SENT`로 동결한다.

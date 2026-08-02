@@ -363,7 +363,7 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 ## 7. 조정·수정 계약서 대조
 
 - 조정 요청 초안은 AI 검토 `review_item_id`와 사용자가 직접 고른 원문
-  `document_clause_id`를 합해 1~4개로 생성한다.
+  `document_clause_id`를 합해 중복 없이 한 개 이상으로 생성하며 개수 상한을 두지 않는다.
 - 초안 항목은 모두 `ReviewItem.status=SELECTED`이고 `user_choice`가 `COMPROMISE`
   또는 `REQUEST`여야 한다. 원안 수용인 `ACCEPT` 항목은 외부 요청으로 발송하지 않는다.
 - 직접 고른 원문 조항은 최신 완료 분석의 `document_clauses`에서 서버가 ID를 다시
@@ -408,7 +408,7 @@ non-null `TEXT` 값은 빈 문자열일 수 없다. `contract_renewal_type`도 `
 `NEGOTIATING`을 유지하며 서명 가능한 상태가 아니다.
 
 대행사가 기존 채널로 보낸 수정본은 `Document.type=REVISED_CONTRACT` PDF로 업로드한다.
-최신 수정본만 대조할 수 있으며 확정 조항 1~4개 각각에 `expected_text`, `match_status`,
+최신 수정본만 대조할 수 있으며 한 개 이상의 확정 조항 각각에 `expected_text`, `match_status`,
 `source_page`, `source_text`, `confidence`를 보존한다. 정규화한 정확 문구를 찾은 경우만
 `MATCHED`와 결정적 `confidence=1.0`으로 표시한다. 찾지 못했거나 표현이 다르면
 `NEEDS_CONFIRMATION`으로 두고 AI 또는 문자열 유사도만으로 합의 반영을 확정하지 않는다.
@@ -604,7 +604,7 @@ P0에서 구현하는 상태 변경은 최소한 다음 전이 계약을 지킨�
 | --- | --- | --- | --- |
 | Contract `DRAFT → ANALYZING` | OWNER의 분석 시작 | 소유 계약의 `CONTRACT` 문서, 실행 중 작업 없음 | `AnalysisTask=QUEUED`, `ANALYSIS_STARTED` |
 | Contract `ANALYZING → REVIEW_REQUIRED` | SYSTEM의 분석 성공 | 검증된 분석 결과 | canonical 승격, 첫 명확한 대표 의무 자동 생성, `ANALYSIS_COMPLETED` |
-| Contract `REVIEW_REQUIRED → NEGOTIATING` | OWNER의 조정 요청 발송 | 선택된 1~4개 항목, `confirmed=true` | 공개 토큰·만료시각, 항목 `SENT`, `ADJUSTMENT_SENT` |
+| Contract `REVIEW_REQUIRED → NEGOTIATING` | OWNER의 조정 요청 발송 | 선택된 한 개 이상의 항목, `confirmed=true` | 공개 토큰·만료시각, 항목 `SENT`, `ADJUSTMENT_SENT` |
 | Contract `NEGOTIATING` 유지 | OWNER의 최종 조정 확정 | 응답 완료, 항목별 유효한 resolution | 수락 항목 `RESOLVED`, 원안 유지 항목 `KEPT_ORIGINAL`, 확정 문구, `ADJUSTMENT_CONFIRMED` |
 | Contract `NEGOTIATING → READY_TO_SIGN` | OWNER의 수정본 대조 최종 확인 | 최신 수정본, 모든 대조 항목 명시 확인 | 대조 `CONFIRMED`, 문서 ID·SHA-256 고정, `REVISED_CONTRACT_CONFIRMED` |
 | Contract `READY_TO_SIGN` 유지 | OWNER의 임베디드 초안 생성 | 최신 확정 수정본 일치, 서명자 2명, `confirmed=true` | `Signature=EDITING`, `modusign_draft_id`, `SIGNATURE_DRAFT_CREATED`; 발송 없음 |

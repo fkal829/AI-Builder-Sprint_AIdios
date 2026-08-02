@@ -57,14 +57,16 @@ Adapter의 보안 검사와 Pydantic 스키마를 통과한 필드만 기록한 
 - 입력을 한 건씩 분리한 후 실제 요청 3회가 모두 성공했다. 따라서 endpoint·인증·
   strict JSON Schema 연동은 성공했지만, 3건 비스트리밍 배치는 현재 timeout 안에서
   안정적이라고 볼 수 없다.
-- 후속 구현에서 production 분석과 이 live 평가 실행기는 모두
+- 당시 후속 구현에서 production 분석과 live 평가 실행기는 모두
   `SolarReviewAdapter.generate_review_content`의 기본 1건 chunk 전략을 사용하도록
   통일했다. 전체 입력 ID·순서 검증이 끝나기 전에는 어떤 chunk 결과도 분석에 저장하지
-  않는다.
-- 이 변경 후 2026-07-31 09:05:34 UTC에 production과 같은 1건 chunk 전략으로
+  않는다. 이후 기본 chunk는 최대 4건으로 변경됐다.
+- 이 변경 후 2026-07-31 09:05:34 UTC에 당시 production과 같은 1건 chunk 전략으로
   외부 호출 3회를 다시 실행했고 모두 성공했다. 첫 샌드박스 격리 실행은 외부 연결이
   차단되어 HTTP status 없는 `ConnectError`로 종료됐으며, 네트워크 허용 환경에서
   동일 명령을 재실행해 위 결과를 얻었다.
+- 현재 4건 chunk에서는 안전 검증 실패를 결정 규칙 기반 fallback으로 격리하는 live
+  동작을 확인했지만, 4건 전체 생성 성공을 입증한 결과는 아직 없다.
 - 자동 테스트는 `429` 응답 뒤 한 번 재시도하여 성공하는 경우, 전송 timeout을 한 번
   재시도한 뒤 `SolarReviewError`로 종료하는 경우, 잘못된 JSON과 스키마·ID·안전·
   입력 근거 검증 실패, 뒤 chunk 실패 시 부분 결과를 반환하지 않는 경우를 검증한다.

@@ -1,0 +1,20 @@
+{
+  "mode": "OFFLINE_SNAPSHOT",
+  "case_count": 10,
+  "schema_valid_cases": 10,
+  "schema_success_rate": 100.0,
+  "extraction_correct": 58,
+  "extraction_total": 60,
+  "extraction_accuracy": 96.67,
+  "evidence_page_correct": 53,
+  "evidence_page_total": 55,
+  "evidence_page_accuracy": 96.36,
+  "mismatch_detected": 3,
+  "mismatch_total": 3,
+  "mismatch_detection_rate": 100.0,
+  "expected_signals_detected": 16,
+  "expected_signals_total": 16,
+  "expected_signal_recall": 100.0,
+  "unsupported_confirmed_warning_count": 0,
+  "meets_all_targets": true
+}

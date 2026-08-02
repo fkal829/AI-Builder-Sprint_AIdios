@@ -1,456 +1,353 @@
-# AI 사용 명세
+# AI_USAGE — 단디계약
 
-## P0 계약 분석
+단디계약은 부산 관광상권 소상공인이 광고대행 계약의 조건을 확인하고, 원문 근거가
+연결된 조정 요청을 만든 뒤 수정본 검증·서명·이행·광고효과·만료까지 관리하도록 돕는
+계약 생애주기 관리 서비스다.
 
-4.4 분석 작업은 `apps/api/app/adapters/upstage.py`의 Parse·Extract Adapter,
-`apps/api/app/adapters/solar.py`의 Solar 검토 문구 Adapter,
-`apps/api/app/services/analysis.py`의 결정적 검증 코드로 구성한다.
+이 파일은 제품 AI와 개발 과정 AI의 **단일 증빙·기술 기준 문서**다. API·데이터 계약은
+[api-data-contract.md](docs/api-data-contract.md), 실행 산출물은
+[docs/ai-evidence/](docs/ai-evidence/)에서 확인한다.
 
-| 단계 | 모드·API | 역할 |
+## 1. 기준과 표기
+
+| 항목 | 값 |
+| --- | --- |
+| 사실 검증일 | 2026-08-03 KST |
+| 제품 코드 기준 | `origin/main` / `e4cb13ec6fe397f44eb346a81ccfe514e1fb7de7` |
+| 최신 자동 검증 | [2026-08-03 전체 자동 검증](docs/ai-evidence/project-tests/2026-08-03/SUMMARY.md) |
+| 테스트 데이터 | 실제 개인정보가 없는 가상 계약·합성 PDF |
+
+- `LIVE_EXTERNAL`: 실제 외부 API를 호출한 기록이다. 실행일·모델·프롬프트 버전과
+  검증 범위를 함께 표시한다.
+- `AUTOMATED_OFFLINE`: 외부 Adapter를 mock으로 고정한 자동 테스트다.
+- `OFFLINE_SNAPSHOT`: 사람이 만든 정답·고정 추출 snapshot의 회귀 평가다. 실제 모델
+  정확도가 아니다.
+- `IMPLEMENTED_NOT_LIVE_VERIFIED`: 코드·자동 테스트는 있지만 별도 live 성공 산출물은 없다.
+
+## 2. 어떤 AI를 어디에 사용했는가
+
+| 제품 기능 | 사용 AI·API | 역할 | 증빙 상태 |
+| --- | --- | --- | --- |
+| 계약서·수정계약서·성과 리포트 읽기 | Upstage Document Parse `POST /v1/document-digitization` | PDF 페이지·원문 요소·좌표 추출 | `LIVE_EXTERNAL` |
+| 계약 조건 구조화 | Upstage Universal Information Extraction `POST /v1/information-extraction/chat/completions` | 정해진 JSON Schema의 계약 필드 28종 추출 | `LIVE_EXTERNAL` |
+| 계약 검토 문구 | Upstage Solar Chat `solar-pro3` | 서버가 찾은 누락·불일치·모호 신호의 쉬운 설명과 문구 3종 생성 | `LIVE_EXTERNAL` |
+| 대행사 역제안 비교 | Upstage Solar Chat `solar-pro3` | 달라진 점·남은 확인사항·최종 확인 문구 생성 | `LIVE_EXTERNAL` |
+| 조정 요청 문구 다듬기 | Upstage Solar Chat `solar-pro3` | 사용자가 쓴 문구를 조건과 숫자를 유지하며 정중하게 변환 | `IMPLEMENTED_NOT_LIVE_VERIFIED` |
+| 성과 리포트 지표 매핑 | Upstage Document Parse + Solar Chat `solar-pro3` | 광고비·노출·클릭 등 10개 후보와 원문 근거 매핑 | `LIVE_EXTERNAL`(v1 8개) / `AUTOMATED_OFFLINE`(v2 10개) |
+
+서비스는 OpenAI·Claude 등 다른 회사의 모델을 제품 런타임에서 호출하지 않는다.
+Codex·Claude Code는 개발 과정에서 사용한 코딩 도구이며 제품 사용자 데이터 처리 경로와
+분리된다.
+
+## 3. 사용자 흐름 기준 AI 호출 위치
+
+| 단계 | AI가 하는 일 | AI가 하지 않는 일 |
 | --- | --- | --- |
-| 문서 구조 분석 | mock 또는 Upstage `POST /v1/document-digitization` | 페이지, 원문 요소, 정규화 좌표 보존 |
-| 핵심 필드 추출 | mock 또는 Upstage Universal Extraction `POST /v1/information-extraction/chat/completions` | JSON Schema에 맞는 계약 필드 추출 |
-| 신호 판정 | 서버 코드 | 타입, 날짜, 금액, 원문 페이지·문장, 누락·불명확 표현·이해조건 불일치 검증 |
-| 검토 문구 생성 | mock 또는 Solar Chat `POST /v1/chat/completions` | 항목별 쉬운 설명과 원안 수용·절충·요청 문구 생성 |
+| 계약서 업로드·분석 | Parse로 문서를 읽고 Universal Extraction으로 28개 조건 후보와 위치·confidence를 추출 | 날짜·금액 계산, canonical 값 확정, 상태 전이 |
+| 계약 검토 | 서버가 먼저 만든 신호를 쉬운 말과 원안 수용·절충·요청 문구로 표현 | 불일치 여부나 위법성 판단, 조정 요청 자동 발송 |
+| 조정 문구 작성 | 사용자가 누른 경우에만 입력 문구를 정중하게 다듬고 미리보기를 반환 | 자동 적용·저장·발송, 숫자·조건 변경 |
+| 상대방 역제안 확인 | 실제 요청·역제안·사유의 차이와 확인사항을 요약 | 역제안 자동 수락·거절, 상태 변경 |
+| 수정계약서 검증 | Parse로 최신 PDF의 페이지별 원문을 추출 | 합의 반영 여부를 생성형 모델 의미 판단으로 확정 |
+| 광고효과 리포트 | Parse 후 v2의 10개 성과 후보와 페이지·인용문을 매핑 | 없는 지표 추정, 비율·금액을 다른 실적 건수로 오인 |
 
-live 추출 모델 alias는 `UPSTAGE_EXTRACT_MODEL=information-extract`이며 PDF 한 건을
-base64 문서 항목 하나로 전송한다. 추출 요청에는 first-level scalar JSON Schema와
-`location=true`, `location_granularity=element`, `confidence=true`, `split=false`를
-사용한다. 별도의 자유 형식 시스템 프롬프트 대신 각 필드의 한국어 설명과 타입을
-스키마에 명시한다.
+수정계약서는 Parse 단계에만 AI API가 사용된다. 확정 문구와 수정본의 일치 여부는 서버가
+NFKC 정규화·소문자화·공백 제거 후 정확 포함 여부로 검사한다. 정확히 찾은 경우만
+`MATCHED`, `source_page`, `source_text`, `confidence=1.0`을 기록한다. 찾지 못하거나 표현이
+다르면 `NEEDS_CONFIRMATION`이며, 사용자가 모든 항목을 확인해야 `READY_TO_SIGN`으로
+전이한다. 구현은 [revised_contracts.py](apps/api/app/services/revised_contracts.py)다.
 
-live Parse·Extract는 모델, 시작 시각, 성공·실패 상태, HTTP status, 지연 시간,
-스키마 검증 성공 여부만 구조화 로그에 남긴다. API key, 계약 원문·파일, data URL,
-전체 요청·응답 payload는 로그에 남기지 않는다.
+## 4. 모델·API·프롬프트·설정
 
-Universal Extraction의 `additional_values` 좌표를 같은 페이지의 Document Parse 요소와
-겹침 검증한 경우에만 해당 요소 원문을 `source_text`로 저장한다. 좌표가 맞지 않으면
-값을 확정하지 않고 `MISSING_EVIDENCE`로 처리한다. Upstage의 범주형 confidence는 저장
-스키마에 맞춰 `high=0.9`, `low=0.4`로 정규화한다. `low`는 원문 근거를 보존하되
-`NEEDS_CHECK`로 처리한다. 이 수치는 별도 확률 보정 결과가 아니며 모델 판단의 범주를
-0~1 필드에 표현하기 위한 내부 매핑이다.
+### 4.1 호출 위치
 
-### 2026-08-02 `05-many-blanks` live 필드 격리 문제 발견
+| 용도 | 모델·alias / 프롬프트 버전 | 구현 위치 |
+| --- | --- | --- |
+| Document Parse | 요청 alias `document-parse`; 2026-07-30 응답 모델 `document-parse-260128` | [upstage.py](apps/api/app/adapters/upstage.py) |
+| 계약 조건 추출 | `information-extract`; 자유 형식 시스템 프롬프트 없음 | [upstage.py](apps/api/app/adapters/upstage.py) |
+| 계약 검토 문구 | `solar-pro3` / `contract-review-copy-v1` | [solar.py](apps/api/app/adapters/solar.py), [analysis.py](apps/api/app/services/analysis.py) |
+| 역제안 비교 | `solar-pro3` / `counterproposal-comparison-v1` | [solar.py](apps/api/app/adapters/solar.py), [counterproposal.py](apps/api/app/services/counterproposal.py) |
+| 조정 문구 다듬기 | `solar-pro3` / `adjustment-copy-polish-v1` | [solar.py](apps/api/app/adapters/solar.py), [tone_polish.py](apps/api/app/services/tone_polish.py) |
+| 성과 지표 매핑 | `solar-pro3` / `performance-report-metrics-v2` | [performance_metrics.py](apps/api/app/adapters/performance_metrics.py), [performance_ai.py](apps/api/app/services/performance_ai.py) |
 
-고정 평가 케이스 `05-many-blanks`를 Universal Extraction live로 호출하던 중,
-모델이 요청된 날짜 필드 하나에 ISO date 형식이 아닌 값을 반환했다. 응답 JSON
-객체와 나머지 필드는 유효했지만, 단일 후보의 Pydantic 검증 예외가 호출 전체로
-전파돼 정상 후보를 포함한 6개 추출 결과가 모두 폐기되는 문제를 확인했다.
+### 4.2 요청 설정
 
-응답이 JSON이 아니거나 최상위 객체가 아닌 경우, 또는 요청하지 않은 필드가 포함된
-구조 오류는 기존처럼 해당 추출 호출 전체를 실패 처리한다. 반면 요청한 필드 하나의
-값만 서버의 타입·형식·enum·범위 검증을 통과하지 못하면 다른 정상 필드를
-보존하고 그 필드만 격리한다. Document Parse location으로 원문 근거를 검증할 수
-있으면 `value=null`과 원문 근거를 가진 `NEEDS_CHECK`, 근거도 검증할 수 없으면
-`value`, `source_page`, `source_text`가 모두 `null`이고 `confidence=0`인 `NOT_FOUND`로
-다룬다. 해당 필드는 Evaluator 2라운드 재추출 대상이며, 두 번째에도 해결되지
-않으면 격리 상태로 분석을 완료한다.
+| 호출 | 주요 설정 | 실패 처리 |
+| --- | --- | --- |
+| Document Parse | `ocr=auto`, `model=document-parse`, timeout 120초 | 문서 분석 실패로 종료; 고정 샘플로 대체하지 않음 |
+| Universal Extraction | first-level scalar JSON Schema, `location=true`, `location_granularity=element`, `confidence=true`, `split=false`, timeout 180초 | 스키마·근거 검증 실패 상태 보존 |
+| 계약 검토 문구 | `temperature=0.3`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, 현재 chunk 최대 4건, timeout 120초 | 일시 오류 1회 재전송; 모델 문구를 버리고 결정 규칙 항목으로 fallback |
+| 역제안 비교 | `temperature=0.2`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, 서비스 batch 최대 4건, timeout 120초 | 안전한 `502`; 저장된 상대방 응답과 상태는 유지 |
+| 조정 문구 다듬기 | `temperature=0.2`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, 1건, timeout 120초 | 안전한 `502`; 자동 저장·적용·발송하지 않음 |
+| 성과 지표 매핑 | `temperature=0`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, timeout 120초 | 일시 오류 1회 재전송 후 추출 attempt 실패 보존 |
 
-이번 수정의 검증 범위는 고정 fake 응답을 사용한 offline regression까지다. 수정 후
-외부 Upstage를 다시 호출하지 않았으므로, `05-many-blanks` live 재검증은 아직 완료하지
-않았다.
+Solar의 일시 오류 재전송 대상은 transport 오류와 HTTP `429`, `500`, `502`, `503`,
+`504`이며 최대 한 번이다. 설정 기본값은 [config.py](apps/api/app/core/config.py), 실제
+system prompt와 JSON Schema는 각 Adapter 상수에 함께 버전 관리한다.
 
-### 2026-08-02 `02-refund-omission` live 명시적 부재 오분류 발견
+### 4.3 프롬프트에 고정한 핵심 지침
 
-고정 평가 케이스 `02-refund-omission`을 Universal Extraction live로 호출했을 때,
-모델은 "환불 조건은 계약서에 기재하지 않았다"는 원문을 `refund_condition` 값으로
-반환했다. 반환 위치와 Document Parse 원문이 실제로 일치하고 confidence도 `high`여서
-기존 검증은 이를 `VERIFIED`로 통과시켰다. 이는 근거가 없는 할루시네이션이 아니라,
-필드 설명이 실제 환불 조건과 환불 조건의 명시적 부재를 구분하지 못한 문제다.
+- 계약 검토: 서버가 판정한 신호를 바꾸지 않고, 새 사실·숫자·법적 결론을 만들지 않는다.
+- 역제안 비교: 실제 요청·역제안·사유만 비교하고, 수락·거절이나 신뢰성 판단을 하지 않는다.
+- 문구 다듬기: 입력을 신뢰할 수 없는 데이터로 취급하고, 의도·주체·조건·날짜·금액·기간·
+  비율·숫자 개수를 유지한다. 결과는 사용자가 확인한 뒤 적용한다.
+- 성과 지표: v2의 10개 후보만 반환하고 각 값에 짧은 실제 원문과 페이지를 붙인다.
+  `ad_spend`는 원화 정수 금액, 나머지는 명시된 정수만 허용한다. 원문에 없으면
+  `NOT_FOUND`, `null`, `confidence=0`으로 반환한다.
 
-그 결과 사용자가 이해한 환불 조건이 있을 때 기대한 `MISSING` 대신, 명시적 부재 문장을
-계약상 환불 조건으로 비교한 `MISMATCH` 검토 항목이 생성될 수 있었다. 수정된 추출
-스키마 설명은 실제 환불 가능 여부·대상·금액·시기·방식만 값으로 추출하고, 계약서에
-환불 조건을 기재·명시·정하지 않았다는 문장은 속성에서 생략하도록 지시한다. 서버도
-검증된 `source_text`에 이 환불 전용 명시적 부재만 있고 실제 환불 조건이 함께 없으면
-모호 표현 판정보다 먼저 `value`, `source_page`, `source_text`를 `null`,
-`confidence=0`으로 정규화한 `NOT_FOUND`로 처리한다. 검증된 원문이 없으면 기존
-`MISSING_EVIDENCE`를 유지하고, 부재 표현과 실제 환불 조건이 한 근거에 섞여 있으면
-근거를 보존한 `NEEDS_CHECK`로 처리한다. 반면 "환불하지 않는다", "환불 불가"처럼 실제
-비환불 조건을 정한 문장은 유효한 계약 조건으로 유지한다.
+## 5. 모델 출력을 신뢰하지 않기 위한 장치
 
-이번 수정 후 검증은 고정 fake 응답을 사용한 offline regression까지 수행한다. 외부
-Upstage를 다시 호출하지 않았으므로 `02-refund-omission` live 재검증은 아직 완료하지
-않았다.
+1. **Evaluator Loop 최대 2회**: 첫 추출 뒤 누락·`NOT_FOUND`·근거 불일치·확인 필요
+   필드만 한 번 재추출한다.
+2. **원문 좌표 검증**: Universal Extraction 좌표가 같은 페이지 Parse 요소와 실제로
+   겹치는 경우에만 `source_text`를 인정한다.
+3. **잘못된 추출 후보 격리**: 요청한 필드 하나가 타입·형식·enum·범위를 어겨도 정상
+   후보는 보존한다. 원문 근거가 있으면 `NEEDS_CHECK`, 없으면 `NOT_FOUND`로 격리해
+   2라운드 재추출 대상으로 삼는다.
+4. **명시적 환불 부재 분리**: “환불 조건을 기재하지 않았다”는 문장은 실제 환불 조건으로
+   확정하지 않는다. 실제 비환불 조건과 섞였는지는 서버가 원문을 다시 검사한다.
+5. **엄격한 출력 계약**: Solar 응답을 strict JSON Schema와 Pydantic으로 이중 검증한다.
+6. **입력·출력 ID 검증**: UUID 개수·중복·순서 또는 집합이 요청과 다르면 사용하지 않는다.
+7. **근거 없는 숫자 차단**: 입력에 없는 숫자를 만든 계약 검토·역제안 결과를 거부한다.
+   문구 다듬기는 숫자별 출현 횟수까지 동일해야 한다.
+8. **금지 단정 검사**: 사기·위법·업체 안전성·승소 가능성·법률 자문 대체 같은 단정을
+   거부한다.
+9. **confidence 분리**: Upstage `high=0.9`, `low=0.4`는 내부 표현값이지 보정 확률이
+   아니다. Solar 자기평가도 법적 정확도나 원문 추출 confidence로 사용하지 않는다.
+10. **사람 승인 게이트**: 발송, 역제안 수락, 최종 합의, 서명 초안 시작, 증빙 승인,
+   재계약·종료는 사용자 명시 행동 없이는 실행하지 않는다.
 
-## Solar 검토 문구
+날짜·금액·비율·총액·D-day·계약 상태 전이는 결정적 Python·SQL 코드가 처리한다.
 
-live 모드는 `UPSTAGE_SOLAR_MODEL=solar-pro3`,
-`UPSTAGE_SOLAR_TIMEOUT_SECONDS=120`을 기본값으로 사용한다. 서버가 먼저 누락,
-불일치, 명시적인 모호 표현과 책임 확인 후보를 만든 뒤 필요한 최소 원문과 사용자
-이해조건만 Solar에 전달한다. Solar는 신호 종류, 원문 근거, 날짜·금액 계산, 상태,
-사용자 선택을 변경할 수 없고 다음 필드만 생성한다.
+## 6. 프론트엔드와 비밀정보 경계
 
-- `plain_explanation`
-- `suggestion_accept`
-- `suggestion_compromise`
-- `suggestion_request`
-- 비보정 자기평가값과 모델 한계
+- 프론트엔드는 Upstage Document Parse·Universal Extraction·Solar Chat을 직접 호출하지
+  않고 FastAPI 소유자 API를 사용한다.
+- Supabase Auth는 `src/lib/supabase/*`에서 브라우저가 직접 사용한다. 브라우저에는 공개용
+  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`가 포함될 수 있다.
+- Supabase service-role secret과 Upstage·Solar·모두싸인 비밀키는 서버 환경에만 둔다.
+- API key, Authorization 헤더, 계약 전문, 공개 토큰, 서명 URL, 모델 원시 응답을 로그에
+  남기지 않는다. 공개 토큰은 CSPRNG로 생성하고 DB에는 SHA-256 hash만 저장한다.
+- AI 설명·원문·사용자 이해조건·공식 기준·조정 요청안을 UI에서 서로 다른 층위로 표시하고,
+  원문 페이지·문장을 같은 카드에서 확인할 수 있게 한다.
 
-응답은 `contract-review-copy-v1` 프롬프트와 strict JSON Schema로 요청하고 별도의
-Pydantic 스키마로 다시 검증한다. 검토 항목은 Adapter 상한인 4건씩 묶어 호출한다.
-전체 입력 UUID의 개수·중복·순서가 일치하고 모든 문구 검증을 통과한 경우에만 Solar
-문구를 사용한다. 세 문구가 같거나, 금지된 단정 표현 또는 입력 근거에 없는 숫자가
-있으면 Solar 결과 전체를 저장하지 않는다. 결정 규칙과 검증된 Solar 문구가 함께
-사용된 항목은 `detection_method=HYBRID`다.
+현재 광고효과 화면은 목업이 아니다. 업로드·추출·확정·정정·집계 API가 연결되어 있고,
+Supabase 이메일·비밀번호 가입·로그인·복구·세션 토큰 경로도 구현되어 있다. 회귀 테스트는
+[performance-api-wiring.test.mjs](apps/frontend/tests/performance-api-wiring.test.mjs)와
+[live-api-wiring.test.mjs](apps/frontend/tests/live-api-wiring.test.mjs)에 있다.
 
-Solar Chat API는 보정된 confidence를 제공하지 않는다. 공개 계약의
-`model_confidence`에는 Solar가 반환한 비보정 자기평가값을 넣고,
-`model_limitations`에 이것이 법적 판단 정확도나 `source_confidence`가 아님을
-명시한다. `source_confidence`는 기존 원문 추출 근거 값으로 유지한다.
+## 7. 테스트·평가·검증 산출물
 
-Solar timeout, HTTP 오류, 잘못된 JSON, 스키마 오류, 출력 ID 불일치가 발생하면 모델
-문구를 버리고 서버가 이미 만든 결정 규칙 기반 검토 항목으로 분석을 완료한다. 이때
-항목은 `detection_method=DETERMINISTIC`이고 모델 자기평가와 한계를 저장하지 않는다.
-`429`와 일시적인 전송·서버 오류만 Adapter에서 한 번 재시도한다. Solar 문구 실패는
-추출값·원문 근거·신호·상태 전이를 변경하지 않으며 추출 Evaluator Loop의
-`attempt_count`에도 포함하지 않는다.
+### 7.1 2026-08-03 현재 자동 검증 — `AUTOMATED_OFFLINE`
 
-### 2026-08-01 저장 계약 live 실패 재현과 fallback 검증
+| 검증 | 결과 |
+| --- | ---: |
+| 백엔드 pytest | 820 passed, 실패·오류·skip 0 |
+| Ruff | 진단 0건 |
+| 프론트 소스 회귀 테스트 | 35 passed, 실패 0 |
+| 프론트 ESLint | 통과 |
+| Next.js 프로덕션 빌드 | 통과 |
+| 고정 계약 10건 오프라인 평가 | 선언 목표 전체 통과 |
 
-사용자가 명시적으로 실제 Upstage 사용을 요청해, 저장된 계약 한 건을 DB 쓰기 없이
-live Adapter 경로로 재현했다. API key·계약 원문·파일명·Storage 경로·원시 모델 응답은
-출력하지 않았다.
+JUnit XML, Ruff JSON, 프론트 실행 출력, 빌드 출력, 환경, 재현 범위와 SHA-256은
+[2026-08-03 검증 패키지](docs/ai-evidence/project-tests/2026-08-03/SUMMARY.md)에 보관한다.
+제품 코드 기준은 `e4cb13e...`이며, 이 문서 통합 브랜치에서 다시 실행했다.
 
-- Document Parse 성공: 5페이지, 원문 요소 74개
-- Universal Extraction 성공: 대상 필드 28개, Evaluator 2라운드
-- 결정 규칙 검토 후보 14개 생성
-- 기존 1건 chunk 경로에서 첫 항목은 성공했지만 다음 항목의 Solar 문구에 입력 근거에
-  없는 숫자가 포함되어 안전 검증이 거부했음을 확인
-- 기본 chunk를 4건으로 바꾸고 같은 계약을 다시 실행한 결과, Solar 문구 검증 실패를
-  결정 규칙 항목 14개로 fallback해 최종 `Analysis` 스키마 검증 완료
-- 최종 안전 메타데이터: 추출값 28개, 검토 항목 14개,
-  `detection_method=DETERMINISTIC` 14개
+### 7.2 고정 계약 10건 — `OFFLINE_SNAPSHOT`
 
-이 검증은 실제 Upstage Parse·Extract·Solar 연결과 실패 격리를 확인한 것이며 계약
-내용의 법률적 정확도 평가는 아니다. 저장된 실패 작업의 재시작은 사용자가 화면의
-`같은 계약서 다시 분석하기`를 명시적으로 눌렀을 때만 새 작업으로 실행한다.
+| 지표 | 결과 |
+| --- | ---: |
+| 핵심 필드 추출 정확도 | 96.67% (58/60) |
+| 근거 페이지 연결 정확도 | 96.36% (53/55) |
+| 필수 JSON 스키마 성공률 | 100% (10/10) |
+| 기간·총액 불일치 탐지율 | 100% (3/3) |
+| 기대 확인 신호 재현율 | 100% (16/16) |
+| 근거 없는 확정 경고 | 0건 |
 
-## Solar 역제안 비교
+상세 분모는 [RESULTS.md](fixtures/evaluation/RESULTS.md)다. 이 결과는 실제 모델 정확도가
+아니며 고정 snapshot과 결정 규칙의 회귀 결과다.
 
-5.2 소유자용 조정 상세 조회는 `apps/api/app/services/counterproposal.py`의
-`CounterproposalComparator`를 사용한다. 수락·거절 설명은 서버 코드가 결정적으로
-만들고, 역제안만 저장된 실제 요청 문구, 대행사의 역제안 문구와 사유를 Solar Chat에
-전달한다.
+### 7.3 실제 외부 API 검증 — `LIVE_EXTERNAL`
 
-live 요청은 `counterproposal-comparison-v1` 프롬프트와 strict JSON Schema를 사용해
-다음 필드만 생성한다.
+| 일자 | 범위 | 결과·원본 |
+| --- | --- | --- |
+| 2026-07-30 | 계약 Parse·Extract + Supabase 수직 흐름 | 2페이지·31요소, 28필드 중 `VERIFIED` 27 / `NEEDS_CHECK` 1; [기술 기록](#2026-07-30-live-확인) |
+| 2026-07-31 | 계약 검토 문구 | 1건 단위 요청 3회 성공, strict schema 3/3; [SOLAR_LIVE_RESULTS.md](fixtures/evaluation/SOLAR_LIVE_RESULTS.md) |
+| 2026-07-31 | 역제안 비교 | 가상 역제안 1건 성공; [COUNTERPROPOSAL_LIVE_RESULTS.md](fixtures/evaluation/COUNTERPROPOSAL_LIVE_RESULTS.md) |
+| 2026-08-01 | 저장 계약 실패 격리 | Parse 5페이지·74요소, 28필드·2라운드 후 안전 검증 실패를 결정 규칙 14건으로 fallback; [기술 기록](#2026-08-01-저장-계약-live-실패-재현과-fallback-검증) |
+| 2026-08-01 | 성과 지표 Adapter | 합성 PDF 기대 지표 8/8, 근거 있는 `VERIFIED`; [기술 기록](#p2-성과-리포트-지표-매핑-기반) |
+| 2026-08-01 | 광고효과 16.2~16.5 수직 E2E | 로컬 FastAPI TCP·live Supabase·Upstage·Solar, 멱등 3/3, `no-store` 7/7, cleanup 6/6; [runner](apps/api/evaluation/performance_e2e_live.py) |
 
-- `changed_summary`
-- `remaining_checks`
-- `final_confirmation`
+live 호출 기록에는 API key·계약 원문·`source_text`·Storage 경로·원시 응답을 넣지 않는다.
 
-출력 UUID는 입력 UUID와 정확히 일치해야 하며 빈 확인사항, 추가 필드, 금지된 법적·
-신뢰성 단정과 입력에 없는 숫자는 거부한다. 비교 결과는 조정 상태를 변경하거나
-역제안을 자동 수락·재요청하지 않는다. Solar 요청 또는 검증 실패는
-`502 ANALYSIS_SCHEMA_INVALID`로 반환하며 먼저 저장된 대행사 응답은 유지한다.
-mock 결과는 실제 요청·역제안·사유를 반영한 규칙 기반 예시이고 실제 Solar 응답이
-아니다.
+### 7.4 실패와 미검증 범위
 
-2026-07-31 09:17:58 UTC에 가상 역제안 한 건을 실제 `solar-pro3`로 호출해
-`counterproposal-comparison-v1` strict JSON Schema 검증, 달라진 점·남은
-확인사항·최종 확인 생성과 입력 근거 검사를 모두 통과했다. 결과와 재현 명령은
-`fixtures/evaluation/COUNTERPROPOSAL_LIVE_RESULTS.md`에 기록한다.
+- 계약 검토 문구 3건을 한 요청으로 보낸 최초 live 배치는 120초 timeout과 한 번의 재시도
+  뒤에도 `ReadTimeout`으로 실패했다. 1건씩 보낸 3회는 성공했다.
+- 현재 기본 계약 검토 chunk는 최대 4건이다. 4건 chunk의 안전 fallback은 확인했지만,
+  4건 전체 생성 성공을 입증한 live 결과는 없다.
+- `adjustment-copy-polish-v1`은 자동 테스트가 있지만 별도 Solar live 성공 산출물은 없다.
+- 2026-08-02 발견한 단일 추출 후보 형식 오류 격리와 환불 조건 명시적 부재 처리는
+  고정 응답 회귀 테스트를 통과했지만 해당 두 live 케이스를 다시 호출하지 않았다.
+- 현재 성과 매핑은 `performance-report-metrics-v2` 10개 후보다. live 증거는 확장 전
+  v1의 8개 후보에 관한 것이며, 새 `ad_spend`·`clicks` strict 출력은 live 미검증이다.
+- 광고효과 수직 E2E는 배포 서버가 아니라 로컬 FastAPI를 실제 TCP로 기동한 검증이다.
+- 2026-08-03 자동 검증은 외부 Adapter를 재호출하지 않았다.
 
-## 수정 계약서 대조
+## 8. 개발 과정의 AI 활용과 증빙 범위
 
-대행사 응답을 소상공인이 확정해도 계약을 곧바로 서명 준비 상태로 바꾸거나 서비스가
-별도 합의서를 생성하지 않는다. 대행사가 외부 채널로 보낸 수정 계약서 PDF를 소상공인이
-다시 업로드하면 기존 Upstage Parse Adapter로 페이지별 원문만 추출한다.
+팀 기록에 따르면 백엔드 구현·테스트에는 Codex, 프론트 구현·검증에는 Claude Code,
+초기 화면 설계에는 Claude 기반 디자인 도구와 공개 디자인 Skill을 사용했다.
 
-확정된 각 최종 문구와 수정본의 대조는 생성형 모델 판단이 아니라 서버 코드가 NFKC
-정규화, 소문자화, 공백 정규화 뒤 완전 포함 여부로 처리한다. 완전히 일치한 항목에만
-`source_page`, `source_text`, `confidence=1`을 붙이고, 표현이 다르거나 찾지 못한 항목은
-`NEEDS_CONFIRMATION`으로 남긴다. 사용자가 모든 항목을 명시적으로 체크한 뒤에만 계약을
-`READY_TO_SIGN`으로 전이한다. 서명 초안은 확정한 수정 PDF의 문서 ID와 SHA-256을 검증해
-같은 파일을 모두싸인에 전달하며, 서비스가 서명 요청을 자동 발송하지 않는다.
+저장소에서 직접 확인 가능한 개발 AI 증빙은 다음과 같다.
 
-## Evaluator Loop
+| 증빙 | 확인 가능한 내용 |
+| --- | --- |
+| [AGENTS.md](AGENTS.md) | 저장소 경계, 근거 보존, 결정적 계산, 자동 발송 금지 |
+| [apps/api/AGENTS.md](apps/api/AGENTS.md) | API·AI 파이프라인·스키마·상태 전이·테스트 규칙 |
+| [apps/frontend/CLAUDE.md](apps/frontend/CLAUDE.md) | 추측 금지, 최소·외과적 변경, 검증 가능한 성공 기준 |
+| [dandi-issue-to-pr Skill](.agents/skills/dandi-issue-to-pr/SKILL.md) | 이슈→브랜치→구현→검증→PR 절차 |
+| [PR #107](https://github.com/fkal829/AI-Builder-Sprint_AIdios/pull/107) | 광고효과 프론트 API 연동 |
+| [PR #109](https://github.com/fkal829/AI-Builder-Sprint_AIdios/pull/109) | 운영 소유자 Supabase Auth |
+| [PR #115](https://github.com/fkal829/AI-Builder-Sprint_AIdios/pull/115) | Solar 조정 요청 문구 다듬기 |
+| [PR #119](https://github.com/fkal829/AI-Builder-Sprint_AIdios/pull/119) | 계약 비교·공개 원문 근거 표시 |
 
-1. 선택한 주 계약 문서와 지원 문서를 각각 한 번 Parse한다.
-2. 1라운드에서 모든 선택 문서의 추출 결과를 Pydantic 스키마로 검증한다.
-3. 문서별 누락, `NOT_FOUND`, 근거 불일치, 확인 필요 필드만 2라운드 재추출 대상으로
-   좁힌다.
-4. 지원 문서 수와 관계없이 작업의 Evaluator `attempt_count`는 최대 2라운드다. 한
-   라운드에는 선택 문서별 추출 호출이 하나씩 포함될 수 있다.
-5. 두 번째에도 찾지 못한 필드는 `NOT_FOUND`, 근거가 맞지 않는 값은
-   `MISSING_EVIDENCE`로 저장한다.
-6. 날짜·금액·비율·canonical 승격과 계약 상태 전이는 모델이 아니라 서버 코드와 DB
-   트랜잭션이 처리한다.
+지침 파일은 에이전트 설정과 작업 경계를 증명하지만 개별 AI 세션의 모델 ID·대화 전문까지
+증명하지는 않는다. 공개 디자인 Skill의 설치본도 개인 에이전트 디렉터리로 관리되어 현재
+저장소에는 포함하지 않는다. 따라서 개발 AI의 세션별 기여도를 제품 live 증빙이나 자동
+테스트 수치와 혼합하지 않는다.
 
-mock 모드는 고정된 가상 계약 결과를 사용하며, 발견한 값에는 `source_page`,
-`source_text`, `confidence`가 모두 포함된다. 찾지 못한 필드도 같은 공개 스키마를
-사용하되 근거 필드는 `null`, confidence는 `0`이다. mock 결과를 live 연동 성과로
-간주하지 않는다.
+## 9. 현재 한계
 
-mock Solar 문구는 항목별 필드와 신호를 반영하지만 실제 모델 응답이 아니며
-`model_limitations`에도 이 사실을 표시한다.
+- 배포 FastAPI·배포 Supabase·배포 프론트를 모두 묶은 운영 환경 live E2E는 별도 검증이
+  필요하다.
+- 계약 검토 4건 chunk와 문구 다듬기의 별도 live 성공 산출물이 필요하다.
+- 추출 후보 격리·환불 부재 처리의 수정 후 live 재검증과 성과 지표 v2 10개 후보의 live
+  재검증이 필요하다.
+- 모델 confidence는 확률 보정 결과가 아니다.
+- 이 서비스는 법률 자문, 사기·위법성 판정, 업체 신뢰성 판정, 승소 가능성 예측을 제공하지
+  않는다.
 
-## P2 성과 리포트 지표 매핑 기반
+## 10. 재현 명령
 
-17.5/P2-B-5 기반은 `apps/api/app/adapters/performance_metrics.py`의
-`SolarPerformanceMetricMapper`로 분리한다. Upstage Document Parse가 만든
-페이지별 원문을 입력받아 Solar가 strict JSON Schema로 지표 후보를 매핑한다.
-공유 추출 계약은 기존 8개 required 후보를 유지하고 `ad_spend`와 `clicks`를 optional로
-추가해 이전 payload도 계속 허용한다. 현재 구현의 prompt/schema version은
-`performance-report-metrics-v2`다. v2 Solar strict output에서는 아래 10개를 모두
-required로 요청하며, 원문에 없으면 새 두 후보도 생략하지 않고 `NOT_FOUND`로 반환한다.
-즉 optional은 저장된 v1 payload를 읽는 공개 계약의 호환 규칙이고 Solar 출력 규칙이 아니다.
+외부 호출 없는 자동 검증:
 
-- `ad_spend`, `impressions`, `clicks`
-- `likes`, `comments`, `reach`, `saves`, `shares`
-- `follower_net_change`
-- `published_content_count`
+```bash
+env -i PATH=/usr/bin:/bin LC_ALL=C.UTF-8 PYTHONPATH=apps/api \
+  PYTHONDONTWRITEBYTECODE=1 APP_ENV=local SUPABASE_MODE=mock \
+  UPSTAGE_MODE=mock MODUSIGN_MODE=mock \
+  apps/api/.venv/bin/python -m pytest \
+  -c apps/api/pyproject.toml apps/api/tests --strict-config \
+  -p no:cacheprovider -q --tb=short --color=no
 
-`mock`는 명시적인 `지표명: 정수`형 가상 원문만 결정적으로 읽고
-HTTP client를 생성하지 않는다. `live`는 Solar Chat에 strict structured output을
-요청한 뒤 Pydantic 스키마와 `source_page`/`source_text`의 실제 페이지
-포함 여부를 다시 검증한다. 인용문의 해당 지표 라벨과 그 라벨 구간의
-정수가 같은지도 검증해 페이지 전체에서 다른 지표 숫자를 고르는 결과를 거부한다.
-광고비는 명시적인 `ad_spend` 금액 후보로, 클릭은 명시적인 `clicks` 건수 후보로만
-취급한다. 비율·기간·비용 문맥과 `%`·기간·금액 단위를 다른 실적 건수로 인정하지 않는다.
-스키마 밖에서 발견한 표현을 임의 사용자 정의 지표로 만들거나 확정하지 않는다.
-원문에 없는 지표는 `NOT_FOUND`/`null`/
-`confidence=0`이고, 원문의 명시적인 `0`은 누락으로 바꾸지 않는다.
-`게시물 수`가 없으면 행이나 URL 수로 `published_content_count`를 추정하지
-않는 두 경계는 `fixtures/evaluation/performance-metrics/`에 고정했다.
+apps/api/.venv/bin/python -m ruff check \
+  apps/api/app apps/api/tests apps/api/evaluation --no-cache
 
-로그는 prompt version, model, 시작 시각, 성공/실패, HTTP status, 페이지·
-지표 개수, 지연 시간, 스키마 검증 여부만 남긴다. 리포트 원문,
-요청·응답 payload, API key는 로그에 남기지 않고 model도 외부 응답이 아닌
-서버에 설정된 값만 기록한다. `apps/api/app/services/performance_ai.py`는 점유된
-private 원본을 다운로드하고 Upstage Parse 후 이 mapper를 호출한다.
-이 조합은 `get_performance_report_extraction_service`를 통해 16.3 공개 추출
-endpoint에 연결됐다. 일반 자동 테스트는 mock parser·mapper나 고정 fake를
-사용하며 외부 네트워크를 호출하지 않는다.
+cd apps/frontend
+npm test
+npm run lint
+npm run build
+```
 
-16.3 서버는 stale 작업이나 extraction attempt 전체를 자동으로 재실행하지 않는다.
-사용자가 새 `Idempotency-Key`로 명시적으로 재시도해야 Document Parse부터 새 attempt가
-시작된다. 다만 이미 claim한 동일 attempt 안에서 Solar 요청이 일시적인 transport 오류
-또는 HTTP `429`/`500`/`502`/`503`/`504`로 실패하면 mapper가 최대 1회 전송
-재시도한다. 이 재전송은 Document Parse를 다시 실행하거나 새 attempt를 claim하지 않으며,
-두 전송이 모두 실패하면 `REPORT_EXTRACT_FAILED`로 종료한다.
-
-2026-08-01 사용자의 명시적 요청으로 비식별 합성 PDF를 사용한 live Adapter
-연결 검증을 1회 실행했다. Upstage Document Parse와 Solar Chat을 순서대로 실제
-호출했고 exit code 0으로 완료됐다. Parse 결과는 1페이지였으며 Solar 설정 모델은
-`solar-pro3`, prompt version은 `performance-report-metrics-v1`이었다. 8개 지표가
-모두 원문 근거를 가진 `VERIFIED`로 strict Pydantic 검증을 통과했고 합성 PDF의
-기대 정수값과 일치했다. API key·PDF 원문·`source_text`·외부 raw 응답은 결과에
-기록하지 않았고 Supabase DB·Storage에는 쓰지 않았다. 이 결과는 Adapter live
-연결 증거이며 아래 수직 E2E와 분리해 기록한다.
-
-이 live 증거는 계약 확장 전 8개 required 후보에 대한 것이다. 새 `ad_spend`와
-`clicks`까지 포함한 strict 출력은 별도 live 재검증 전이며, 사용자 정의 `metric_items`는
-Solar가 생성하지 않고 소유자 확인 PATCH에서만 추가·수정·삭제한다.
-
-### 2026-08-01 광고효과 16.2~16.5 live 수직 E2E
-
-로컬 FastAPI를 실제 TCP로 기동한 뒤 live Supabase Auth·private Storage·
-PostgreSQL, Upstage Document Parse, Solar Chat을 통과하는 합성 리포트 한 건을
-명시적으로 실행했다. 배포된 FastAPI가 아닌 로컬 서버의 live 외부 연동
-검증이며, 배포 환경은 별도로 확인해야 한다.
-
-- 16.2 업로드 `201`, 16.3 추출·16.4 확정·16.5 조회 `200`
-- Parse 1페이지, `solar-pro3`, `performance-report-metrics-v1`, 8개 지표 모두
-  원문 근거가 있는 `VERIFIED`이며 기대 정수 8/8 일치
-- 업로드·추출·확정 멱등 재생과 최초 `requestId` 일치 3/3, `no-store` 7/7
-- private bucket, 익명 public object 읽기 거부, 감사 이벤트 3/3,
-  멱등 레코드 3/3 확인
-- 임시 Auth 사용자·계약·Storage·DB 대상 정리 6/6, 잔여 fixture 없음
-- API key·원문·`source_text`·Storage 경로·외부 raw 응답을 요약에 노출하지 않음
-
-재현 runner는 `apps/api/evaluation/performance_e2e_live.py`이다. localhost 목적지와
-`--confirm-live --cleanup-created-data` 두 플래그를 모두 강제하며, 일반 자동 테스트에서는
-외부 네트워크를 호출하지 않는다.
-
-아래 명령은 이미 Parse된 고정 fixture로 Solar mapper만 다시 점검할 때 사용하는
-최소 재현 절차다. 유료 호출 전 명시적 확인을 다시 받아야 한다.
-`UPSTAGE_API_KEY`는 명령어나 shell history에 적지 말고 `apps/api/.env`
-또는 배포 환경의 서버 비밀 변수로 미리 주입한다.
+실제 외부 호출과 비용이 발생하는 live runner는 명시적 확인 옵션 없이는 실행되지 않는다.
 
 ```bash
 cd apps/api
-CONFIRM_LIVE_PERFORMANCE_METRICS=1 UPSTAGE_MODE=live \
-.venv/bin/python - <<'PY'
-import asyncio
-import json
-import os
-from pathlib import Path
-
-from app.adapters.base import ParsedDocument, ParsedPage
-from app.adapters.performance_metrics import (
-    PERFORMANCE_METRIC_PROMPT_VERSION,
-    SolarPerformanceMetricMapper,
-)
-from app.core.config import get_settings
-
-if os.environ.get("CONFIRM_LIVE_PERFORMANCE_METRICS") != "1":
-    raise SystemExit("set CONFIRM_LIVE_PERFORMANCE_METRICS=1 to allow the paid live call")
-
-fixture_path = (
-    Path.cwd().parents[1]
-    / "fixtures/evaluation/performance-metrics/02-explicit-zero.json"
-)
-fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-parsed = ParsedDocument(
-    pages=tuple(ParsedPage(number=p["page"], text=p["text"]) for p in fixture["pages"]),
-    model="fixture-document-parse-v1",
-)
-settings = get_settings()
-mapper = SolarPerformanceMetricMapper(
-    mode="live",
-    api_key=settings.upstage_api_key,
-    base_url=settings.upstage_base_url,
-    timeout_seconds=settings.upstage_solar_timeout_seconds,
-    model=settings.upstage_solar_model,
-)
-try:
-    result = asyncio.run(mapper.map_metrics(parsed_document=parsed))
-except Exception as error:
-    cause = error.__cause__
-    response = getattr(cause, "response", None)
-    status_code = getattr(response, "status_code", None)
-    print(json.dumps({
-        "status": "failed",
-        "error_type": type(error).__name__,
-        "cause_type": type(cause).__name__ if cause is not None else None,
-        "http_status": status_code if isinstance(status_code, int) else None,
-    }, ensure_ascii=False, indent=2))
-    raise SystemExit(1) from None
-print(json.dumps({
-    "status": "completed",
-    "prompt_version": PERFORMANCE_METRIC_PROMPT_VERSION,
-    "model": settings.upstage_solar_model,
-    "schema_valid": True,
-    "verification_statuses": {
-        name: getattr(result, name).verification_status.value
-        for name in type(result).model_fields
-    },
-}, ensure_ascii=False, indent=2))
-PY
+.venv/bin/python -m evaluation.solar_live --confirm-live
+.venv/bin/python -m evaluation.counterproposal_live --confirm-live
+.venv/bin/python -m evaluation.performance_e2e_live \
+  --confirm-live --cleanup-created-data
 ```
 
-재검증 명령의 exit code와 안전한 메타데이터 요약을 확인하고, 모델·prompt version·
-실행일을 결과 문서에 추가한다. 실패하면
-성공으로 대체하지 않고 오류 유형·HTTP status만 민감한 본문 없이 남긴다.
+## 11. 기술 상세 부록
 
-## 비동기 작업 복구 경계
+### 11.1 계약 분석 Evaluator Loop
 
-HTTP 진입점의 FastAPI `BackgroundTasks`는 빠른 mock/demo 처리를 위한 보조 경로이며,
-내구성 복구는 별도 worker가 맡는다. 4.5 최근 분석 조회는 상태 변경이나 AI 호출을
-일으키지 않는 순수 조회다.
+1. 선택한 주 계약 문서와 지원 문서를 각각 한 번 Parse한다.
+2. 1라운드에서 모든 선택 문서의 추출 결과를 Pydantic 스키마로 검증한다.
+3. 문서별 누락, `NOT_FOUND`, 근거 불일치, 확인 필요 필드만 2라운드 대상으로 좁힌다.
+4. 지원 문서 수와 관계없이 작업의 `attempt_count`는 최대 2라운드다.
+5. 두 번째에도 찾지 못한 필드는 `NOT_FOUND`, 근거가 맞지 않는 값은
+   `MISSING_EVIDENCE`로 저장한다.
+6. Solar 검토 문구 실행은 추출 `attempt_count`에 포함하지 않는다.
 
-`python -m app.workers.analysis_recovery --once`는 설정한 cutoff보다 오래된 `QUEUED`
-작업을 `created_at ASC, id ASC` 순서로 최대 batch만 읽고, 저장된 `owner_id`와 `task_id`로
-기존 `AnalysisService.process`를 호출한다. 실제 claim은 기존의 조건부
-`QUEUED → PROCESSING` 전이인 `mark_analysis_processing`이 수행하므로, 여러 worker가
-같은 작업을 읽어도 한 worker만 처리한다. worker 로그에는 작업 UUID, 개수와 오류 유형만
-남기며 계약 원문, 공개 토큰, 키, URL을 남기지 않는다.
+Universal Extraction의 `additional_values` 좌표가 같은 페이지 Document Parse 요소와
+겹치는 경우에만 해당 요소 원문을 `source_text`로 저장한다. Upstage의 범주형 confidence는
+저장 스키마에 맞춰 `high=0.9`, `low=0.4`로 표현하며, `low`는 근거를 보존하되
+`NEEDS_CHECK`로 처리한다.
 
-별도 `ANALYSIS_RECOVERY_PROCESSING_TIMEOUT_SECONDS`(기본 14,400초)는 Upstage Parse·Extract,
-Solar 실행 시간보다 충분히 긴 처리 제한이다. worker는 `updated_at`이 이 제한보다
-오래된 `PROCESSING` 행만 `FOR UPDATE SKIP LOCKED`로 잠그고 cutoff과 상태를 다시
-확인한다. 확인된 행은 `FAILED/DOCUMENT_PARSE_FAILED`, 주 계약 문서와 선택 자료
-`parse_status=FAILED`, `ANALYSIS_FAILED` 감사 이벤트로 한 DB 트랜잭션에 전이한다.
-계약 상태는 `ANALYZING`을 유지하고 새 멱등 키로 사용자가 명시적으로 재시작해야
-하며, worker가 자동으로 무한 재시도하지 않는다.
+<a id="2026-07-30-live-확인"></a>
 
-운영에서는 API 프로세스와 별도의 worker를 실행한다.
-
-```bash
-# 한 번 실행
-python -m app.workers.analysis_recovery --once
-
-# 장기 실행 (기본 30초 간격)
-python -m app.workers.analysis_recovery --loop
-```
-
-`ANALYSIS_RECOVERY_STALE_AFTER_SECONDS`(기본 60),
-`ANALYSIS_RECOVERY_PROCESSING_TIMEOUT_SECONDS`(기본 14,400),
-`ANALYSIS_RECOVERY_BATCH_SIZE`(기본 10),
-`ANALYSIS_RECOVERY_INTERVAL_SECONDS`(기본 30)로 범위를 조절한다. mock/live repository의
-cutoff·정렬·limit·소유자 전달과 동시 claim·timeout 전이 안전성은 자동 테스트로
-검증했고, 실제 Supabase
-환경에서는 마이그레이션 적용 뒤 worker 배포가 필요하다.
-
-## 고정 계약 10건 오프라인 평가
-
-`fixtures/evaluation/cases`의 가상 계약 10건은 계약 원문, 사용자가 이해한 조건
-5문항, 오프라인 추출 스냅샷, 사람이 검증한 정답과 기대 확인 신호를 함께 보관한다.
-`apps/api/evaluation` 실행기는 외부 네트워크 없이 현재 Pydantic 스키마, 원문 근거
-검증과 결정적 확인 신호 생성 코드를 평가한다.
-
-2026-07-31 오프라인 기준선 결과는 핵심 필드 추출 96.67%, 근거 페이지 연결
-96.36%, 필수 JSON 스키마 100%, 기간·총액 불일치 탐지 100%, 근거 없는 확정 경고
-0건이다. 전체 기대 확인 신호 16건도 모두 재현했다. 상세 분모와 실행 방법은
-`fixtures/evaluation/RESULTS.md`에 기록한다.
-
-이 수치는 `OFFLINE_SNAPSHOT` 회귀 결과이며 실제 Upstage·Solar 모델 정확도가 아니다.
-live 결과는 같은 계약 원문을 실제 Adapter로 실행한 뒤 모델·프롬프트 버전·실행일과
-함께 별도로 공개한다.
-
-## 2026-08-01 백엔드 자동 테스트 검증 산출물
-
-제출용 AI 활용 증빙을 위해 외부 Adapter를 명시적으로 mock으로 고정한 백엔드 전체
-자동 검증을 실행했다. Python 3.12.3 환경에서 Ruff 진단 0건, 전체 `pytest` 719건 통과,
-고정 계약 10건 오프라인 평가의 선언 목표 전체 통과를 확인했다.
-
-JUnit XML, Ruff JSON, 오프라인 평가 JSON, 실행 환경·명령·제약을 포함한 검증 묶음은
-[`docs/ai-evidence/backend-tests/2026-08-01`](docs/ai-evidence/backend-tests/2026-08-01/SUMMARY.md)에
-보관한다. 이 결과는 `AUTOMATED_OFFLINE`이며 실제 외부 API 재호출 결과가 아니다. 기존
-Upstage·Solar·Supabase live 결과는 같은 폴더의 live 증빙 안내에서 별도로 연결한다.
-
-## 2026-07-31 Solar 검토 문구 live 확인
-
-고정 평가의 가상 계약 중 총액 불일치, 모호한 산출물 수량, 촬영 안전 책임 3건으로
-Solar `POST /v1/chat/completions`를 실제 호출했다. 요청 모델은 `solar-pro3`,
-프롬프트 버전은 `contract-review-copy-v1`이다.
-
-- 입력을 한 건씩 분리한 실제 요청 3회 성공
-- 응답 3건 모두 strict JSON Schema와 Pydantic 스키마 검증 통과
-- 쉬운 설명 3/3 생성
-- 원안 수용·절충·요청 문구 3종 3/3 생성 및 항목별 상호 구분 확인
-- 입력 ID 일치, 입력에 없는 숫자, 금지 단정 표현 검사 통과
-- 기본 1건 chunk 전략을 production과 평가 실행기에 함께 적용한 뒤
-  2026-07-31 09:05:34 UTC에 외부 요청 3회를 다시 실행해 모두 성공
-
-최초 3건 배치 요청은 120초 timeout 뒤 한 번 재시도했지만 `ReadTimeout`으로
-실패했다. 한 건씩 나눈 호출은 모두 성공했으므로 실제 endpoint와 응답 계약 연동은
-확인했지만, 3건 비스트리밍 배치가 현재 timeout 안에서 안정적이라는 증거는 아니다.
-검증된 생성 문구와 실패·재시도 내역은
-`fixtures/evaluation/SOLAR_LIVE_RESULTS.md`에 기록한다.
-
-## 2026-07-30 live 확인
+### 11.2 2026-07-30 계약 Parse·Extract
 
 가상 샘플 `apps/frontend/public/sample-contract.pdf`로 명시적 live 확인을 수행했다.
 
-- Document Parse: 성공, 모델 `document-parse-260128`, 2페이지, 원문 요소 31개
-- 소수 필드 사전 확인: 기간 시작일·총액·환불조건 3개 모두
-  `source_page`, `source_text`, `confidence`를 가진 `VERIFIED`
-- 전체 live 분석: 대상 필드 28개, Evaluator 2회, 최종 `VERIFIED` 27개,
-  원문 근거를 보존한 `NEEDS_CHECK` 1개
-- 근거 필드가 연결된 추출값: 28개, 생성된 검토 항목: 5개
-- Supabase service-level 수직 흐름: Auth 테스트 사용자 → 계약 생성 → PDF private
-  Storage 업로드 → 5문항 저장 → 분석 접수·완료 → signed URL 발급 성공
-- 실제 Supabase access token을 사용한 FastAPI HTTP 수직 흐름:
-  계약 생성 `201` → 업로드 `201` → 5문항 저장 `200` → 분석 접수 `202 QUEUED` →
-  최종 `COMPLETED` → 원문 접근 `200`
-- 최종 계약 상태: `REVIEW_REQUIRED`; 분석 접수·완료 감사 이벤트 저장 확인
-- 이 샘플은 산출물 제목 필드와 기한이 동일한 원문 요소에 있지 않아 대표
-  `Obligation`을 임의 생성하지 않음
+- Document Parse 요청 alias `document-parse`, 응답 모델 `document-parse-260128`
+- 2페이지, 원문 요소 31개
+- 전체 대상 28필드, Evaluator 2회
+- `VERIFIED` 27개, 원문 근거가 있는 `NEEDS_CHECK` 1개
+- 실제 Supabase access token을 사용한 FastAPI 흐름:
+  계약 생성 `201` → 업로드 `201` → 이해조건 저장 `200` → 분석 `202 QUEUED` →
+  `COMPLETED` → 원문 접근 `200`
 
-위 확인은 한 샘플의 Adapter·HTTP API·원격 영속성 연동 결과이며 정확도 평가 지표가
-아니다. 기획안의 목표 지표는 `fixtures/evaluation/`의 고정 10건 평가를 실행한 뒤
-별도로 기록한다.
+이 결과는 한 샘플의 Adapter·HTTP·원격 영속 연결 확인이며 모델 정확도 지표가 아니다.
 
-이 2026-07-30 확인 자체는 Solar 검토 문구 단계가 추가되기 전 수행한 기록이다.
-Solar `/v1/chat/completions`의 새 live 성공 근거는 위 2026-07-31 기록을 따른다.
+<a id="2026-08-01-저장-계약-live-실패-재현과-fallback-검증"></a>
 
-## 보안
+### 11.3 2026-08-01 저장 계약 실패 격리
 
-- API 키는 `apps/api/.env` 또는 배포 환경의 서버 변수로만 주입한다.
-- 키, Authorization 헤더, 계약 전문, 원시 모델 응답은 로그나 저장소에 남기지 않는다.
-- Solar 실행 로그에는 프롬프트 버전, 모델 ID, 시작 시각, 성공·실패, 항목 수,
-  지연시간, 스키마 검증 여부만 남긴다.
-- 외부 발송, 계약 확정, 서명 요청, 증빙 승인, 재계약은 AI가 자동 실행하지 않는다.
+저장된 계약 한 건을 DB 쓰기 없이 live Adapter 경로로 재현했다.
+
+- Parse 5페이지·원문 요소 74개
+- Universal Extraction 대상 28필드·Evaluator 2라운드
+- 결정 규칙 검토 후보 14개
+- Solar가 입력 근거에 없는 숫자를 생성해 안전 검증이 거부
+- 결정 규칙 항목 14개로 fallback해 최종 `Analysis` 스키마 검증 완료
+
+API key·계약 원문·파일명·Storage 경로·원시 모델 응답은 기록하지 않았다.
+
+<a id="p2-성과-리포트-지표-매핑-기반"></a>
+<a id="2026-08-01-광고효과-162165-live-수직-e2e"></a>
+
+### 11.4 2026-08-01 성과 지표 Adapter와 수직 E2E
+
+현재 `performance-report-metrics-v2`는 `ad_spend`, `impressions`, `clicks`, `likes`,
+`comments`, `reach`, `saves`, `shares`, `follower_net_change`,
+`published_content_count` 10개 후보를 strict 출력으로 요구한다. 공유 payload에서는
+기존 v1 호환을 위해 새 두 후보만 optional이지만, Solar v2 출력에서는 누락 시에도
+`NOT_FOUND`로 반드시 반환한다. `ad_spend`는 원화 정수 금액, `clicks`는 명시적 클릭
+횟수만 허용하며 비율에서 역산하지 않는다. 각 값의 `source_page`·`source_text`가 실제
+페이지에 존재하고 해당 라벨 구간에 같은 정수가 있는지 서버가 다시 검사한다.
+
+비식별 합성 PDF live Adapter 검증은 확장 전 v1의 8개 지표가 모두 근거 있는
+`VERIFIED`였고 기대값 8/8과 일치한 기록이다. 새 `ad_spend`·`clicks`를 포함한 v2 live
+성공으로 해석하지 않는다. 로컬 FastAPI TCP·live Supabase Auth/Storage/PostgreSQL·Upstage·Solar를
+통과한 수직 E2E는 업로드 `201`, 추출·확정·조회 `200`, 멱등 재생 3/3,
+`no-store` 7/7, 감사 이벤트 3/3, 테스트 데이터 cleanup 6/6을 확인했다.
+
+### 11.5 2026-08-02 live에서 발견한 추출 경계와 수정 범위
+
+- `05-many-blanks`: 날짜 후보 하나가 ISO 형식이 아니어서 정상 후보까지 모두 버려지는
+  문제를 live 응답에서 발견했다. 현재 서버는 전체 JSON 구조 오류와 개별 후보 오류를
+  구분하고, 개별 오류만 근거 유무에 따라 `NEEDS_CHECK` 또는 `NOT_FOUND`로 격리한다.
+- `02-refund-omission`: “환불 조건은 계약서에 기재하지 않았다”는 문장이 실제 환불
+  조건처럼 `VERIFIED`되는 문제를 live 응답에서 발견했다. 현재 추출 설명과 서버 검증은
+  명시적 부재를 `NOT_FOUND`로 정규화하되, “환불 불가”처럼 실제 비환불 조건은 유지한다.
+
+두 수정은 고정 fake 응답을 사용한 회귀 테스트까지 통과했다. 수정 뒤 외부 Upstage를 다시
+호출하지 않았으므로 live 재검증 성공으로 표기하지 않는다.
+
+### 11.6 비동기 복구 경계
+
+FastAPI `BackgroundTasks`는 빠른 mock/demo 처리를 위한 보조 경로이고, 내구성 복구는
+`python -m app.workers.analysis_recovery` worker가 맡는다. worker는 오래된 `QUEUED`
+작업만 읽고 기존 조건부 `QUEUED → PROCESSING` claim을 사용하므로 여러 worker 중 하나만
+처리한다. 처리 제한을 넘긴 `PROCESSING`은 문서 실패·감사 이벤트와 함께 원자적으로
+종료하며 자동 무한 재시도하지 않는다. 사용자가 새 멱등 키로 명시적으로 재시작해야 한다.
+
+### 11.7 보안 로그
+
+- Parse·Extract·Solar 로그에는 모델·프롬프트 버전·시작 시각·성공/실패·HTTP status·
+  지연시간·스키마 검증 여부 같은 안전한 메타데이터만 기록한다.
+- API key, Authorization 헤더, 계약 전문, data URL, Storage 경로, 공개 토큰,
+  `source_text`, 외부 원시 요청·응답은 기록하지 않는다.
+- mock 결과는 live 연동 성공이나 실제 모델 정확도로 발표하지 않는다.

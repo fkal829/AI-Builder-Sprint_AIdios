@@ -8,7 +8,6 @@ import {
   adapter,
   calculatePerformanceCpc,
   calculatePerformanceCtr,
-  isUsingMock,
   performanceMetricValue,
   type ContractPerformance,
   type PerformanceCanonicalMetricKey,
@@ -106,11 +105,6 @@ export default function AllPerformancePage() {
       title="광고효과 모아보기"
       size="wide"
       backHref="/dashboard"
-      right={
-        <span className="rounded bg-brand100 px-2 py-1 text-[10px] font-bold text-brand800">
-          {isUsingMock ? "데모 데이터 모드" : "실 API 연결"}
-        </span>
-      }
     >
       <div className="flex flex-col gap-5">
         <p className="text-[13px] leading-relaxed text-neutral700">

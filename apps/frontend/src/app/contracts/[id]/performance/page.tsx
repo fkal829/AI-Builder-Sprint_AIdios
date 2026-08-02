@@ -12,7 +12,6 @@ import {
   calculatePerformanceCpc,
   calculatePerformanceCtr,
   createPerformanceBaseMetricItems,
-  isUsingMock,
   performanceMetricValue,
   PERFORMANCE_BASE_METRICS,
   type ContractPerformance,
@@ -317,36 +316,12 @@ export default function PerformancePage() {
       title="이행·광고효과 관리"
       size="wide"
       backHref="/manage"
-      right={
-        <span className="rounded bg-brand100 px-2 py-1 text-[10px] font-bold text-brand800">
-          {isUsingMock ? "데모 데이터 모드" : "실 API 연결"}
-        </span>
-      }
     >
       <div className="flex flex-col gap-5">
         <p className="text-[13px] leading-relaxed text-neutral700">
           대행사에게 받은 광고 리포트를 올려두면, 계약에서 약속한 조건대로 진행되고
           있는지 한눈에 확인하고 산출물 증빙까지 마무리할 수 있어요.
         </p>
-
-        <Card>
-          <p className="text-[12px] leading-relaxed text-neutral700">
-            <b className="text-ink">계약서를 기준으로 확인해요.</b> 리포트에서 읽은 숫자는
-            사장님이 직접 확인한 뒤에만 계약 조건과 전월 기록에 대조합니다.
-          </p>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-neutral500">
-            원문 근거를 찾지 못한 값은 자동으로 확정하지 않고 확인이 필요한 값으로
-            남겨둡니다.
-          </p>
-          <div className="mt-2.5">
-            <a
-              href={`/contracts/${id}`}
-              className="rounded-lg border border-neutral300 bg-white px-3 py-1.5 text-[12px] font-bold text-ink hover:bg-subtle"
-            >
-              계약서에서 보기 →
-            </a>
-          </div>
-        </Card>
 
         <StepFlow activeReport={activeReport} hasConfirmed={Boolean(performance?.confirmedSeries.length)} />
 
@@ -411,7 +386,9 @@ export default function PerformancePage() {
           </Card>
         </section>
 
-        {activeReport?.status === "UPLOADED" && (
+        {/* 업로드·추출이 진행 중일 때는 위 카드의 버튼과 겹치므로, 추출이 실제로
+            멈춰 있을 때(working이 없을 때)만 다시 시도 안내를 보여준다. */}
+        {activeReport?.status === "UPLOADED" && !working && (
           <Card>
             <p className="text-[13px] font-bold text-ink">
               {activeReport.period} 리포트가 업로드됐지만 숫자 추출이 끝나지 않았어요.
@@ -419,10 +396,9 @@ export default function PerformancePage() {
             <button
               type="button"
               onClick={retryExtraction}
-              disabled={Boolean(working)}
-              className="mt-3 h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white disabled:opacity-40"
+              className="mt-3 h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white"
             >
-              {working === "extracting" ? "숫자 읽는 중…" : "지표 추출 다시 시도"}
+              지표 추출 다시 시도
             </button>
           </Card>
         )}
@@ -846,8 +822,13 @@ function MonthlyChart({ points }: { points: ContractPerformance["confirmedSeries
     )),
     1,
   );
+  // 리포트가 한 건뿐이면 flex-1이 막대를 카드 전체 폭으로 늘려 읽기 어렵다.
+  // 이때만 폭을 절반으로 묶어 가운데 세우고, 두 건부터는 원래대로 균등 분할한다.
+  const single = points.length === 1;
   return (
-    <div className="flex min-h-40 items-end gap-3 overflow-x-auto pb-1">
+    <div
+      className={`flex min-h-40 items-end gap-3 overflow-x-auto pb-1 ${single ? "justify-center" : ""}`}
+    >
       {points.map((point) => {
         const items = point.confirmedPayload.metricItems;
         const adSpend = performanceMetricValue(items, "ad_spend");
@@ -857,7 +838,10 @@ function MonthlyChart({ points }: { points: ContractPerformance["confirmedSeries
         const cpc = calculatePerformanceCpc(adSpend, clicks);
         const posts = performanceMetricValue(items, "published_content_count");
         return (
-          <div key={point.reportId} className="flex min-w-36 flex-1 flex-col items-center gap-1.5">
+          <div
+            key={point.reportId}
+            className={`flex min-w-36 flex-col items-center gap-1.5 ${single ? "w-1/2 flex-none" : "flex-1"}`}
+          >
             <span className="text-[11px] font-bold text-ink">{impressions.toLocaleString()}</span>
             <div className="flex h-28 w-full items-end">
               <div

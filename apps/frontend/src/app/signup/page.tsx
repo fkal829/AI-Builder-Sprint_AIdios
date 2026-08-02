@@ -158,10 +158,27 @@ function SignupInner() {
               onChange={(event) => setAgree(event.target.checked)}
               className="mt-0.5 h-5 w-5 flex-none accent-brand700"
             />
+            {/* 링크는 새 창으로 연다(입력하던 폼을 잃지 않도록).
+                label 안이라 클릭이 그대로 올라가면 동의 체크가 함께 토글되므로 전파를 막는다. */}
             <span>
-              <Link href="#" className="text-brand700 underline">이용약관</Link>과{" "}
-              <Link href="#" className="text-brand700 underline">개인정보처리방침</Link>에
-              동의합니다.
+              <Link
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(event) => event.stopPropagation()}
+                className="text-brand700 underline"
+              >
+                이용약관
+              </Link>과{" "}
+              <Link
+                href="/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(event) => event.stopPropagation()}
+                className="text-brand700 underline"
+              >
+                개인정보처리방침
+              </Link>에 동의합니다.
             </span>
           </label>
 

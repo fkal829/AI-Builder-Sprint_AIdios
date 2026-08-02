@@ -37,10 +37,15 @@ export function AuthShell({ children }: { children: ReactNode }) {
           </ul>
         </div>
 
-        <p className="text-xs leading-loose text-white/45">
-          단디계약은 법률 자문을 제공하지 않으며 계약의 위법 여부를 판정하지 않습니다.
-          표시된 정보는 모두 가상 데이터입니다.
-        </p>
+        <div>
+          <p className="text-xs leading-loose text-white/45">
+            단디계약은 법률 자문을 제공하지 않으며 계약의 위법 여부를 판정하지 않습니다.
+          </p>
+          <div className="mt-4 flex gap-5 text-xs text-white/60">
+            <Link href="/terms" className="hover:text-white">이용약관</Link>
+            <Link href="/privacy" className="hover:text-white">개인정보처리방침</Link>
+          </div>
+        </div>
       </aside>
 
       {/* 우 : 폼 */}
@@ -56,6 +61,11 @@ export function AuthShell({ children }: { children: ReactNode }) {
         </div>
         <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col justify-center py-8">
           {children}
+        </div>
+        {/* 좌 브랜드 패널이 숨는 모바일에서도 약관·방침에 닿을 수 있게 한다 */}
+        <div className="flex justify-center gap-5 text-xs text-neutral500 lg:hidden">
+          <Link href="/terms" className="hover:text-ink">이용약관</Link>
+          <Link href="/privacy" className="hover:text-ink">개인정보처리방침</Link>
         </div>
       </main>
     </div>

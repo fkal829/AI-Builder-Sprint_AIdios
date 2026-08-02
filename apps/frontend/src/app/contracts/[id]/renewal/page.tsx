@@ -31,37 +31,37 @@ export default function RenewalPage() {
   };
 
   return (
-    <AppScreen title="만료·재계약 검토" size="sm" backHref="/dashboard">
+    <AppScreen title="만료·재계약 검토" size="md" backHref="/dashboard">
       {state.status === "loading" && (
-        <p className="py-10 text-center text-sm text-neutral500">불러오는 중…</p>
+        <p className="py-10 text-center text-base text-neutral500">불러오는 중…</p>
       )}
       {state.status === "error" && (
-        <p className="py-10 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>
+        <p className="py-10 text-center text-base font-bold text-brand800">⚠ {state.error}</p>
       )}
       {view && (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-6">
           <div>
-            <h2 className="text-base font-black text-ink">{view.title}</h2>
-            <p className="mt-1 text-xs text-neutral500">계약 만료와 통보기한을 확인해주세요.</p>
+            <h2 className="text-xl font-black text-ink">{view.title}</h2>
+            <p className="mt-1.5 text-[15px] text-neutral500">계약 만료와 통보기한을 확인해주세요.</p>
           </div>
           <DdayRow renewal={view} />
 
           {view.currentDecision ? (
-            <div className="rounded-xl border-2 border-brand700 bg-brand50 p-4">
-              <div className="text-sm font-black text-brand700">
+            <div className="rounded-xl border-2 border-brand700 bg-brand50 p-6">
+              <div className="text-lg font-black text-brand700">
                 {decisionLabel(view.currentDecision)}
               </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-neutral700">
+              <p className="mt-2 text-[15px] leading-loose text-neutral700">
                 선택만 저장했습니다. 새 계약서·조정 요청·서명은 자동으로 시작되지 않습니다.
               </p>
               {view.currentDecision === "RENEW_WITH_CHANGES" && (
-                <p className="mt-2 text-[11px] font-bold text-neutral700">
+                <p className="mt-3 text-[15px] font-bold text-neutral700">
                   다시 검토할 원안 유지 항목 {view.revisitReviewItemIds.length}건
                 </p>
               )}
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               <DecisionButton
                 label="동일 조건 재계약 의사 저장"
                 active={saving === "RENEW_SAME_TERMS"}
@@ -85,8 +85,8 @@ export default function RenewalPage() {
             </div>
           )}
 
-          {error && <p className="text-xs font-bold text-red-700">{error}</p>}
-          <p className="text-[11px] leading-relaxed text-neutral500">
+          {error && <p className="text-sm font-bold text-red-700">{error}</p>}
+          <p className="text-[14px] leading-loose text-neutral500">
             재계약 의사는 정해진 검토 기간에만 저장할 수 있습니다. 선택을 저장해도 상대방에게
             자동 통지하거나 계약을 자동 갱신하지 않습니다.
           </p>
@@ -103,18 +103,18 @@ function DdayRow({ renewal }: { renewal: LiveRenewalView }) {
     { d: renewal.autoRenewalDday, label: "자동갱신 임박", emphasis: true },
   ];
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-3">
       {items.map((item) => (
         <div
           key={item.label}
-          className={`flex-1 rounded-lg px-2 py-2.5 text-center ${
-            item.emphasis ? "border border-brand600 bg-brand50" : "bg-subtle"
+          className={`flex-1 rounded-xl px-4 py-5 text-center ${
+            item.emphasis ? "border-2 border-brand600 bg-brand50" : "bg-subtle"
           }`}
         >
-          <div className={`text-sm font-black ${item.emphasis ? "text-brand700" : "text-ink"}`}>
+          <div className={`text-2xl font-black ${item.emphasis ? "text-brand700" : "text-ink"}`}>
             {item.d === null ? "—" : item.d >= 0 ? `D-${item.d}` : `D+${Math.abs(item.d)}`}
           </div>
-          <div className="text-[9px] text-neutral500">{item.label}</div>
+          <div className="mt-1.5 text-[13px] text-neutral500">{item.label}</div>
         </div>
       ))}
     </div>
@@ -141,12 +141,14 @@ function DecisionButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-lg border-2 px-4 py-3 text-left text-[13px] font-bold disabled:opacity-40 ${
-        emphasized ? "border-brand700 bg-brand50 text-ink" : "border-ink bg-white text-ink"
+      className={`rounded-xl border-2 px-5 py-4 text-left text-[16px] font-bold transition disabled:opacity-40 ${
+        emphasized
+          ? "border-brand700 bg-brand50 text-ink hover:bg-brand100"
+          : "border-ink bg-white text-ink hover:bg-subtle"
       }`}
     >
       {active ? "저장 중…" : label}
-      {description && <span className="mt-1 block text-[11px] font-medium text-neutral500">{description}</span>}
+      {description && <span className="mt-1.5 block text-[14px] font-medium leading-relaxed text-neutral500">{description}</span>}
     </button>
   );
 }

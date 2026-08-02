@@ -358,15 +358,15 @@ function ViewerBody({
           </LayerBlock>
         </div>
         <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard label="추가 신호 없음" value={counts.low} tile={RISK.low.tile} num={RISK.low.num} />
+          <StatCard label="중위험 조항" value={counts.mid} tile={RISK.mid.tile} num={RISK.mid.num} />
+          <StatCard label="고위험 조항" value={counts.high} tile={RISK.high.tile} num={RISK.high.num} />
           <StatCard
             label="총 조항 수"
             value={doc.clauses.length}
             tile="bg-white ring-1 ring-neutral200"
             num="text-ink"
           />
-          <StatCard label="고위험 조항" value={counts.high} tile={RISK.high.tile} num={RISK.high.num} />
-          <StatCard label="중위험 조항" value={counts.mid} tile={RISK.mid.tile} num={RISK.mid.num} />
-          <StatCard label="추가 신호 없음" value={counts.low} tile={RISK.low.tile} num={RISK.low.num} />
         </div>
       </div>
 

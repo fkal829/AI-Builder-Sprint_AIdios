@@ -39,6 +39,11 @@ test("performance page uses evidence-backed API data and keeps inquiry delivery 
   assert.match(page, /border-2 border-dashed border-neutral300/);
   assert.match(page, /① 대행사 리포트 올리기/);
   assert.match(page, /setCorrectionReason/);
+  assert.match(page, /oldestUnfinishedReport\(data\.reports\)/);
+  assert.match(page, /sort\(\(left, right\) => left\.period\.localeCompare\(right\.period\)\)/);
+  assert.match(page, /suggestedUploadPeriod\(data\.reports\)/);
+  assert.match(page, /Boolean\(working\) \|\| Boolean\(activeReport\) \|\| !period \|\| !file/);
+  assert.match(page, /먼저 \{activeReport\.period\} 리포트 확인을 마치면/);
   assert.match(page, /기존 기록을\s*덮어쓰지 않고 새 버전으로 남습니다/);
   assert.match(page, /문의 문안은 자동 발송되지/);
   assert.doesNotMatch(page, /화면 목업 · 개발 예정/);

@@ -68,6 +68,38 @@ uvicorn app.main:app --reload
 - API 문서: `http://localhost:8000/docs`
 - 상태 확인: `http://localhost:8000/api/v1/health`
 
+## 배포 환경
+
+운영 배포는 프런트엔드와 API를 분리합니다.
+
+| 영역 | 플랫폼 | 설정 |
+| --- | --- | --- |
+| 웹 프런트엔드 | Vercel | `apps/frontend`, Next.js |
+| API 서버 | Render | `apps/api`, FastAPI/Uvicorn, Singapore 리전 |
+| 데이터베이스·인증·파일 | Supabase | PostgreSQL, Auth, Storage |
+| 소스·배포 트리거 | GitHub | `main`을 운영 기준 브랜치로 사용 |
+
+Render의 시작 명령은 다음과 같습니다.
+
+```text
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Vercel의 Root Directory는 `apps/frontend`, Render의 Root Directory는 `apps/api`입니다.
+각 서비스에서 `main` 브랜치의 커밋을 자동 배포하도록 설정합니다.
+
+운영 환경에서 Render에는 `APP_ENV=production`, `SUPABASE_MODE=live`,
+`UPSTAGE_MODE=live`, `MODUSIGN_MODE=live`, `CORS_ORIGINS`,
+`PUBLIC_APP_BASE_URL`, `PUBLIC_TOKEN_SECRET`과 서버 전용 외부 API 키를 설정합니다.
+Vercel에는 `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_USE_MOCK=false`,
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`만 설정합니다.
+service-role 키와 외부 API 비밀키는 브라우저 환경에 넣지 않습니다.
+
+배포 후 API 상태는 `https://<render-service>.onrender.com/api/v1/health`에서 확인하고,
+Supabase Auth의 Site URL과 Redirect URL에는 Vercel 운영 주소 및
+`/auth/callback`을 등록합니다. `CORS_ORIGINS`에도 동일한 Vercel origin을 추가해야
+로그인 이후 API 호출과 외부 조정 링크가 정상 동작합니다.
+
 ## 개발 원칙
 
 - 원문 근거가 없는 AI 결과는 확정값으로 표시하지 않습니다.

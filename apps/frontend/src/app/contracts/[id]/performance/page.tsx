@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 import { AppScreen } from "@/components/AppScreen";
 import { Card, Disclaimer, SectionTitle } from "@/components/Bits";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { LayerBlock } from "@/components/LayerBlock";
 import { StatTile } from "@/components/StatTile";
-import { useAsync } from "@/lib/hooks";
 import {
   adapter,
   calculatePerformanceCpc,
   calculatePerformanceCtr,
   createPerformanceBaseMetricItems,
+  DEMO_PERFORMANCE_REPORT_FILE_NAME,
+  isUsingMock,
   performanceMetricValue,
   PERFORMANCE_BASE_METRICS,
   type ContractPerformance,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/adapter";
 import { displayText } from "@/lib/displayText";
 import { compactCount, compactWon } from "@/lib/format";
+import type { ContractSummary } from "@/lib/types";
 
 type EvidenceMetricField = {
   key: string;
@@ -47,6 +50,7 @@ const EVIDENCE_METRIC_FIELDS: EvidenceMetricField[] = [
 type MetricFormItem = Omit<PerformanceMetricItem, "value"> & { value: string };
 type MetricForm = MetricFormItem[];
 type WorkingAction = "loading" | "uploading" | "extracting" | "saving" | null;
+type ManagementSectionId = "obligation" | "reports";
 
 const CANONICAL_UNITS = new Map<string, PerformanceMetricUnit>(
   PERFORMANCE_BASE_METRICS.map((metric) => [metric.key, metric.unit] as const),
@@ -106,11 +110,21 @@ function formFromReport(report: PerformanceReport): MetricForm {
   if (report.currentRevision) {
     return toFormItems(report.currentRevision.confirmedPayload.metricItems);
   }
+  const extracted = report.extractedPayload;
+  if (!extracted) return emptyMetricForm();
   return toFormItems(createPerformanceBaseMetricItems({
-    ad_spend: report.extractedPayload?.adSpend.value ?? null,
-    impressions: report.extractedPayload?.impressions.value ?? null,
-    clicks: report.extractedPayload?.clicks.value ?? null,
-    published_content_count: report.extractedPayload?.publishedContentCount.value ?? null,
+    ad_spend: extracted.adSpend.verificationStatus === "NOT_FOUND"
+      ? null
+      : extracted.adSpend.value,
+    impressions: extracted.impressions.verificationStatus === "NOT_FOUND"
+      ? null
+      : extracted.impressions.value,
+    clicks: extracted.clicks.verificationStatus === "NOT_FOUND"
+      ? null
+      : extracted.clicks.value,
+    published_content_count: extracted.publishedContentCount.verificationStatus === "NOT_FOUND"
+      ? null
+      : extracted.publishedContentCount.value,
   }));
 }
 
@@ -179,8 +193,35 @@ function defaultPeriod(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function formatReportPeriod(period: string): string {
+  const [year, month] = period.split("-").map(Number);
+  return `${year}년 ${month}월`;
+}
+
+function openSectionsFromUrl(): Record<ManagementSectionId, boolean> | null {
+  const value = new URLSearchParams(window.location.search).get("sections");
+  if (value === null) return null;
+  const sectionIds = new Set(value.split(","));
+  return {
+    obligation: sectionIds.has("obligation"),
+    reports: sectionIds.has("reports"),
+  };
+}
+
+function syncOpenSectionsToUrl(sections: Record<ManagementSectionId, boolean>) {
+  const url = new URL(window.location.href);
+  const openIds = (["obligation", "reports"] as const).filter((section) => sections[section]);
+  url.searchParams.set("sections", openIds.length > 0 ? openIds.join(",") : "none");
+  url.hash = "";
+  window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+}
+
 export default function PerformancePage() {
   const { id } = useParams<{ id: string }>();
+  const [contract, setContract] = useState<ContractSummary | null>(null);
+  const [obligation, setObligation] = useState<LiveObligation | null>(null);
+  const [obligationLoading, setObligationLoading] = useState(true);
+  const [obligationError, setObligationError] = useState<string | null>(null);
   const [performance, setPerformance] = useState<ContractPerformance | null>(null);
   const [activeReport, setActiveReport] = useState<PerformanceReport | null>(null);
   const [form, setForm] = useState<MetricForm>(emptyMetricForm);
@@ -191,12 +232,36 @@ export default function PerformancePage() {
   const [correctionReason, setCorrectionReason] = useState("");
   const [working, setWorking] = useState<WorkingAction>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [reportLoadError, setReportLoadError] = useState<string | null>(null);
+  const [openSections, setOpenSections] = useState<Record<ManagementSectionId, boolean>>({
+    obligation: false,
+    reports: false,
+  });
+  const [initialSectionResolved, setInitialSectionResolved] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    adapter.getDashboard()
+      .then((dashboard) => {
+        if (alive) setContract(dashboard.contracts.find((item) => item.id === id) ?? null);
+      })
+      .catch(() => {
+        if (alive) setContract(null);
+      });
+    adapter.getObligation(id)
+      .then((data) => {
+        if (alive) setObligation(data);
+      })
+      .catch((cause: unknown) => {
+        if (alive) setObligationError(errorMessage(cause, "산출물 상태를 불러오지 못했습니다."));
+      })
+      .finally(() => {
+        if (alive) setObligationLoading(false);
+      });
     adapter.getContractPerformance(id)
       .then((data) => {
         if (!alive) return;
+        setReportLoadError(null);
         setPerformance(data);
         const unfinished = oldestUnfinishedReport(data.reports);
         if (unfinished) {
@@ -207,7 +272,9 @@ export default function PerformancePage() {
         }
       })
       .catch((cause: unknown) => {
-        if (alive) setError(errorMessage(cause, "광고효과 기록을 불러오지 못했습니다."));
+        if (alive) {
+          setReportLoadError(errorMessage(cause, "광고효과 기록을 불러오지 못했습니다."));
+        }
       })
       .finally(() => {
         if (alive) setWorking(null);
@@ -217,10 +284,96 @@ export default function PerformancePage() {
     };
   }, [id]);
 
+  useEffect(() => {
+    const targetId = window.location.hash.slice(1);
+    if (targetId !== "obligation" && targetId !== "reports") return;
+    const openTimer = window.setTimeout(() => {
+      setOpenSections((current) => ({ ...current, [targetId]: true }));
+    }, 0);
+    const scrollToTarget = () => {
+      const target = document.getElementById(targetId);
+      if (!target) return false;
+      target.scrollIntoView({ block: "start" });
+      return true;
+    };
+    if (scrollToTarget()) return;
+    const observer = new MutationObserver(() => {
+      if (scrollToTarget()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    const timeout = window.setTimeout(() => observer.disconnect(), 2_000);
+    return () => {
+      window.clearTimeout(openTimer);
+      window.clearTimeout(timeout);
+      observer.disconnect();
+    };
+  }, [id]);
+
+  useEffect(() => {
+    if (initialSectionResolved || obligationLoading || working === "loading") return;
+    const timer = window.setTimeout(() => {
+      setInitialSectionResolved(true);
+      const targetId = window.location.hash.slice(1);
+      if (targetId === "obligation" || targetId === "reports") {
+        setOpenSections((current) => ({ ...current, [targetId]: true }));
+        return;
+      }
+      const savedSections = openSectionsFromUrl();
+      if (savedSections) {
+        setOpenSections(savedSections);
+        return;
+      }
+      if (obligation && (obligation.status === "PENDING" || obligation.status === "SUBMITTED")) {
+        setOpenSections((current) => ({ ...current, obligation: true }));
+        return;
+      }
+      if (activeReport) setOpenSections((current) => ({ ...current, reports: true }));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeReport, initialSectionResolved, obligation, obligationLoading, working]);
+
+  const toggleSection = (section: ManagementSectionId) => {
+    setInitialSectionResolved(true);
+    const nextSections = { ...openSections, [section]: !openSections[section] };
+    setOpenSections(nextSections);
+    syncOpenSectionsToUrl(nextSections);
+  };
+
   const reload = async () => {
     const data = await adapter.getContractPerformance(id);
+    setReportLoadError(null);
     setPerformance(data);
     return data;
+  };
+
+  const retryObligationLoad = async () => {
+    setObligationLoading(true);
+    setObligationError(null);
+    try {
+      setObligation(await adapter.getObligation(id));
+    } catch (cause) {
+      setObligationError(errorMessage(cause, "산출물 상태를 불러오지 못했습니다."));
+    } finally {
+      setObligationLoading(false);
+    }
+  };
+
+  const retryPerformanceLoad = async () => {
+    if (working) return;
+    setWorking("loading");
+    setReportLoadError(null);
+    setError(null);
+    try {
+      const data = await reload();
+      const unfinished = oldestUnfinishedReport(data.reports);
+      setActiveReport(unfinished);
+      setForm(unfinished ? formFromReport(unfinished) : emptyMetricForm());
+      if (!unfinished) setPeriod(suggestedUploadPeriod(data.reports));
+    } catch (cause) {
+      setReportLoadError(errorMessage(cause, "광고효과 기록을 불러오지 못했습니다."));
+    } finally {
+      setWorking(null);
+    }
   };
 
   const uploadAndExtract = async () => {
@@ -306,7 +459,12 @@ export default function PerformancePage() {
     )?.issueNote ?? "");
     setCorrectionReason("");
     setError(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.setTimeout(() => {
+      document.getElementById("report-review")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
   };
 
   const latestConfirmedReportId = performance?.confirmedSeries.at(-1)?.reportId ?? null;
@@ -318,73 +476,131 @@ export default function PerformancePage() {
       backHref="/manage"
     >
       <div className="flex flex-col gap-5">
-        <p className="text-[13px] leading-relaxed text-neutral700">
-          대행사에게 받은 광고 리포트를 올려두면, 계약에서 약속한 조건대로 진행되고
-          있는지 한눈에 확인하고 산출물 증빙까지 마무리할 수 있어요.
-        </p>
-
-        <StepFlow activeReport={activeReport} hasConfirmed={Boolean(performance?.confirmedSeries.length)} />
-
-        <section className="flex flex-col gap-2">
-          <SectionTitle>① 대행사 리포트 올리기</SectionTitle>
-          <Card>
-            <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-neutral300 bg-subtle px-6 py-8 text-center">
-              <span className="text-3xl">📄</span>
+        {contract && (
+          <div className="rounded-2xl border border-neutral200 bg-subtle p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="text-[13px] font-bold text-ink">
-                  월간 리포트나 인사이트 화면을 올려주세요
-                </div>
-                <div className="mt-1 text-[11px] text-neutral500">
-                  PDF · 이미지 캡처 모두 괜찮아요
-                </div>
-              </div>
-              <div className="grid w-full max-w-xl gap-3 sm:grid-cols-[150px_1fr]">
-                <label className="text-left text-[11px] font-bold text-neutral700">
-                  대상 월
-                  <input
-                    type="month"
-                    value={period}
-                    onChange={(event) => setPeriod(event.target.value)}
-                    disabled={Boolean(working) || Boolean(activeReport)}
-                    className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 text-[13px] text-ink disabled:opacity-50"
-                  />
-                </label>
-                <label className="text-left text-[11px] font-bold text-neutral700">
-                  PDF 또는 이미지
-                  <input
-                    type="file"
-                    accept="application/pdf,image/png,image/jpeg"
-                    onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                    disabled={Boolean(working) || Boolean(activeReport)}
-                    className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 py-2 text-[12px] text-neutral700 file:mr-3 file:border-0 file:bg-transparent file:font-bold"
-                  />
-                </label>
-              </div>
-              <button
-                type="button"
-                onClick={uploadAndExtract}
-                disabled={Boolean(working) || Boolean(activeReport) || !period || !file}
-                className="h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white hover:bg-ink/90 disabled:opacity-40"
-              >
-                {working === "uploading"
-                  ? "업로드 중…"
-                  : working === "extracting"
-                    ? "숫자 읽는 중…"
-                    : "리포트 올리고 숫자 읽기"}
-              </button>
-              {file && <p className="text-[11px] font-bold text-neutral700">선택됨 · {file.name}</p>}
-              {activeReport && (
-                <p className="text-[11px] font-bold text-brand800">
-                  먼저 {activeReport.period} 리포트 확인을 마치면 다음 월을 등록할 수 있어요.
+                <div className="text-[15px] font-black text-ink">{contract.title}</div>
+                <p className="mt-0.5 text-[11px] text-neutral500">
+                  {contract.counterpartyName}
+                  {contract.date && ` · ${contract.date}`}
                 </p>
-              )}
+              </div>
+              <span className="rounded bg-white px-2 py-1 text-[10px] font-bold text-brand800">
+                {contract.stage ?? "이행 관리"}
+              </span>
             </div>
-            <p className="mt-2 text-[11px] text-neutral500">
-              원본은 비공개로 저장되며 월마다 한 건만 등록할 수 있어요. 분석 시작은 버튼을
-              누른 뒤에만 실행됩니다.
-            </p>
-          </Card>
-        </section>
+          </div>
+        )}
+
+        <ManagementAccordion
+          id="obligation"
+          title="산출물 이행 확인"
+          summary={obligationSectionSummary(obligation, obligationLoading, obligationError)}
+          open={openSections.obligation}
+          onToggle={() => toggleSection("obligation")}
+        >
+          <ObligationPanel
+            contractId={id}
+            obligation={obligation}
+            loading={obligationLoading}
+            loadError={obligationError}
+            onRetry={retryObligationLoad}
+            onChange={setObligation}
+          />
+        </ManagementAccordion>
+
+        <ManagementAccordion
+          id="reports"
+          title="광고 리포트 관리"
+          summary={reportSectionSummary(performance, activeReport, working, reportLoadError)}
+          open={openSections.reports}
+          onToggle={() => toggleSection("reports")}
+        >
+          <div className="flex flex-col gap-5">
+          <p className="text-[13px] leading-relaxed text-neutral700">
+            대행사에게 받은 광고 리포트를 올려두면 계약에서 약속한 조건과 전월 기록을
+            기준으로 광고효과를 확인할 수 있어요.
+          </p>
+
+          <StepFlow
+            activeReport={activeReport}
+            hasConfirmed={Boolean(performance?.confirmedSeries.length)}
+            hasInquiry={Boolean(performance?.inquiryDrafts.length)}
+          />
+
+          {activeReport && (
+            <div className="rounded-xl border border-brand200 bg-brand50 px-4 py-3 text-[12px] font-bold text-brand800">
+              {activeReport.revisionCount > 0
+                ? `${activeReport.period} 확정값을 정정하고 있어요.`
+                : `${activeReport.period} 리포트 확인을 마치면 다음 월을 등록할 수 있어요.`}
+            </div>
+          )}
+
+          {performance && (
+            !activeReport || working === "uploading" || working === "extracting"
+          ) && (
+            <section className="flex flex-col gap-2">
+              <SectionTitle>① 대행사 리포트 올리기</SectionTitle>
+              <Card>
+                <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-neutral300 bg-subtle px-6 py-8 text-center">
+                  <span className="text-3xl">📄</span>
+                  <div>
+                    <div className="text-[13px] font-bold text-ink">
+                      월간 리포트나 인사이트 화면을 올려주세요
+                    </div>
+                    <div className="mt-1 text-[11px] text-neutral500">
+                      PDF · 이미지 캡처 모두 괜찮아요
+                    </div>
+                    {isUsingMock && (
+                      <div className="mt-1.5 text-[10px] font-bold leading-relaxed text-brand800">
+                        데모 모드에서는 {DEMO_PERFORMANCE_REPORT_FILE_NAME} 샘플만 분석합니다.
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid w-full max-w-xl gap-3 sm:grid-cols-[150px_1fr]">
+                    <label className="text-left text-[11px] font-bold text-neutral700">
+                      대상 월
+                      <input
+                        type="month"
+                        value={period}
+                        onChange={(event) => setPeriod(event.target.value)}
+                        disabled={Boolean(working)}
+                        className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 text-[13px] text-ink disabled:opacity-50"
+                      />
+                    </label>
+                    <label className="text-left text-[11px] font-bold text-neutral700">
+                      PDF 또는 이미지
+                      <input
+                        type="file"
+                        accept="application/pdf,image/png,image/jpeg"
+                        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                        disabled={Boolean(working)}
+                        className="mt-1 block h-10 w-full rounded-lg border border-neutral300 bg-white px-3 py-2 text-[12px] text-neutral700 file:mr-3 file:border-0 file:bg-transparent file:font-bold"
+                      />
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={uploadAndExtract}
+                    disabled={Boolean(working) || !period || !file}
+                    className="h-10 rounded-lg bg-ink px-4 text-[13px] font-bold text-white hover:bg-ink/90 disabled:opacity-40"
+                  >
+                    {working === "uploading"
+                      ? "리포트 올리는 중…"
+                      : working === "extracting"
+                        ? "숫자 읽는 중…"
+                        : "리포트 올리고 숫자 읽기"}
+                  </button>
+                  {file && <p className="text-[11px] font-bold text-neutral700">선택됨 · {file.name}</p>}
+                </div>
+                <p className="mt-2 text-[11px] text-neutral500">
+                  원본은 비공개로 저장되며 월마다 한 건만 등록할 수 있어요. 분석 시작은 버튼을
+                  누른 뒤에만 실행됩니다. 광고 성과와 관련 없는 파일은 분석하지 않습니다.
+                </p>
+              </Card>
+            </section>
+          )}
 
         {/* 업로드·추출이 진행 중일 때는 위 카드의 버튼과 겹치므로, 추출이 실제로
             멈춰 있을 때(working이 없을 때)만 다시 시도 안내를 보여준다. */}
@@ -403,25 +619,41 @@ export default function PerformancePage() {
           </Card>
         )}
 
-        {activeReport && activeReport.status !== "UPLOADED" && (
-          <MetricConfirmation
-            report={activeReport}
-            form={form}
-            setForm={setForm}
-            hasIssue={hasIssue}
-            setHasIssue={setHasIssue}
-            issueNote={issueNote}
-            setIssueNote={setIssueNote}
-            correctionReason={correctionReason}
-            setCorrectionReason={setCorrectionReason}
-            working={working === "saving"}
-            onSave={saveConfirmation}
-            onCancel={activeReport.revisionCount > 0 ? () => setActiveReport(null) : undefined}
-          />
-        )}
+          {activeReport && activeReport.status !== "UPLOADED" && (
+            <div id="report-review" className="scroll-mt-28">
+              <MetricConfirmation
+                report={activeReport}
+                form={form}
+                setForm={setForm}
+                hasIssue={hasIssue}
+                setHasIssue={setHasIssue}
+                issueNote={issueNote}
+                setIssueNote={setIssueNote}
+                correctionReason={correctionReason}
+                setCorrectionReason={setCorrectionReason}
+                working={working === "saving"}
+                onSave={saveConfirmation}
+                onCancel={activeReport.revisionCount > 0 ? () => setActiveReport(null) : undefined}
+              />
+            </div>
+          )}
 
         {working === "loading" && (
           <p className="py-8 text-center text-sm text-neutral500">광고효과 기록을 불러오는 중…</p>
+        )}
+        {reportLoadError && !performance && working !== "loading" && (
+          <Card>
+            <p role="alert" className="text-center text-[12px] font-bold text-brand800">
+              ⚠ {reportLoadError}
+            </p>
+            <button
+              type="button"
+              onClick={retryPerformanceLoad}
+              className="mt-3 h-10 w-full rounded-lg bg-ink text-[13px] font-bold text-white"
+            >
+              광고 리포트 다시 불러오기
+            </button>
+          </Card>
         )}
         {error && (
           <p role="alert" className="rounded-lg border border-brand300 bg-brand50 px-4 py-3 text-[12px] font-bold text-brand800">
@@ -429,18 +661,15 @@ export default function PerformancePage() {
           </p>
         )}
 
-        {performance && (
-          <PerformanceDashboard
-            performance={performance}
-            latestConfirmedReportId={latestConfirmedReportId}
-            onCorrect={startCorrection}
-          />
-        )}
-
-        <section className="flex flex-col gap-2">
-          <SectionTitle>⑤ 산출물 증빙 확인</SectionTitle>
-          <ObligationPanel contractId={id} />
-        </section>
+          {performance && (
+            <PerformanceDashboard
+              performance={performance}
+              latestConfirmedReportId={latestConfirmedReportId}
+              onCorrect={startCorrection}
+            />
+          )}
+          </div>
+        </ManagementAccordion>
 
         <Disclaimer>
           확인 신호는 법률 판단이나 광고 성과 보장이 아닙니다. 문의 문안은 자동 발송되지
@@ -449,6 +678,93 @@ export default function PerformancePage() {
       </div>
     </AppScreen>
   );
+}
+
+function ManagementAccordion({
+  id,
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  id: ManagementSectionId;
+  title: string;
+  summary: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const contentId = `${id}-content`;
+  return (
+    <section id={id} className="scroll-mt-28 overflow-hidden rounded-2xl border border-neutral200 bg-white">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left sm:px-5"
+      >
+        <span className="min-w-0">
+          <span className="block text-[15px] font-black text-ink">{title}</span>
+          <span className="mt-1 block truncate text-[11px] font-medium text-neutral500">
+            {summary}
+          </span>
+        </span>
+        <span className="flex flex-none items-center gap-2 text-[11px] font-bold text-brand800">
+          {open ? "접기" : "펼치기"}
+          <span
+            aria-hidden="true"
+            className={`text-base transition-transform ${open ? "rotate-180" : ""}`}
+          >
+            ▾
+          </span>
+        </span>
+      </button>
+      <div
+        id={contentId}
+        hidden={!open}
+        className="border-t border-neutral200 bg-subtle/40 p-4 sm:p-5"
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function obligationSectionSummary(
+  obligation: LiveObligation | null,
+  loading: boolean,
+  loadError: string | null,
+): string {
+  if (loading) return "산출물 상태를 불러오는 중…";
+  if (loadError) return "산출물 상태를 불러오지 못했어요.";
+  if (!obligation) return "확인할 대표 산출물이 아직 없어요.";
+  if (obligation.status === "PENDING") return `사장님 확인 필요 · 기한 ${obligation.dueDate}`;
+  if (obligation.status === "SUBMITTED") return `증빙 제출됨 · 기한 ${obligation.dueDate}`;
+  if (obligation.status === "APPROVED") return "계약대로 완료했다고 확인했어요.";
+  return "문제 있거나 미완료로 기록했어요.";
+}
+
+function reportSectionSummary(
+  performance: ContractPerformance | null,
+  activeReport: PerformanceReport | null,
+  working: WorkingAction,
+  loadError: string | null,
+): string {
+  if (working === "loading") return "광고 리포트를 불러오는 중…";
+  if (working === "uploading") return "리포트를 업로드하는 중…";
+  if (working === "extracting") return "리포트에서 숫자를 읽는 중…";
+  if (working === "saving") return "확인한 값을 저장하는 중…";
+  if (loadError && !performance) return "광고 리포트를 불러오지 못했어요.";
+  if (activeReport?.revisionCount) return `${activeReport.period} 확정값 정정 중`;
+  if (activeReport?.status === "UPLOADED") return `${activeReport.period} 지표 추출 필요`;
+  if (activeReport?.status === "EXTRACTED") return `${activeReport.period} 숫자 확인 필요`;
+  const latest = [...(performance?.confirmedSeries ?? [])]
+    .sort((left, right) => left.period.localeCompare(right.period))
+    .at(-1);
+  if (latest) return `${formatReportPeriod(latest.period)}까지 확인 완료`;
+  return "등록된 월간 리포트가 아직 없어요.";
 }
 
 function MetricConfirmation({
@@ -479,6 +795,15 @@ function MetricConfirmation({
   onCancel?: () => void;
 }) {
   const correcting = report.revisionCount > 0;
+  const manualEntryKeys = new Set(
+    !correcting && report.extractedPayload
+      ? EVIDENCE_METRIC_FIELDS
+        .filter((field) => (
+          report.extractedPayload![field.extractedKey].verificationStatus === "NOT_FOUND"
+        ))
+        .map((field) => field.key)
+      : [],
+  );
   const updateMetric = (
     key: string,
     patch: Partial<Pick<MetricFormItem, "label" | "value" | "unit">>,
@@ -507,6 +832,11 @@ function MetricConfirmation({
         ② {correcting ? `${report.period} 확정값 정정` : "읽은 숫자와 원문 확인"}
       </SectionTitle>
       <Card>
+        {manualEntryKeys.size > 0 && (
+          <div className="mb-4 rounded-lg border border-brand300 bg-brand50 px-3 py-2.5 text-[12px] font-bold leading-relaxed text-brand800">
+            리포트에서 읽지 못한 값 {manualEntryKeys.size}개는 아래 빈칸에 직접 입력해주세요.
+          </div>
+        )}
         {report.extractedPayload && !correcting && (
           <div className="mb-4 grid gap-2 lg:grid-cols-2">
             {EVIDENCE_METRIC_FIELDS.map((field) => {
@@ -538,6 +868,7 @@ function MetricConfirmation({
           {form.map((item) => {
             const canonicalUnit = CANONICAL_UNITS.get(item.key);
             const derived = DERIVED_METRIC_KEYS.has(item.key);
+            const requiresManualEntry = manualEntryKeys.has(item.key);
             return (
               <div key={item.key} className="rounded-lg border border-neutral200 bg-white p-3">
                 <div className="flex items-start gap-2">
@@ -567,7 +898,11 @@ function MetricConfirmation({
                       inputMode="decimal"
                       value={item.value}
                       onChange={(event) => updateMetric(item.key, { value: event.target.value })}
-                      placeholder={derived ? "자동 계산" : "없으면 비워두기"}
+                      placeholder={derived
+                        ? "자동 계산"
+                        : requiresManualEntry
+                          ? "직접 입력해주세요"
+                          : "없으면 비워두기"}
                       readOnly={derived}
                       disabled={working}
                       className="mt-1 h-9 w-full rounded-lg border border-neutral300 px-2.5 text-[12px] font-bold text-ink read-only:bg-subtle disabled:opacity-50"
@@ -902,18 +1237,22 @@ function FlagCard({ flag, inquiry }: { flag: PerformanceFlag; inquiry: string | 
 function StepFlow({
   activeReport,
   hasConfirmed,
+  hasInquiry,
 }: {
   activeReport: PerformanceReport | null;
   hasConfirmed: boolean;
+  hasInquiry: boolean;
 }) {
-  const steps = ["리포트 올리기", "읽은 내용 확인", "대시보드", "문의하기", "증빙 확인"];
+  const steps = ["리포트 올리기", "읽은 내용 확인", "효과 보기", "문의 문안"];
   const reached = activeReport?.status === "EXTRACTED"
     ? 2
     : activeReport?.status === "UPLOADED"
       ? 1
-      : hasConfirmed
+      : hasInquiry
         ? 4
-        : 0;
+        : hasConfirmed
+          ? 3
+          : 0;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {steps.map((step, index) => (
@@ -928,13 +1267,25 @@ function StepFlow({
   );
 }
 
-function ObligationPanel({ contractId }: { contractId: string }) {
-  const state = useAsync(() => adapter.getObligation(contractId), [contractId]);
-  const [updated, setUpdated] = useState<LiveObligation | null>(null);
+function ObligationPanel({
+  contractId,
+  obligation,
+  loading,
+  loadError,
+  onRetry,
+  onChange,
+}: {
+  contractId: string;
+  obligation: LiveObligation | null;
+  loading: boolean;
+  loadError: string | null;
+  onRetry: () => void;
+  onChange: (obligation: LiveObligation) => void;
+}) {
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const obligation = updated ?? (state.status === "ready" ? state.data : null);
+  const [pendingDecision, setPendingDecision] = useState<"APPROVED" | "DISPUTED" | null>(null);
 
   const review = async (decision: "APPROVED" | "DISPUTED") => {
     if (!obligation || !["PENDING", "SUBMITTED"].includes(obligation.status) || working) return;
@@ -942,19 +1293,31 @@ function ObligationPanel({ contractId }: { contractId: string }) {
     setError(null);
     try {
       const url = obligation.status === "PENDING" ? evidenceUrl.trim() || null : null;
-      setUpdated(await adapter.reviewObligation(contractId, obligation.id, decision, url));
+      onChange(await adapter.reviewObligation(contractId, obligation.id, decision, url));
     } catch (cause) {
       setError(errorMessage(cause, "산출물 확인 결과를 저장하지 못했습니다."));
     } finally {
       setWorking(false);
+      setPendingDecision(null);
     }
   };
 
-  if (state.status === "loading") {
+  if (loading) {
     return <p className="py-6 text-center text-sm text-neutral500">불러오는 중…</p>;
   }
-  if (state.status === "error") {
-    return <p className="py-6 text-center text-sm font-bold text-brand800">⚠ {state.error}</p>;
+  if (loadError) {
+    return (
+      <Card>
+        <p className="text-center text-sm font-bold text-brand800">⚠ {loadError}</p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 h-10 w-full rounded-lg bg-ink text-[13px] font-bold text-white"
+        >
+          산출물 상태 다시 불러오기
+        </button>
+      </Card>
+    );
   }
   if (!obligation) {
     return (
@@ -968,7 +1331,8 @@ function ObligationPanel({ contractId }: { contractId: string }) {
   }
 
   return (
-    <Card>
+    <>
+      <Card>
       <div className="text-[13px] font-black text-ink">{obligation.title}</div>
       <div className="mt-2 rounded-lg bg-subtle p-3.5">
         <div className="text-[11px] text-neutral500">기한 {obligation.dueDate}</div>
@@ -1011,10 +1375,10 @@ function ObligationPanel({ contractId }: { contractId: string }) {
               className="mt-1 h-10 w-full rounded-lg border border-neutral300 px-3 text-[12px] text-ink disabled:opacity-40"
             />
           </label>
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              onClick={() => void review("APPROVED")}
+              onClick={() => setPendingDecision("APPROVED")}
               disabled={working}
               className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
             >
@@ -1022,7 +1386,7 @@ function ObligationPanel({ contractId }: { contractId: string }) {
             </button>
             <button
               type="button"
-              onClick={() => void review("DISPUTED")}
+              onClick={() => setPendingDecision("DISPUTED")}
               disabled={working}
               className="h-11 flex-1 rounded-lg border border-neutral300 bg-white px-2 text-[13px] font-bold text-neutral600 disabled:opacity-40"
             >
@@ -1033,11 +1397,11 @@ function ObligationPanel({ contractId }: { contractId: string }) {
       )}
 
       {obligation.status === "SUBMITTED" && (
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
             disabled={working}
-            onClick={() => void review("APPROVED")}
+            onClick={() => setPendingDecision("APPROVED")}
             className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
           >
             {working ? "저장 중…" : "계약대로 완료했어요"}
@@ -1045,7 +1409,7 @@ function ObligationPanel({ contractId }: { contractId: string }) {
           <button
             type="button"
             disabled={working}
-            onClick={() => void review("DISPUTED")}
+            onClick={() => setPendingDecision("DISPUTED")}
             className="h-11 flex-1 rounded-lg border border-neutral300 bg-white text-[13px] font-bold text-neutral500 disabled:opacity-40"
           >
             문제 있거나 미완료예요
@@ -1063,7 +1427,39 @@ function ObligationPanel({ contractId }: { contractId: string }) {
       <p className="mt-2 text-[11px] leading-relaxed text-neutral500">
         완료 체크는 계약상 지급 조건 충족 표시이며 실제 송금·결제나 상대방 통지를 실행하지 않습니다.
       </p>
-    </Card>
+      </Card>
+
+      <ConfirmModal
+        open={pendingDecision !== null}
+        eyebrow="산출물 확인 결과 저장"
+        title={pendingDecision === "APPROVED"
+          ? "계약대로 완료한 것으로 기록할까요?"
+          : "문제 있거나 미완료로 기록할까요?"}
+        body={
+          <>
+            이 선택은 이행 이력에 최종 결과로 저장되며 이후 화면에서 되돌릴 수 없어요.
+            {pendingDecision === "APPROVED" && (
+              <span className="mt-2 block">
+                지급 조건 충족으로 표시되지만 실제 송금이나 상대방 통지는 실행하지 않습니다.
+              </span>
+            )}
+          </>
+        }
+        confirmLabel={working
+          ? "저장 중…"
+          : pendingDecision === "APPROVED"
+            ? "네, 완료로 기록할게요"
+            : "네, 문제 있음으로 기록할게요"}
+        confirmDisabled={working}
+        cancelLabel="다시 확인할게요"
+        onCancel={() => {
+          if (!working) setPendingDecision(null);
+        }}
+        onConfirm={() => {
+          if (pendingDecision && !working) void review(pendingDecision);
+        }}
+      />
+    </>
   );
 }
 

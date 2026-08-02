@@ -9,6 +9,7 @@ export function ConfirmModal({
   title,
   body,
   confirmLabel,
+  confirmDisabled = false,
   cancelLabel = "다시 볼게요",
   onConfirm,
   onCancel,
@@ -19,6 +20,7 @@ export function ConfirmModal({
   title: string;
   body: ReactNode;
   confirmLabel: string;
+  confirmDisabled?: boolean;
   cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
@@ -30,6 +32,9 @@ export function ConfirmModal({
       onClick={onCancel}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className="w-full max-w-[400px] animate-fade-up rounded-2xl border-2 border-ink bg-white p-5"
         onClick={(e) => e.stopPropagation()}
       >
@@ -38,14 +43,17 @@ export function ConfirmModal({
         <div className="mt-2 text-[13px] leading-relaxed text-neutral700">{body}</div>
         <div className="mt-4 flex gap-2">
           <button
+            type="button"
             onClick={onCancel}
             className="h-11 flex-1 rounded-lg border-2 border-ink bg-white text-[13px] font-bold text-ink"
           >
             {cancelLabel}
           </button>
           <button
+            type="button"
             onClick={onConfirm}
-            className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white"
+            disabled={confirmDisabled}
+            className="h-11 flex-1 rounded-lg bg-ink text-[13px] font-bold text-white disabled:opacity-40"
           >
             {confirmLabel}
           </button>

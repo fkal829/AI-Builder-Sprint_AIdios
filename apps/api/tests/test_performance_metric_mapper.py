@@ -172,7 +172,7 @@ async def test_mock_extracts_clicks_and_krw_ad_spend_with_grounded_units() -> No
 
 async def test_mock_treats_unitless_ad_spend_as_not_found() -> None:
     parsed = ParsedDocument(
-        pages=(ParsedPage(number=1, text="광고비: 12,345"),),
+        pages=(ParsedPage(number=1, text="월간 광고 성과 리포트\n광고비: 12,345"),),
         model="fixture-document-parse-v1",
     )
     mapper = SolarPerformanceMetricMapper(
@@ -185,6 +185,54 @@ async def test_mock_treats_unitless_ad_spend_as_not_found() -> None:
 
     assert mapped.ad_spend.value is None
     assert mapped.ad_spend.verification_status is PerformanceMetricVerificationStatus.NOT_FOUND
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2026년 8월 임대차 계약서\n보증금: 10,000,000원\n계약기간: 24개월",
+        "월간 업무 보고\n회의: 12건\n작업 시간: 40시간",
+        "광고 성과 리포트라는 제목만 있고 지표는 없습니다.",
+        "comments: 42",
+    ],
+)
+async def test_mapper_rejects_documents_without_performance_report_evidence(text: str) -> None:
+    mapper = SolarPerformanceMetricMapper(
+        mode="mock",
+        api_key="",
+        base_url="https://api.upstage.ai",
+    )
+    parsed = ParsedDocument(
+        pages=(ParsedPage(number=1, text=text),),
+        model="fixture-document-parse-v1",
+    )
+
+    with pytest.raises(SolarPerformanceMetricMapperError):
+        await mapper.map_metrics(parsed_document=parsed)
+
+
+async def test_live_rejects_irrelevant_document_before_solar_request() -> None:
+    def forbidden_request(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("관련 없는 문서는 Solar 요청 전에 거부해야 합니다.")
+
+    mapper = SolarPerformanceMetricMapper(
+        mode="live",
+        api_key="private-test-key",
+        base_url="https://api.upstage.ai",
+        transport=httpx.MockTransport(forbidden_request),
+    )
+    parsed = ParsedDocument(
+        pages=(
+            ParsedPage(
+                number=1,
+                text="식당 위생 점검표\n냉장고 온도: 3도\n테이블 수: 12개",
+            ),
+        ),
+        model="fixture-document-parse-v1",
+    )
+
+    with pytest.raises(SolarPerformanceMetricMapperError):
+        await mapper.map_metrics(parsed_document=parsed)
 
 
 async def test_live_retries_one_transient_failure_before_returning_valid_payload() -> None:

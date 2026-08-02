@@ -19,6 +19,9 @@ test("owner navigation keeps integrated management and aggregate performance adj
   assert.match(header, /pathname\.startsWith\("\/performance"\)/);
   assert.match(header, /href: "\/performance"/);
   assert.match(header, /<AuthControl \/>/);
+  assert.match(header, /aria-current=\{on \? "page" : undefined\}/);
+  assert.match(header, /overflow-x-auto pb-2 md:hidden/);
+  assert.match(header, /hidden items-center gap-1 md:flex/);
 });
 
 test("integrated management lets the owner choose an eligible contract before upload", async () => {
@@ -29,15 +32,22 @@ test("integrated management lets the owner choose an eligible contract before up
 
   assert.match(manage, /adapter\.getDashboard\(\)/);
   assert.match(manage, /adapter\.getContractPerformance\(contract\.id\)/);
+  assert.match(manage, /adapter\.getObligation\(contract\.id\)/);
+  assert.match(manage, /Promise\.allSettled/);
   assert.match(manage, /PERFORMANCE_WRITE_STATUSES/);
   for (const status of ["SIGNED", "IN_PROGRESS", "RENEWAL_DUE", "COMPLETED"]) {
     assert.match(manage, new RegExp(`"${status}"`));
   }
-  assert.match(manage, /리포트를 등록할 계약/);
-  assert.match(manage, /`\/contracts\/\$\{contract\.id\}\/performance`/);
-  assert.match(manage, /리포트 등록하기/);
+  assert.match(manage, /관리할 계약/);
+  assert.match(manage, /산출물 이행/);
+  assert.match(manage, /광고 리포트/);
+  assert.match(manage, /performance#obligation/);
+  assert.match(manage, /performance#reports/);
+  assert.match(manage, /산출물 확인하기/);
   assert.match(manage, /서명 완료 후 가능/);
   assert.match(contractPage, /backHref="\/manage"/);
+  assert.match(contractPage, /dashboard\.contracts\.find/);
+  assert.match(contractPage, /contract\.counterpartyName/);
 });
 
 test("develop-style comparison keeps independent left and right font controls", async () => {

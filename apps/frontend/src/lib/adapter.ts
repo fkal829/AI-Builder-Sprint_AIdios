@@ -6,6 +6,7 @@
 import {
   DEMO_ADJUSTMENT_REQUEST,
   DEMO_CONTRACT,
+  DEMO_CONTRACT_ID,
   DASHBOARD_CONTRACTS,
   DASHBOARD_STATS,
 } from "./mock";
@@ -506,6 +507,10 @@ export const PERFORMANCE_BASE_METRICS = [
   unit: PerformanceMetricUnit;
 }[];
 
+export const DEMO_PERFORMANCE_REPORT_FILE_NAME = "브릿지웨이브_7월_광고리포트.pdf";
+const DEMO_PERFORMANCE_REPORT_SHA256 =
+  "2bbccabc2f49971bad0425235a0261dd6590ec83d5254dbd3d5a01c1be9c3d12";
+
 export function calculatePerformanceCtr(
   clicks: number | null,
   impressions: number | null,
@@ -742,6 +747,11 @@ export interface DataAdapter {
 
 /** 네트워크 지연 흉내 (분석 진행 화면 등에서 사용) */
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function sha256Hex(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 function mockRevisedContractReview(documentId: string): RevisedContractReview {
   const requested = DEMO_CONTRACT.clauses
@@ -1047,6 +1057,9 @@ function calculatePerformanceEngagementRate(payload: PerformanceConfirmedPayload
 }
 
 function createMockContractPerformance(contractId: string): ContractPerformance {
+  if (contractId !== DEMO_CONTRACT_ID) {
+    return buildMockContractPerformance(contractId, []);
+  }
   const points = [
     { period: "2026-05", payload: mockConfirmedPayload(800_000, 12_400, 620, 4) },
     { period: "2026-06", payload: mockConfirmedPayload(900_000, 15_200, 760, 4) },
@@ -1184,8 +1197,41 @@ function previousPerformancePeriod(period: string): string {
     : `${String(year).padStart(4, "0")}-${String(month - 1).padStart(2, "0")}`;
 }
 
+function createMockObligation(contractId: string): LiveObligation | null {
+  if (contractId === "cxn_signboard") {
+    return {
+      id: "ob_signboard_installation",
+      title: "간판 최종 시안과 설치 사진",
+      dueDate: "2026-08-15",
+      sourcePage: 2,
+      sourceText: "제작 완료 후 최종 시안과 설치 사진을 제출한다.",
+      confidence: 0.94,
+      evidenceUrl: null,
+      status: "PENDING",
+      submittedAt: null,
+      reviewedAt: null,
+      paymentConditionMet: false,
+    };
+  }
+  if (contractId !== DEMO_CONTRACT_ID) return null;
+  return {
+    id: DEMO_CONTRACT.obligation.id,
+    title: DEMO_CONTRACT.obligation.title,
+    dueDate: DEMO_CONTRACT.obligation.dueDate,
+    sourcePage: 4,
+    sourceText: "인스타그램 게시물 4건을 제출한다.",
+    confidence: 0.95,
+    evidenceUrl: DEMO_CONTRACT.obligation.evidenceUrl,
+    status: DEMO_CONTRACT.obligation.status,
+    submittedAt: DEMO_CONTRACT.obligation.submittedAt,
+    reviewedAt: null,
+    paymentConditionMet: false,
+  };
+}
+
 class MockAdapter implements DataAdapter {
   private readonly performanceByContract = new Map<string, ContractPerformance>();
+  private readonly obligationByContract = new Map<string, LiveObligation | null>();
 
   async getDashboard() {
     await delay(120);
@@ -1424,22 +1470,13 @@ class MockAdapter implements DataAdapter {
     };
   }
 
-  async getObligation(_contractId: string): Promise<LiveObligation | null> {
-    void _contractId;
+  async getObligation(contractId: string): Promise<LiveObligation | null> {
     await delay(120);
-    return {
-      id: DEMO_CONTRACT.obligation.id,
-      title: DEMO_CONTRACT.obligation.title,
-      dueDate: DEMO_CONTRACT.obligation.dueDate,
-      sourcePage: 4,
-      sourceText: "인스타그램 게시물 4건을 제출한다.",
-      confidence: 0.95,
-      evidenceUrl: DEMO_CONTRACT.obligation.evidenceUrl,
-      status: DEMO_CONTRACT.obligation.status,
-      submittedAt: DEMO_CONTRACT.obligation.submittedAt,
-      reviewedAt: null,
-      paymentConditionMet: false,
-    };
+    if (!this.obligationByContract.has(contractId)) {
+      this.obligationByContract.set(contractId, createMockObligation(contractId));
+    }
+    const obligation = this.obligationByContract.get(contractId) ?? null;
+    return obligation ? structuredClone(obligation) : null;
   }
 
   async createObligationEvidenceLink(
@@ -1456,16 +1493,16 @@ class MockAdapter implements DataAdapter {
   }
 
   async reviewObligation(
-    _contractId: string,
+    contractId: string,
     _obligationId: string,
     decision: "APPROVED" | "DISPUTED",
     evidenceUrl: string | null = null,
   ): Promise<LiveObligation> {
-    const current = await this.getObligation(_contractId);
+    const current = await this.getObligation(contractId);
     if (!current) {
       throw new PublicApiError(404, "NOT_FOUND", "대표 산출물을 찾을 수 없습니다.");
     }
-    return {
+    const reviewed: LiveObligation = {
       ...current,
       evidenceUrl: current.status === "PENDING" ? evidenceUrl : current.evidenceUrl,
       submittedAt:
@@ -1474,6 +1511,8 @@ class MockAdapter implements DataAdapter {
       reviewedAt: new Date().toISOString(),
       paymentConditionMet: decision === "APPROVED",
     };
+    this.obligationByContract.set(contractId, reviewed);
+    return structuredClone(reviewed);
   }
 
   async getRenewalView(_contractId: string): Promise<LiveRenewalView> {
@@ -1510,8 +1549,16 @@ class MockAdapter implements DataAdapter {
     period: string,
     file: File,
   ): Promise<PerformanceReport> {
-    void file;
     await delay(240);
+    const isDemoFixture = await sha256Hex(file) === DEMO_PERFORMANCE_REPORT_SHA256;
+    if (!isDemoFixture) {
+      throw new PublicApiError(
+        422,
+        "VALIDATION_ERROR",
+        `데모 모드에서는 ${DEMO_PERFORMANCE_REPORT_FILE_NAME} 샘플만 분석할 수 있어요. `
+          + "다른 파일은 실 API 모드에서 분석해주세요.",
+      );
+    }
     const current = await this.getContractPerformance(contractId);
     if (current.reports.some((report) => report.period === period)) {
       throw new PublicApiError(409, "REPORT_PERIOD_ALREADY_EXISTS", "이미 등록된 월입니다.");

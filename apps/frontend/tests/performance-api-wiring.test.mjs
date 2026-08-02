@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -28,6 +29,22 @@ test("performance adapter covers upload, extraction, confirmation, correction, a
   assert.match(adapter, /missingPerformanceCandidate\(\)/);
   assert.match(adapter, /metric_items: data\.metricItems\.map/);
   assert.match(adapter, /Array\.isArray\(data\.metric_items\) && data\.metric_items\.length > 0/);
+  assert.match(adapter, /await sha256Hex\(file\) === DEMO_PERFORMANCE_REPORT_SHA256/);
+  assert.match(adapter, /데모 모드에서는.*샘플만 분석할 수 있어요/);
+});
+
+test("mock performance extraction only accepts the exact fictitious demo report", async () => {
+  const [adapter, fixture] = await Promise.all([
+    source("src/lib/adapter.ts"),
+    readFile(new URL(
+      "../../../fixtures/demo/performance-reports/브릿지웨이브_7월_광고리포트.pdf",
+      import.meta.url,
+    )),
+  ]);
+  const expectedHash = createHash("sha256").update(fixture).digest("hex");
+
+  assert.match(adapter, new RegExp(`DEMO_PERFORMANCE_REPORT_SHA256[^]*${expectedHash}`));
+  assert.match(adapter, /throw new PublicApiError\(\s*422,\s*"VALIDATION_ERROR"/);
 });
 
 test("performance page uses evidence-backed API data and keeps inquiry delivery manual", async () => {
@@ -44,14 +61,48 @@ test("performance page uses evidence-backed API data and keeps inquiry delivery 
   assert.doesNotMatch(page, /계약서를 기준으로 확인해요/);
   assert.match(page, /border-2 border-dashed border-neutral300/);
   assert.match(page, /① 대행사 리포트 올리기/);
+  assert.match(page, /광고 성과와 관련 없는 파일은 분석하지 않습니다/);
+  assert.match(page, /데모 모드에서는 \{DEMO_PERFORMANCE_REPORT_FILE_NAME\} 샘플만 분석합니다/);
   assert.match(page, /setCorrectionReason/);
   assert.match(page, /oldestUnfinishedReport\(data\.reports\)/);
   assert.match(page, /sort\(\(left, right\) => left\.period\.localeCompare\(right\.period\)\)/);
   assert.match(page, /suggestedUploadPeriod\(data\.reports\)/);
-  assert.match(page, /Boolean\(working\) \|\| Boolean\(activeReport\) \|\| !period \|\| !file/);
-  assert.match(page, /먼저 \{activeReport\.period\} 리포트 확인을 마치면/);
+  assert.match(page, /!activeReport \|\| working === "uploading" \|\| working === "extracting"/);
+  assert.match(page, /Boolean\(working\) \|\| !period \|\| !file/);
+  assert.match(page, /working === "uploading"[^]*"리포트 올리는 중…"/);
+  assert.match(page, /working === "extracting"[^]*"숫자 읽는 중…"/);
+  assert.match(page, /activeReport\?\.status === "UPLOADED" && !working/);
+  assert.match(page, /리포트 확인을 마치면 다음 월을 등록할 수 있어요/);
   assert.match(page, /기존 기록을\s*덮어쓰지 않고 새 버전으로 남습니다/);
   assert.match(page, /문의 문안은 자동 발송되지/);
+  assert.match(page, /id="obligation"/);
+  assert.match(page, /id="reports"/);
+  assert.ok(page.indexOf('id="obligation"') < page.indexOf('id="reports"'));
+  assert.match(page, /function ManagementAccordion/);
+  assert.match(page, /aria-expanded=\{open\}/);
+  assert.match(page, /openSections\.obligation/);
+  assert.match(page, /openSections\.reports/);
+  assert.match(page, /\[section\]: !openSections\[section\]/);
+  assert.match(page, /\.\.\.current, \[targetId\]: true/);
+  assert.match(page, /obligation\.status === "PENDING" \|\| obligation\.status === "SUBMITTED"/);
+  assert.match(page, /if \(activeReport\) setOpenSections/);
+  assert.doesNotMatch(page, /바로가기 ↓/);
+  assert.match(page, /window\.location\.hash\.slice\(1\)/);
+  assert.match(page, /openSectionsFromUrl/);
+  assert.match(page, /syncOpenSectionsToUrl\(nextSections\)/);
+  assert.match(page, /openIds\.join\(","\)/);
+  assert.match(page, /hidden=\{!open\}/);
+  assert.match(page, /onRetry=\{retryObligationLoad\}/);
+  assert.match(page, /onClick=\{retryPerformanceLoad\}/);
+  assert.match(page, /const single = points\.length === 1/);
+  assert.match(page, /single \? "justify-center"/);
+  assert.match(page, /new MutationObserver/);
+  assert.match(page, /<ConfirmModal/);
+  assert.match(page, /setPendingDecision\("APPROVED"\)/);
+  assert.match(page, /setPendingDecision\("DISPUTED"\)/);
+  assert.match(page, /이후 화면에서 되돌릴 수 없어요/);
+  assert.match(page, /hasInquiry=\{Boolean\(performance\?\.inquiryDrafts\.length\)\}/);
+  assert.doesNotMatch(page.slice(page.indexOf("function StepFlow")), /"증빙 확인"/);
   assert.doesNotMatch(page, /화면 목업 · 개발 예정/);
   assert.doesNotMatch(page, /const JULY_POSTS/);
 });
@@ -87,6 +138,9 @@ test("performance metric editor keeps six defaults, dynamic rows, and determinis
   assert.match(page, /replaceAll\("-", "_"\)/);
   assert.match(page, /maxLength=\{50\}/);
   assert.match(page, /readOnly=\{derived\}/);
+  assert.match(page, /verificationStatus === "NOT_FOUND"/);
+  assert.match(page, /리포트에서 읽지 못한 값 \{manualEntryKeys\.size\}개/);
+  assert.match(page, /requiresManualEntry[^]*"직접 입력해주세요"/);
   assert.match(page, /METRIC_UNIT_OPTIONS\.map/);
   assert.match(page, /form\.length === 0/);
   assert.match(page, /seenKeys/);
@@ -99,6 +153,9 @@ test("performance metric editor keeps six defaults, dynamic rows, and determinis
   assert.match(adapter, /Math\.round\(\(clicks \/ impressions\) \* 10_000\) \/ 100/);
   assert.match(adapter, /Math\.round\(adSpend \/ clicks\)/);
   assert.match(adapter, /createPerformanceBaseMetricItems\(\{/);
+  assert.match(adapter, /contractId !== DEMO_CONTRACT_ID/);
+  assert.match(adapter, /obligationByContract/);
+  assert.match(adapter, /간판 최종 시안과 설치 사진/);
   assert.doesNotMatch(page, /label: "좋아요"|label: "댓글"|label: "저장"/);
 });
 

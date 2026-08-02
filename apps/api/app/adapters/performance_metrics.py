@@ -16,7 +16,7 @@ from app.adapters.solar import SOLAR_CHAT_PATH, SOLAR_RETRYABLE_STATUS_CODES
 from app.core.enums import PerformanceMetricVerificationStatus
 from app.schemas.performance import PerformanceExtractedPayload
 
-PERFORMANCE_METRIC_PROMPT_VERSION = "performance-report-metrics-v2"
+PERFORMANCE_METRIC_PROMPT_VERSION = "performance-report-metrics-v3"
 PERFORMANCE_METRIC_NAMES = (
     "ad_spend",
     "impressions",
@@ -159,6 +159,11 @@ _ANY_METRIC_LABEL = re.compile(
         _metric_label_expression(label) for label in sorted(_LABEL_TO_METRIC, key=len, reverse=True)
     )
 )
+_PERFORMANCE_REPORT_CONTEXT = re.compile(
+    r"(?:광고\s*성과|성과\s*리포트|광고\s*리포트|월간\s*(?:성과|보고)|캠페인|인사이트)"
+    r"|(?:\b(?:performance|analytics|insights?|campaign|monthly)\s+(?:report|summary)\b)",
+    re.IGNORECASE,
+)
 _INTEGER_TOKEN = re.compile(r"(?<![\d,.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?![\d,.])")
 _NON_COUNT_CONTEXT = re.compile(
     r"(?:증가율|감소율|성장률|반응률|참여율|전환율|클릭률|도달률|저장률|공유율|비율|비중|평균|기간|기한|목표|예상|추정|계획|비용|단가|광고비)"
@@ -216,6 +221,7 @@ class SolarPerformanceMetricMapper:
         parsed_document: ParsedDocument,
     ) -> PerformanceExtractedPayload:
         _validate_parsed_document(parsed_document)
+        _validate_performance_report_relevance(parsed_document)
         if self.mode == "mock":
             return _mock_payload(parsed_document)
 
@@ -402,6 +408,22 @@ def _validate_parsed_document(parsed_document: ParsedDocument) -> None:
         or any(not page.text.strip() for page in parsed_document.pages)
     ):
         raise SolarPerformanceMetricMapperError("성과 리포트 파싱 페이지가 올바르지 않습니다.")
+
+
+def _validate_performance_report_relevance(parsed_document: ParsedDocument) -> None:
+    normalized_text = "\n".join(
+        re.sub(r"\s+", " ", unicodedata.normalize("NFKC", page.text).lower())
+        for page in parsed_document.pages
+    )
+    metric_names = {
+        _LABEL_TO_METRIC[match.group(0)]
+        for match in _ANY_METRIC_LABEL.finditer(normalized_text)
+    }
+    has_report_context = _PERFORMANCE_REPORT_CONTEXT.search(normalized_text) is not None
+    if not metric_names or (len(metric_names) < 2 and not has_report_context):
+        raise SolarPerformanceMetricMapperError(
+            "광고 성과 리포트 문맥과 지표 라벨을 확인할 수 없습니다."
+        )
 
 
 def _validate_metric_evidence(

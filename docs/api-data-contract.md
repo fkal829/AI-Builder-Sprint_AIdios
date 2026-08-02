@@ -809,7 +809,8 @@ Document를 `FAILED`, report를 `UPLOADED`로 유지한다. Solar 매핑만 실�
 `COMPLETED`를 보존하고 report를 `UPLOADED`로 유지한다. P2는 Parse 결과를 별도 저장하지
 않으므로 명시적 재시도는 Document Parse부터 다시 실행한다.
 
-timeout·HTTP·Parse·AI 스키마 실패를 고정 샘플로 대체하지 않고
+파싱 원문에 광고 성과 리포트 문맥과 지표 라벨이 없는 문서는 Solar 매핑 전에 거부한다.
+관련 없는 문서, timeout·HTTP·Parse·AI 스키마 실패를 고정 샘플로 대체하지 않고
 `502 REPORT_EXTRACT_FAILED`를 반환한다. private Storage·DB·멱등 저장 기반을
 사용할 수 없으면 `503 EXTERNAL_SERVICE_UNAVAILABLE`을 반환하고 raw 예외를
 노출하지 않는다. 추출 후보 각 필드는 `value`, `source_page`,

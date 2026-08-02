@@ -1594,7 +1594,10 @@ Document·report UUID로 응답 유실과 멱등 응답 저장 실패를 복구�
   `503 EXTERNAL_SERVICE_UNAVAILABLE`
 
 `UPLOADED`에서만 시작한다. 원본 파일을 Upstage Document Parse로 읽고 Solar가
-지표명과 숫자 후보를 매핑한다. 외부 호출은 긴 DB 트랜잭션 밖에서 수행하고,
+지표명과 숫자 후보를 매핑한다. Solar 호출 전에 파싱 원문이 광고 성과 리포트 문맥과
+지표 라벨을 갖췄는지 결정적으로 검사한다. 관련 없는 문서는 고정값이나 우연히 발견한
+숫자를 반환하지 않고 `502 REPORT_EXTRACT_FAILED`로 거부한다. 외부 호출은 긴 DB 트랜잭션
+밖에서 수행하고,
 검증된 완전한 결과와 `PERFORMANCE_REPORT_EXTRACTED` 감사 이벤트만 원자적으로
 저장한다.
 
@@ -1602,7 +1605,8 @@ Document·report UUID로 응답 유실과 멱등 응답 저장 실패를 복구�
 `confidence`, `verification_status`를 가진다. 필수 지표와 선택 지표뿐 아니라
 `published_content_count`도 원문에 명시된 경우에만 후보로 반환한다. 찾지 못한 값을
 행 수·URL 수 등으로 추정하지 않고 `NOT_FOUND`로 반환해 소상공인이 확인 단계에서
-입력하게 한다.
+입력하게 한다. 따라서 정상 리포트의 개별 지표 누락과 문서 전체의 부적합은 서로 다르게
+처리한다.
 
 기존 8개 후보의 required 계약은 유지한다. `ad_spend`와 `clicks`는 원문에 명시된 경우를
 위한 optional 후보이므로 이전 8개 필드 payload도 유효하다. Solar가 스키마 밖의 지표를

@@ -987,8 +987,11 @@ paths:
       tags: [performance]
       description: |
         UPLOADED 리포트 원본을 Upstage Document Parse로 읽고 Solar strict schema로
-        지표 후보와 원문 근거를 매핑한다. 찾지 못한 값은 추정하지 않고 NOT_FOUND로
-        반환하며 이 단계의 값은 비교·문의 문안에 사용하지 않는다. report와 Document를
+        지표 후보와 원문 근거를 매핑한다. 매핑 전에 파싱 원문에 광고 성과 리포트 문맥과
+        지표 라벨이 있는지 결정적으로 검사하며, 관련 없는 문서는 값을 만들지 않고
+        REPORT_EXTRACT_FAILED로 거부한다. 정상 리포트에서 찾지 못한 개별 값은 추정하지
+        않고 NOT_FOUND로 반환하며 이 단계의 값은 비교·문의 문안에 사용하지 않는다.
+        report와 Document를
         잠깐 잠가 extraction attempt를 claim한 뒤 외부 호출은 트랜잭션 밖에서 수행한다.
         15분 미만의 활성 attempt는 REPORT_EXTRACTION_IN_PROGRESS로 거부하고, 15분 이상
         지난 attempt만 새 Idempotency-Key의 명시적 재시도로 원자 재점유한다. 현재

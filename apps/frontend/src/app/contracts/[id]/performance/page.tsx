@@ -812,10 +812,12 @@ function MonthlyChart({ points }: { points: ContractPerformance["confirmedSeries
     1,
   );
   // 리포트가 한 건뿐이면 flex-1이 막대를 카드 전체 폭으로 늘려 읽기 어렵다.
-  // 이때만 폭을 절반으로 묶고, 두 건부터는 원래대로 균등 분할한다.
+  // 이때만 폭을 절반으로 묶어 가운데 세우고, 두 건부터는 원래대로 균등 분할한다.
   const single = points.length === 1;
   return (
-    <div className="flex min-h-40 items-end gap-3 overflow-x-auto pb-1">
+    <div
+      className={`flex min-h-40 items-end gap-3 overflow-x-auto pb-1 ${single ? "justify-center" : ""}`}
+    >
       {points.map((point) => {
         const items = point.confirmedPayload.metricItems;
         const adSpend = performanceMetricValue(items, "ad_spend");

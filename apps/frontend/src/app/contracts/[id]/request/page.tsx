@@ -148,7 +148,12 @@ export default function RequestPreviewPage() {
     >
       {state.status === "loading" && <PreviewSkeleton />}
 
-      {state.status === "ready" && (
+      {/* 요청서를 못 불러왔거나 담긴 항목이 하나도 없으면 빈 화면만 남는다.
+          이럴 때만 새로고침을 안내하고, 정상 표시될 때는 나타나지 않는다. */}
+      {(state.status === "error"
+        || (state.status === "ready" && items.length === 0)) && <ReloadNotice />}
+
+      {state.status === "ready" && items.length > 0 && (
         <div className="flex flex-col gap-5">
           <div>
             <div className="text-[15px] font-black text-ink">
@@ -166,11 +171,15 @@ export default function RequestPreviewPage() {
                 className="rounded-xl border border-neutral200 bg-white p-4 shadow-[0_1px_2px_rgba(16,54,90,0.04)]"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand800 text-[11px] font-bold text-white">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand800 text-[11px] font-bold text-white">
                       {index + 1}
                     </span>
-                    <span className="truncate text-[14px] font-black text-ink">{it.title}</span>
+                    {/* 실 API에서는 조항 제목 자리에 AI 설명 문장이 통째로 들어온다.
+                        줄임표로 자르지 않고 전문이 보이도록 줄바꿈시킨다. */}
+                    <span className="min-w-0 flex-1 text-[14px] font-black leading-relaxed text-ink">
+                      {it.title}
+                    </span>
                   </div>
                   {it.manual && (
                     <button
@@ -219,6 +228,27 @@ export default function RequestPreviewPage() {
         onConfirm={sendRequest}
       />
     </AppScreen>
+  );
+}
+
+/** 요청서가 비어 보일 때만 뜨는 안내 — 새로고침으로 대부분 해결된다. */
+function ReloadNotice() {
+  return (
+    <div className="rounded-xl border border-brand300 bg-brand50 px-5 py-6 text-center">
+      <p className="text-[15px] font-black text-ink">요청서를 불러오지 못했어요</p>
+      <p className="mt-2 text-[13px] leading-loose text-neutral700">
+        잠시 연결이 끊겼을 수 있어요. 새로고침을 해주세요.
+        <br />
+        계속 비어 있으면 계약서 화면에서 조정할 조항을 먼저 확인해주세요.
+      </p>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="mt-4 h-11 rounded-lg bg-ink px-6 text-[13px] font-bold text-white"
+      >
+        새로고침
+      </button>
+    </div>
   );
 }
 

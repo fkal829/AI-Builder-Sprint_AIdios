@@ -180,8 +180,18 @@ export default function SignaturePage() {
                 모두싸인 편집기 열기 <span aria-hidden="true">↗</span>
               </a>
             )}
+            <a
+              href={MODUSIGN_HELP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 flex h-11 items-center justify-center gap-1.5 rounded-lg border border-neutral300 bg-white text-sm font-bold text-ink hover:bg-subtle"
+            >
+              모두싸인 서명 방법 안내 보기 <span aria-hidden="true">↗</span>
+            </a>
             <p className="mt-2 text-[11px] text-neutral500">
-              편집기는 새 창에서 열립니다. 이 화면은 그대로 두셔도 됩니다.
+              {isUsingMock
+                ? "서명 방법 안내는 새 창에서 열립니다."
+                : "편집기와 안내는 새 창에서 열립니다. 이 화면은 그대로 두셔도 됩니다."}
             </p>
           </div>
         )}

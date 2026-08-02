@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppScreen } from "@/components/AppScreen";
-import { adapter, isUsingMock } from "@/lib/adapter";
+import { adapter, isUsingMock, PublicApiError } from "@/lib/adapter";
 
 /* ③ AI 분석 진행 — Evaluator Loop(최대 2회 재시도) 단계 표시.
    "검토 중"처럼 중립적으로. 판정 느낌 없이. */
@@ -12,6 +12,21 @@ const STEPS = [
   "조건을 뽑고 있어요",
   "이해하신 내용과 대조 중",
 ];
+
+/** 상태 조회가 연달아 이만큼 실패해야 화면에 오류를 띄운다. */
+const MAX_POLL_FAILURES = 3;
+
+/**
+ * 새로고침으로 풀릴 수 있는 일시적 오류인지 판별한다.
+ *
+ * 서버는 토큰 검증에 한 번이라도 실패하면 401을 돌려주는데(네트워크 순단, 인증
+ * 서버 rate limit 포함), 이 화면은 2초마다 상태를 조회해 그런 순간을 만나기 쉽다.
+ * 실제로 로그아웃된 것이 아닌 경우가 대부분이라 재로그인 대신 새로고침을 안내한다.
+ */
+function isRecoverable(cause: unknown): boolean {
+  if (!(cause instanceof PublicApiError)) return false;
+  return cause.status === 401 || cause.status === 0 || cause.status >= 500;
+}
 
 export default function AnalysisPage() {
   const router = useRouter();
@@ -23,6 +38,7 @@ export default function AnalysisPage() {
   const [canRetry, setCanRetry] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [pollRun, setPollRun] = useState(0);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
 
   useEffect(() => {
     if (!isUsingMock) return;
@@ -38,11 +54,14 @@ export default function AnalysisPage() {
     if (isUsingMock) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // 일시적인 조회 실패로 진행 화면이 멈춰버리지 않도록 연속 실패 횟수를 센다.
+    let failures = 0;
 
     const poll = async () => {
       try {
         const task = await adapter.getContractAnalysis(id);
         if (!alive) return;
+        failures = 0;
         if (task.status === "COMPLETED") {
           router.replace(`/contracts/${id}`);
           return;
@@ -61,9 +80,21 @@ export default function AnalysisPage() {
         setStep(task.status === "PROCESSING" ? 1 : 0);
         timer = setTimeout(poll, 2_000);
       } catch (cause) {
-        if (alive) {
-          setError(cause instanceof Error ? cause.message : "분석 상태를 확인하지 못했습니다.");
+        if (!alive) return;
+        failures += 1;
+        const recoverable = isRecoverable(cause);
+        if (recoverable && failures < MAX_POLL_FAILURES) {
+          timer = setTimeout(poll, 2_000);
+          return;
         }
+        setNeedsRefresh(recoverable);
+        setError(
+          recoverable
+            ? "분석 상태를 확인하지 못했어요. 새로고침을 해주세요."
+            : cause instanceof Error
+              ? cause.message
+              : "분석 상태를 확인하지 못했습니다.",
+        );
       }
     };
 
@@ -138,6 +169,15 @@ export default function AnalysisPage() {
           <div className="flex flex-col items-center gap-3 text-center">
             <p className="text-xs font-bold leading-relaxed text-brand800">⚠ {error}</p>
             <div className="flex flex-wrap justify-center gap-2">
+              {needsRefresh && (
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="rounded-lg bg-ink px-4 py-2 text-xs font-bold text-white"
+                >
+                  새로고침
+                </button>
+              )}
               {failedDocumentId && canRetry ? (
                 <button
                   type="button"

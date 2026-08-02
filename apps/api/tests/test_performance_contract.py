@@ -34,6 +34,7 @@ from app.schemas.performance import (
     PerformanceFlag,
     PerformanceFlagBasisSnapshot,
     PerformanceInquiryDraft,
+    PerformanceMetricItem,
     PerformanceNonNegativeMetricCandidate,
     PerformanceReport,
     PerformanceReportConfirmation,
@@ -69,6 +70,38 @@ def confirmed_payload_values(**overrides: object) -> dict[str, object]:
 
 def make_confirmed_payload(**overrides: object) -> PerformanceConfirmedPayload:
     return PerformanceConfirmedPayload(**confirmed_payload_values(**overrides))
+
+
+def editable_metric_items(**value_overrides: object) -> list[dict[str, object]]:
+    values: dict[str, object] = {
+        "ad_spend": 10_001,
+        "impressions": 1_000,
+        "clicks": 30,
+        "ctr": None,
+        "cpc": None,
+        "published_content_count": 3,
+    }
+    values.update(value_overrides)
+    labels = {
+        "ad_spend": "광고비",
+        "impressions": "노출",
+        "clicks": "클릭",
+        "ctr": "클릭률",
+        "cpc": "클릭당 비용",
+        "published_content_count": "게시물 수",
+    }
+    units = {
+        "ad_spend": "KRW",
+        "impressions": "COUNT",
+        "clicks": "COUNT",
+        "ctr": "PERCENT",
+        "cpc": "KRW",
+        "published_content_count": "COUNT",
+    }
+    return [
+        {"key": key, "label": labels[key], "value": value, "unit": units[key]}
+        for key, value in values.items()
+    ]
 
 
 def make_non_negative_candidate(
@@ -317,6 +350,130 @@ def test_confirmed_payload_requires_nullable_keys_and_preserves_zero() -> None:
     )
     assert zero.published_content_count == 0
     assert unknown.published_content_count is None
+
+
+def test_metric_items_default_empty_preserves_legacy_payload_behavior() -> None:
+    payload_input = PerformanceConfirmedPayloadInput(**confirmed_payload_values())
+    payload = PerformanceConfirmedPayload(**confirmed_payload_values())
+
+    assert payload_input.metric_items == []
+    assert payload.metric_items == []
+    assert payload.calculate_engagement_rate() == Decimal("0.100000")
+
+
+def test_metric_items_fill_derived_ctr_and_cpc_without_changing_legacy_rate() -> None:
+    payload_input = PerformanceConfirmedPayloadInput(
+        **confirmed_payload_values(metric_items=editable_metric_items())
+    )
+    payload = PerformanceConfirmedPayload(**payload_input.model_dump())
+    items = {item.key: item for item in payload.metric_items}
+
+    assert items["ctr"].value == Decimal("3.00")
+    assert items["cpc"].value == Decimal("333")
+    assert payload.calculate_engagement_rate() == Decimal("0.100000")
+
+
+def test_metric_items_round_ctr_and_cpc_half_up_at_their_canonical_scales() -> None:
+    payload = PerformanceConfirmedPayload(
+        **confirmed_payload_values(
+            impressions=6,
+            metric_items=editable_metric_items(ad_spend=5, impressions=6, clicks=2),
+        )
+    )
+    items = {item.key: item for item in payload.metric_items}
+
+    assert items["ctr"].value == Decimal("33.33")
+    assert items["cpc"].value == Decimal("3")
+
+
+def test_metric_items_accept_only_null_or_exact_derived_input_values() -> None:
+    exact_items = editable_metric_items(ctr=Decimal("3.00"), cpc=Decimal("333"))
+    assert PerformanceConfirmedPayloadInput(
+        **confirmed_payload_values(metric_items=exact_items)
+    ).metric_items
+
+    for key, invalid_value in (("ctr", Decimal("3.01")), ("cpc", Decimal("334"))):
+        with pytest.raises(ValidationError):
+            PerformanceConfirmedPayloadInput(
+                **confirmed_payload_values(
+                    metric_items=editable_metric_items(**{key: invalid_value})
+                )
+            )
+
+
+def test_metric_items_validate_slug_label_value_unit_and_duplicates() -> None:
+    with pytest.raises(ValidationError):
+        PerformanceMetricItem(key="Invalid Key", label="지표", value=1, unit="NUMBER")
+    with pytest.raises(ValidationError):
+        PerformanceMetricItem(key="custom", label="   ", value=1, unit="NUMBER")
+    with pytest.raises(ValidationError):
+        PerformanceMetricItem(
+            key="custom", label="지표", value=Decimal("0.0000001"), unit="NUMBER"
+        )
+    with pytest.raises(ValidationError):
+        PerformanceMetricItem(key="clicks", label="클릭", value=1, unit="KRW")
+    with pytest.raises(ValidationError):
+        PerformanceMetricItem(key="cost", label="비용", value=Decimal("1.5"), unit="KRW")
+
+    duplicate_items = editable_metric_items()
+    duplicate_items.append(
+        {"key": "custom", "label": "클릭", "value": Decimal("1.25"), "unit": "NUMBER"}
+    )
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(
+            **confirmed_payload_values(metric_items=duplicate_items)
+        )
+
+    casefold_duplicate_items = editable_metric_items()
+    casefold_duplicate_items.extend(
+        [
+            {"key": "custom_a", "label": "Custom", "value": 1, "unit": "NUMBER"},
+            {"key": "custom_b", "label": "custom", "value": 2, "unit": "NUMBER"},
+        ]
+    )
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(
+            **confirmed_payload_values(metric_items=casefold_duplicate_items)
+        )
+
+    duplicate_items[-1]["label"] = "맞춤 지표"
+    duplicate_items.append(
+        {"key": "custom", "label": "다른 이름", "value": 2, "unit": "NUMBER"}
+    )
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(
+            **confirmed_payload_values(metric_items=duplicate_items)
+        )
+
+
+def test_metric_items_limit_and_legacy_projection_are_enforced() -> None:
+    too_many = [
+        {"key": f"custom_{index}", "label": f"지표 {index}", "value": index, "unit": "NUMBER"}
+        for index in range(51)
+    ]
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(
+            **confirmed_payload_values(metric_items=too_many)
+        )
+
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(
+            **confirmed_payload_values(metric_items=editable_metric_items(impressions=999))
+        )
+    with pytest.raises(ValidationError):
+        PerformanceConfirmedPayloadInput(
+            **confirmed_payload_values(
+                metric_items=editable_metric_items(published_content_count=4)
+            )
+        )
+
+    nullable_projection = PerformanceConfirmedPayloadInput(
+        **confirmed_payload_values(
+            metric_items=editable_metric_items(impressions=None, published_content_count=None)
+        )
+    )
+    nullable_items = {item.key: item.value for item in nullable_projection.metric_items}
+    assert nullable_items["impressions"] is None
 
 
 @pytest.mark.parametrize(
@@ -900,6 +1057,7 @@ def test_pydantic_performance_properties_match_openapi() -> None:
         "PerformanceNonNegativeMetricCandidate": PerformanceNonNegativeMetricCandidate,
         "PerformanceSignedMetricCandidate": PerformanceSignedMetricCandidate,
         "PerformanceExtractedPayload": PerformanceExtractedPayload,
+        "PerformanceMetricItem": PerformanceMetricItem,
         "PerformanceConfirmedPayloadInput": PerformanceConfirmedPayloadInput,
         "PerformanceConfirmedPayload": PerformanceConfirmedPayload,
         "PerformanceReportConfirmation": PerformanceReportConfirmation,

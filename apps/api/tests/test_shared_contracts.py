@@ -178,7 +178,7 @@ def test_performance_extracted_payload_schema_matches_runtime_and_openapi() -> N
         (SHARED_CONTRACTS / "openapi" / "openapi.yaml").read_text(encoding="utf-8")
     )["components"]["schemas"]["PerformanceExtractedPayload"]
 
-    expected_fields = {
+    legacy_fields = {
         "impressions",
         "likes",
         "comments",
@@ -188,13 +188,14 @@ def test_performance_extracted_payload_schema_matches_runtime_and_openapi() -> N
         "follower_net_change",
         "published_content_count",
     }
+    expected_fields = legacy_fields | {"ad_spend", "clicks"}
     assert schema["additionalProperties"] is False
     assert set(schema["properties"]) == expected_fields
-    assert set(schema["required"]) == expected_fields
+    assert set(schema["required"]) == legacy_fields
     assert set(runtime_schema["properties"]) == expected_fields
-    assert set(runtime_schema["required"]) == expected_fields
+    assert set(runtime_schema["required"]) == legacy_fields
     assert set(openapi["properties"]) == expected_fields
-    assert set(openapi["required"]) == expected_fields
+    assert set(openapi["required"]) == legacy_fields
 
 
 def test_performance_extracted_payload_schema_keeps_metric_boundaries() -> None:

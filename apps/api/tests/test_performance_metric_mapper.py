@@ -60,10 +60,16 @@ async def test_mock_fixture_mapping_is_network_free_and_preserves_null_zero(
     else:
         assert published.value == 0
         assert published.verification_status is PerformanceMetricVerificationStatus.VERIFIED
-        assert all(getattr(mapped, field).value == 0 for field in PERFORMANCE_METRIC_NAMES)
+        assert mapped.ad_spend.value is None
+        assert mapped.clicks.value is None
+        assert all(
+            getattr(mapped, field).value == 0
+            for field in PERFORMANCE_METRIC_NAMES
+            if field not in {"ad_spend", "clicks"}
+        )
 
 
-def test_live_output_schema_requires_only_the_eight_strict_metric_candidates() -> None:
+def test_live_output_schema_requires_all_ten_strict_metric_candidates() -> None:
     schema = PERFORMANCE_METRIC_OUTPUT_SCHEMA
 
     assert schema["required"] == list(PERFORMANCE_METRIC_NAMES)
@@ -79,6 +85,8 @@ def test_live_output_schema_requires_only_the_eight_strict_metric_candidates() -
             "verification_status",
         }
     assert "minimum" not in schema["properties"]["follower_net_change"]["properties"]["value"]
+    assert schema["properties"]["ad_spend"]["properties"]["value"]["minimum"] == 0
+    assert schema["properties"]["clicks"]["properties"]["value"]["minimum"] == 0
     assert schema["properties"]["published_content_count"]["properties"]["value"]["minimum"] == 0
 
 
@@ -131,11 +139,52 @@ async def test_live_fake_transport_uses_strict_schema_and_logs_metadata_only(cap
     assert "status=completed" in log_text
     assert "http_status=200" in log_text
     assert "page_count=1" in log_text
-    assert "metric_count=8" in log_text
+    assert "metric_count=10" in log_text
     assert "schema_valid=True" in log_text
     assert "private-test-key" not in log_text
     assert parsed.pages[0].text not in log_text
     assert expected.published_content_count.source_text not in log_text
+
+
+async def test_mock_extracts_clicks_and_krw_ad_spend_with_grounded_units() -> None:
+    parsed = ParsedDocument(
+        pages=(
+            ParsedPage(
+                number=1,
+                text="2026년 8월 광고 성과\n광고비: ₩12,345\n클릭 수: 25회",
+            ),
+        ),
+        model="fixture-document-parse-v1",
+    )
+    mapper = SolarPerformanceMetricMapper(
+        mode="mock",
+        api_key="",
+        base_url="https://api.upstage.ai",
+    )
+
+    mapped = await mapper.map_metrics(parsed_document=parsed)
+
+    assert mapped.ad_spend.value == 12_345
+    assert mapped.ad_spend.source_text == "광고비: ₩12,345"
+    assert mapped.clicks.value == 25
+    assert mapped.clicks.source_text == "클릭 수: 25회"
+
+
+async def test_mock_treats_unitless_ad_spend_as_not_found() -> None:
+    parsed = ParsedDocument(
+        pages=(ParsedPage(number=1, text="광고비: 12,345"),),
+        model="fixture-document-parse-v1",
+    )
+    mapper = SolarPerformanceMetricMapper(
+        mode="mock",
+        api_key="",
+        base_url="https://api.upstage.ai",
+    )
+
+    mapped = await mapper.map_metrics(parsed_document=parsed)
+
+    assert mapped.ad_spend.value is None
+    assert mapped.ad_spend.verification_status is PerformanceMetricVerificationStatus.NOT_FOUND
 
 
 async def test_live_retries_one_transient_failure_before_returning_valid_payload() -> None:
@@ -180,6 +229,58 @@ async def test_live_rejects_a_number_taken_from_another_metric_label() -> None:
             "verification_status": "VERIFIED",
         }
     )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "model": "solar-pro3",
+                "choices": [{"message": {"content": json.dumps(raw_output)}}],
+            },
+        )
+
+    mapper = SolarPerformanceMetricMapper(
+        mode="live",
+        api_key="private-test-key",
+        base_url="https://api.upstage.ai",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(SolarPerformanceMetricMapperError):
+        await mapper.map_metrics(parsed_document=parsed)
+
+
+@pytest.mark.parametrize(
+    "source_text",
+    [
+        "광고비: 42",
+        "광고비: 42 USD",
+        "ad spend: $42",
+    ],
+)
+async def test_live_rejects_ad_spend_without_explicit_krw_evidence(
+    source_text: str,
+) -> None:
+    parsed = ParsedDocument(
+        pages=(ParsedPage(number=1, text=source_text),),
+        model="fixture-document-parse-v1",
+    )
+    missing = {
+        "value": None,
+        "source_page": None,
+        "source_text": None,
+        "confidence": 0.0,
+        "verification_status": "NOT_FOUND",
+    }
+    raw_output = {name: dict(missing) for name in PERFORMANCE_METRIC_NAMES}
+    raw_output["ad_spend"] = {
+        "value": 42,
+        "source_page": 1,
+        "source_text": source_text,
+        "confidence": 1.0,
+        "verification_status": "VERIFIED",
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

@@ -26,6 +26,49 @@ LOW_CONFIDENCE = 0.4
 LOW_CONFIDENCE_THRESHOLD = 0.5
 logger = logging.getLogger(__name__)
 
+_ABSENCE_MENTION_ENDING = r"않(?:다|습니다|았다|았습니다|는다|음|지만|았지만|고|으나|았으나)"
+_REFUND_SUBJECT_PATTERN = (
+    r"(?:환불(?:조건|조항|규정|기준)|"
+    r"환불에관한(?:별도)?(?:조건|조항|규정|기준))"
+)
+_REFUND_SUBJECT_BRIDGE = (
+    r"(?:은|는|이|가|을|를)?"
+    r"(?:(?:본)?계약서(?:에|에는|상)?|별도로)*"
+)
+_REFUND_ACTION_LANGUAGE = re.compile(
+    r"(?:"
+    r"(?:환불|환급)(?:은|는|이|가|을|를)?"
+    r"(?:하|한|했|합|함|해|되|된|됐|됩|받|가능|불가|없|제한|제외)"
+    r"|(?:미사용(?:기간)?|잔여(?:기간)?)(?:대금|금액).*?"
+    r"(?:환불|환급|반환|돌려(?:주|준|줌|받))"
+    r"|(?:환불|환급|반환|돌려(?:주|준|줌|받)).*?"
+    r"(?:미사용(?:기간)?|잔여(?:기간)?)(?:대금|금액)"
+    r")"
+)
+_UNDOCUMENTED_STATE = r"(?:미기재|미명시)(?:다|입니다|됨|되어있(?:다|습니다))?"
+_REFUND_DOCUMENTATION_ABSENCE_MENTION = re.compile(
+    _REFUND_SUBJECT_PATTERN
+    + _REFUND_SUBJECT_BRIDGE
+    + r"(?:"
+    + _UNDOCUMENTED_STATE
+    + r"|(?:기재|명시|규정|작성)(?:하지|되어있지|돼있지|되지)"
+    + _ABSENCE_MENTION_ENDING
+    + r"|정하지"
+    + _ABSENCE_MENTION_ENDING
+    + r"|(?:정해져있지|정해지지)"
+    + _ABSENCE_MENTION_ENDING
+    + r")"
+)
+_REFUND_SUBJECT_ABSENCE_MENTION = re.compile(
+    _REFUND_SUBJECT_PATTERN
+    + _REFUND_SUBJECT_BRIDGE
+    + r"(?:없(?:다|습니다|음|지만)|존재하지"
+    + _ABSENCE_MENTION_ENDING
+    + r"|두지"
+    + _ABSENCE_MENTION_ENDING
+    + r")"
+)
+
 FIELD_DESCRIPTIONS: dict[ExtractedField, str] = {
     ExtractedField.CONTRACT_PARTY_OWNER: "소상공인 또는 광고주 계약 당사자명",
     ExtractedField.CONTRACT_PARTY_AGENCY: "광고대행사 계약 당사자명",
@@ -40,7 +83,10 @@ FIELD_DESCRIPTIONS: dict[ExtractedField, str] = {
     ExtractedField.TERMINATION_NOTICE_DATE: "해지 통보 기한 날짜. YYYY-MM-DD",
     ExtractedField.EARLY_TERMINATION_ALLOWED: "중도 해지 가능 여부. YES, NO, UNKNOWN 중 하나",
     ExtractedField.TERMINATION_PENALTY_RATE: "중도 해지 위약금 비율. 0부터 100 사이 정수",
-    ExtractedField.REFUND_CONDITION: "환불 조건의 원문상 의미",
+    ExtractedField.REFUND_CONDITION: (
+        "실제 환불 가능 여부·대상·금액·시점·방법. "
+        "'환불하지 않는다'와 '환불 불가'도 명시적인 환불 조건"
+    ),
     ExtractedField.ADVERTISING_CHANNEL: "광고 채널",
     ExtractedField.CONTENT_TYPE: "제작 또는 게시할 콘텐츠 유형",
     ExtractedField.CONTENT_QUANTITY: "콘텐츠 수량 정수",
@@ -470,10 +516,18 @@ def _information_extract_schema(
             property_type = "integer"
         else:
             property_type = "string"
+        omission_guidance = ""
+        if field == ExtractedField.REFUND_CONDITION:
+            omission_guidance = (
+                "'기재하지 않았다', '명시하지 않았다', "
+                "'작성하지 않았다' 또는 '정하지 않았다'는 부재 설명만 "
+                "있으면 그 문장을 값으로 추출하지 말고 이 속성을 결과에서 생략. "
+            )
         properties[field.value] = {
             "type": property_type,
             "description": (
-                f"{FIELD_DESCRIPTIONS[field]}. 문서에서 확인되지 않으면 이 속성을 결과에서 생략"
+                f"{FIELD_DESCRIPTIONS[field]}. {omission_guidance}"
+                "문서에서 실제 조건이 확인되지 않으면 이 속성을 결과에서 생략"
             ),
         }
     return {
@@ -519,11 +573,6 @@ def _candidates_from_information_extract(
     candidates: list[ExtractedTermCandidate] = []
     for field in target_fields:
         value_type = EXPECTED_VALUE_TYPES.get(field, ExtractedValueType.TEXT)
-        value = _normalize_value(
-            field=field,
-            value_type=value_type,
-            value=extracted.get(field.value),
-        )
         metadata = additional_values.get(field.value)
         if not isinstance(metadata, dict):
             metadata = {}
@@ -535,23 +584,67 @@ def _candidates_from_information_extract(
             coordinates=metadata.get("coordinates"),
         )
 
+        has_evidence = (
+            isinstance(source_page, int)
+            and not isinstance(source_page, bool)
+            and source_page in pages
+            and isinstance(source_text, str)
+            and bool(source_text.strip())
+            and _contains_evidence(pages[source_page], source_text)
+        )
+        if has_evidence:
+            source_text = source_text.strip()
+        else:
+            source_page = None
+            source_text = None
+
+        raw_value = extracted.get(field.value)
+        if field == ExtractedField.REFUND_CONDITION:
+            refund_absence = _classify_explicit_refund_absence(
+                value=raw_value,
+                source_text=source_text,
+            )
+            if refund_absence == "not_found":
+                candidates.append(_not_found_value_candidate(field=field, value_type=value_type))
+                continue
+            if refund_absence == "needs_check":
+                candidates.append(
+                    _invalid_value_candidate(
+                        field=field,
+                        value_type=value_type,
+                        source_page=source_page,
+                        source_text=source_text,
+                        confidence=confidence,
+                    )
+                )
+                continue
+
+        try:
+            value = _normalize_value(
+                field=field,
+                value_type=value_type,
+                value=raw_value,
+            )
+        except ValueError:
+            candidates.append(
+                _invalid_value_candidate(
+                    field=field,
+                    value_type=value_type,
+                    source_page=source_page,
+                    source_text=source_text,
+                    confidence=confidence,
+                )
+            )
+            continue
+
         if value is None:
             status = VerificationStatus.NOT_FOUND
             source_page = None
             source_text = None
-        elif (
-            isinstance(source_page, int)
-            and source_page in pages
-            and isinstance(source_text, str)
-            and source_text.strip()
-            and _contains_evidence(pages[source_page], source_text)
-        ):
+        elif has_evidence:
             status = VerificationStatus.VERIFIED
-            source_text = source_text.strip()
         else:
             status = VerificationStatus.MISSING_EVIDENCE
-            source_page = None
-            source_text = None
 
         if status == VerificationStatus.VERIFIED and confidence <= LOW_CONFIDENCE_THRESHOLD:
             status = VerificationStatus.NEEDS_CHECK
@@ -569,8 +662,8 @@ def _candidates_from_information_extract(
             if source_page is None or source_text is None:
                 status = VerificationStatus.MISSING_EVIDENCE
 
-        candidates.append(
-            ExtractedTermCandidate(
+        try:
+            candidate = ExtractedTermCandidate(
                 field=field,
                 value_type=value_type,
                 value=value,
@@ -579,8 +672,89 @@ def _candidates_from_information_extract(
                 confidence=confidence,
                 verification_status=status,
             )
-        )
+        except ValidationError:
+            if value is None:
+                raise
+            candidate = _invalid_value_candidate(
+                field=field,
+                value_type=value_type,
+                source_page=source_page,
+                source_text=source_text,
+                confidence=confidence,
+            )
+        candidates.append(candidate)
     return candidates
+
+
+def _invalid_value_candidate(
+    *,
+    field: ExtractedField,
+    value_type: ExtractedValueType,
+    source_page: int | None,
+    source_text: str | None,
+    confidence: float,
+) -> ExtractedTermCandidate:
+    if source_page is not None and source_text is not None:
+        return ExtractedTermCandidate(
+            field=field,
+            value_type=value_type,
+            value=None,
+            source_page=source_page,
+            source_text=source_text,
+            confidence=confidence,
+            verification_status=VerificationStatus.NEEDS_CHECK,
+        )
+    return _not_found_value_candidate(field=field, value_type=value_type)
+
+
+def _not_found_value_candidate(
+    *,
+    field: ExtractedField,
+    value_type: ExtractedValueType,
+) -> ExtractedTermCandidate:
+    return ExtractedTermCandidate(
+        field=field,
+        value_type=value_type,
+        value=None,
+        source_page=None,
+        source_text=None,
+        confidence=0,
+        verification_status=VerificationStatus.NOT_FOUND,
+    )
+
+
+def _classify_explicit_refund_absence(
+    *,
+    value: Any,
+    source_text: str | None,
+) -> Literal["none", "not_found", "needs_check"]:
+    if not isinstance(value, str) or source_text is None:
+        return "none"
+
+    found_absence = False
+    found_conflict = False
+    for sentence in re.split(r"[.!?\n]+", source_text):
+        compact_sentence = _compact_semantic_text(sentence)
+        if not compact_sentence:
+            continue
+        has_absence = bool(
+            _REFUND_DOCUMENTATION_ABSENCE_MENTION.search(compact_sentence)
+            or _REFUND_SUBJECT_ABSENCE_MENTION.search(compact_sentence)
+        )
+        if has_absence:
+            found_absence = True
+        if _REFUND_ACTION_LANGUAGE.search(compact_sentence):
+            found_conflict = True
+
+    if not found_absence:
+        return "none"
+    if found_conflict:
+        return "needs_check"
+    return "not_found"
+
+
+def _compact_semantic_text(value: str) -> str:
+    return re.sub(r"[\W_]+", "", value).lower()
 
 
 def _coordinates(value: Any) -> tuple[tuple[float, float], ...]:

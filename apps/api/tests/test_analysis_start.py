@@ -26,7 +26,12 @@ from app.core.exceptions import ExternalStorageFailure
 from app.main import app
 from app.repositories.analysis import AnalysisTaskRecord
 from app.schemas.analysis import ExtractedTermCandidate
-from app.services.analysis import ANALYSIS_FIELDS, AnalysisService, _build_document_clauses
+from app.services.analysis import (
+    ANALYSIS_FIELDS,
+    AnalysisService,
+    _build_document_clauses,
+    _verify_candidate_evidence,
+)
 
 OWNER_ID = UUID("00000000-0000-4000-8000-000000000013")
 DEMO_CONTRACT_ID = UUID("00000000-0000-4000-8000-000000000041")
@@ -77,6 +82,31 @@ def test_document_clause_ids_are_deterministic_for_same_parsed_document() -> Non
     second = _build_document_clauses(document_id=document_id, parsed_document=parsed)
 
     assert [clause.id for clause in first] == [clause.id for clause in second]
+
+
+def test_unmatched_evidence_for_valueless_needs_check_candidate_becomes_not_found() -> None:
+    candidate = ExtractedTermCandidate(
+        field=ExtractedField.CONTRACT_END_DATE,
+        value_type=ExtractedValueType.DATE,
+        value=None,
+        source_page=1,
+        source_text="2027년 3월 31일까지 계약한다.",
+        confidence=0.9,
+        verification_status=VerificationStatus.NEEDS_CHECK,
+    )
+    parsed = ParsedDocument(
+        pages=(ParsedPage(number=1, text="계약 종료일은 추가로 확인한다."),),
+        model="unmatched-evidence-parse",
+    )
+
+    verified = _verify_candidate_evidence(candidate, parsed)
+
+    assert verified.field == ExtractedField.CONTRACT_END_DATE
+    assert verified.value is None
+    assert verified.source_page is None
+    assert verified.source_text is None
+    assert verified.confidence == 0
+    assert verified.verification_status == VerificationStatus.NOT_FOUND
 
 
 def make_pdf() -> bytes:
@@ -160,6 +190,65 @@ class RoundTrackingExtractAdapter:
                 verification_status=VerificationStatus.VERIFIED,
             )
         ]
+
+
+class PartialMalformedDateExtractAdapter:
+    def __init__(self) -> None:
+        self.extract_calls: list[tuple[ExtractedField, ...]] = []
+
+    async def parse_document(
+        self,
+        *,
+        content: bytes,
+        content_type: str,
+    ) -> ParsedDocument:
+        del content, content_type
+        return ParsedDocument(
+            pages=(
+                ParsedPage(
+                    number=1,
+                    text="계약기간은 2026년 4월 1일부터 2027년 3월 31일까지다.",
+                ),
+            ),
+            model="partial-malformed-date-parse",
+        )
+
+    async def extract_terms(
+        self,
+        *,
+        content: bytes,
+        content_type: str,
+        parsed_document: ParsedDocument,
+        target_fields,
+    ):
+        del content, content_type
+        self.extract_calls.append(target_fields)
+        evidence = parsed_document.pages[0].text
+        candidates = [
+            ExtractedTermCandidate(
+                field=ExtractedField.CONTRACT_END_DATE,
+                value_type=ExtractedValueType.DATE,
+                value=None,
+                source_page=1,
+                source_text=evidence,
+                confidence=0.9,
+                verification_status=VerificationStatus.NEEDS_CHECK,
+            )
+        ]
+        if ExtractedField.CONTRACT_START_DATE in target_fields:
+            candidates.insert(
+                0,
+                ExtractedTermCandidate(
+                    field=ExtractedField.CONTRACT_START_DATE,
+                    value_type=ExtractedValueType.DATE,
+                    value="2026-04-01",
+                    source_page=1,
+                    source_text=evidence,
+                    confidence=0.9,
+                    verification_status=VerificationStatus.VERIFIED,
+                ),
+            )
+        return candidates
 
 
 @pytest.fixture
@@ -646,6 +735,48 @@ async def test_evaluator_uses_two_task_rounds_across_supporting_documents(
     assert comparison.plain_explanation.startswith(
         "선택 자료에서 문서로 확인된 계약 시작일 설명과 계약 문서상 조건이 다릅니다."
     )
+
+
+async def test_evaluator_preserves_valid_sibling_when_one_field_stays_needs_check(
+    analysis_context,
+) -> None:
+    client, repository, service = analysis_context
+    contract_id = await create_contract(client)
+    document_id = await upload_document(client, contract_id=contract_id)
+    partial_adapter = PartialMalformedDateExtractAdapter()
+    service.adapter = partial_adapter
+
+    response = await client.post(
+        f"/api/v1/contracts/{contract_id}/analysis",
+        headers=auth_headers(idempotency_key=uuid4()),
+        json={"document_id": str(document_id), "supporting_document_ids": []},
+    )
+
+    task = repository.mock_analysis_tasks[UUID(response.json()["data"]["id"])]
+    assert response.status_code == 202
+    assert task.status == AnalysisStatus.COMPLETED
+    assert task.error_code is None
+    assert task.attempt_count == 2
+    assert len(partial_adapter.extract_calls) == 2
+    assert ExtractedField.CONTRACT_START_DATE in partial_adapter.extract_calls[0]
+    assert ExtractedField.CONTRACT_START_DATE not in partial_adapter.extract_calls[1]
+    assert ExtractedField.CONTRACT_END_DATE in partial_adapter.extract_calls[1]
+    assert task.result is not None
+
+    terms_by_field = {term.field: term for term in task.result.extracted_terms}
+    start_date = terms_by_field[ExtractedField.CONTRACT_START_DATE]
+    end_date = terms_by_field[ExtractedField.CONTRACT_END_DATE]
+    assert start_date.value == "2026-04-01"
+    assert start_date.verification_status == VerificationStatus.VERIFIED
+    assert end_date.value is None
+    assert end_date.source_page == 1
+    assert end_date.source_text == "계약기간은 2026년 4월 1일부터 2027년 3월 31일까지다."
+    assert end_date.verification_status == VerificationStatus.NEEDS_CHECK
+    assert {
+        term.field
+        for term in task.result.extracted_terms
+        if term.verification_status == VerificationStatus.NEEDS_CHECK
+    } == {ExtractedField.CONTRACT_END_DATE}
 
 
 async def test_invalid_solar_output_fails_analysis_without_partial_review_items(

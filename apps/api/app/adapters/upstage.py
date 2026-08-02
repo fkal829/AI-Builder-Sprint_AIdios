@@ -519,11 +519,6 @@ def _candidates_from_information_extract(
     candidates: list[ExtractedTermCandidate] = []
     for field in target_fields:
         value_type = EXPECTED_VALUE_TYPES.get(field, ExtractedValueType.TEXT)
-        value = _normalize_value(
-            field=field,
-            value_type=value_type,
-            value=extracted.get(field.value),
-        )
         metadata = additional_values.get(field.value)
         if not isinstance(metadata, dict):
             metadata = {}
@@ -535,23 +530,46 @@ def _candidates_from_information_extract(
             coordinates=metadata.get("coordinates"),
         )
 
+        has_evidence = (
+            isinstance(source_page, int)
+            and not isinstance(source_page, bool)
+            and source_page in pages
+            and isinstance(source_text, str)
+            and bool(source_text.strip())
+            and _contains_evidence(pages[source_page], source_text)
+        )
+        if has_evidence:
+            source_text = source_text.strip()
+        else:
+            source_page = None
+            source_text = None
+
+        try:
+            value = _normalize_value(
+                field=field,
+                value_type=value_type,
+                value=extracted.get(field.value),
+            )
+        except ValueError:
+            candidates.append(
+                _invalid_value_candidate(
+                    field=field,
+                    value_type=value_type,
+                    source_page=source_page,
+                    source_text=source_text,
+                    confidence=confidence,
+                )
+            )
+            continue
+
         if value is None:
             status = VerificationStatus.NOT_FOUND
             source_page = None
             source_text = None
-        elif (
-            isinstance(source_page, int)
-            and source_page in pages
-            and isinstance(source_text, str)
-            and source_text.strip()
-            and _contains_evidence(pages[source_page], source_text)
-        ):
+        elif has_evidence:
             status = VerificationStatus.VERIFIED
-            source_text = source_text.strip()
         else:
             status = VerificationStatus.MISSING_EVIDENCE
-            source_page = None
-            source_text = None
 
         if status == VerificationStatus.VERIFIED and confidence <= LOW_CONFIDENCE_THRESHOLD:
             status = VerificationStatus.NEEDS_CHECK
@@ -569,8 +587,8 @@ def _candidates_from_information_extract(
             if source_page is None or source_text is None:
                 status = VerificationStatus.MISSING_EVIDENCE
 
-        candidates.append(
-            ExtractedTermCandidate(
+        try:
+            candidate = ExtractedTermCandidate(
                 field=field,
                 value_type=value_type,
                 value=value,
@@ -579,8 +597,47 @@ def _candidates_from_information_extract(
                 confidence=confidence,
                 verification_status=status,
             )
-        )
+        except ValidationError:
+            if value is None:
+                raise
+            candidate = _invalid_value_candidate(
+                field=field,
+                value_type=value_type,
+                source_page=source_page,
+                source_text=source_text,
+                confidence=confidence,
+            )
+        candidates.append(candidate)
     return candidates
+
+
+def _invalid_value_candidate(
+    *,
+    field: ExtractedField,
+    value_type: ExtractedValueType,
+    source_page: int | None,
+    source_text: str | None,
+    confidence: float,
+) -> ExtractedTermCandidate:
+    if source_page is not None and source_text is not None:
+        return ExtractedTermCandidate(
+            field=field,
+            value_type=value_type,
+            value=None,
+            source_page=source_page,
+            source_text=source_text,
+            confidence=confidence,
+            verification_status=VerificationStatus.NEEDS_CHECK,
+        )
+    return ExtractedTermCandidate(
+        field=field,
+        value_type=value_type,
+        value=None,
+        source_page=None,
+        source_text=None,
+        confidence=0,
+        verification_status=VerificationStatus.NOT_FOUND,
+    )
 
 
 def _coordinates(value: Any) -> tuple[tuple[float, float], ...]:

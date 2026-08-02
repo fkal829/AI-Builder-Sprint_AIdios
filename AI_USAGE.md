@@ -30,6 +30,26 @@ Universal Extraction의 `additional_values` 좌표를 같은 페이지의 Docume
 `NEEDS_CHECK`로 처리한다. 이 수치는 별도 확률 보정 결과가 아니며 모델 판단의 범주를
 0~1 필드에 표현하기 위한 내부 매핑이다.
 
+### 2026-08-02 `05-many-blanks` live 필드 격리 문제 발견
+
+고정 평가 케이스 `05-many-blanks`를 Universal Extraction live로 호출하던 중,
+모델이 요청된 날짜 필드 하나에 ISO date 형식이 아닌 값을 반환했다. 응답 JSON
+객체와 나머지 필드는 유효했지만, 단일 후보의 Pydantic 검증 예외가 호출 전체로
+전파돼 정상 후보를 포함한 6개 추출 결과가 모두 폐기되는 문제를 확인했다.
+
+응답이 JSON이 아니거나 최상위 객체가 아닌 경우, 또는 요청하지 않은 필드가 포함된
+구조 오류는 기존처럼 해당 추출 호출 전체를 실패 처리한다. 반면 요청한 필드 하나의
+값만 서버의 타입·형식·enum·범위 검증을 통과하지 못하면 다른 정상 필드를
+보존하고 그 필드만 격리한다. Document Parse location으로 원문 근거를 검증할 수
+있으면 `value=null`과 원문 근거를 가진 `NEEDS_CHECK`, 근거도 검증할 수 없으면
+`value`, `source_page`, `source_text`가 모두 `null`이고 `confidence=0`인 `NOT_FOUND`로
+다룬다. 해당 필드는 Evaluator 2라운드 재추출 대상이며, 두 번째에도 해결되지
+않으면 격리 상태로 분석을 완료한다.
+
+이번 수정의 검증 범위는 고정 fake 응답을 사용한 offline regression까지다. 수정 후
+외부 Upstage를 다시 호출하지 않았으므로, `05-many-blanks` live 재검증은 아직 완료하지
+않았다.
+
 ## Solar 검토 문구
 
 live 모드는 `UPSTAGE_SOLAR_MODEL=solar-pro3`,

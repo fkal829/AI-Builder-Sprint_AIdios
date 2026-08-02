@@ -238,6 +238,17 @@ Storage 경로에 사용하지 않으며 owner·contract·document UUID로 서�
 | `MISSING_EVIDENCE` | `value`는 있으나 `source_page`, `source_text`가 모두 `null`; 확정값 표시 금지 |
 | `NEEDS_CHECK` | `source_page`, `source_text`는 모두 있고 모순·낮은 확신도·검증 실패로 사용자 확인 필요 |
 
+Universal Extraction 응답이 JSON 객체가 아니거나 요청하지 않은 필드를 포함하면
+해당 호출 전체의 구조 오류로 처리한다. 요청한 필드 값 하나만 서버의 타입·형식·
+enum·범위 검증을 통과하지 못하면 정상 후보를 버리지 않고 그 필드만 격리한다.
+검증된 location 원문이 있으면 `value=null`과 근거를 보존한 `NEEDS_CHECK`, 없으면
+`value`, `source_page`, `source_text`가 모두 `null`이고 `confidence=0`인 `NOT_FOUND`다.
+유효한 타입의 값은 있지만 location 근거만 없는 경우에만 `MISSING_EVIDENCE`를 사용한다.
+격리된 필드는 2라운드 재추출 대상이고, 두 번째에도 해결되지 않으면 해당 상태로
+완료하며 다른 유효한 필드는 보존한다. 응답 전체의 구조 오류는 해당 추출
+시도 전체를 무효화하며, 두 번째 추출 시도에서 발생하면 기존처럼
+`FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다.
+
 `ExtractedTerm.source_page`와 `source_text`는 항상 함께 존재하거나 함께 `null`이어야
 한다. `ReviewItem`에서는 `source_document_id`, `source_page`, `source_text`,
 `source_confidence` 네 필드가 항상 함께 존재하거나 함께 `null`이어야 한다.

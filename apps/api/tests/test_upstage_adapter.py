@@ -214,6 +214,157 @@ async def test_live_extract_uses_single_pdf_item_and_builtin_evidence_metadata(
     assert "%PDF-test" not in log_text
 
 
+async def test_live_extract_isolates_malformed_date_in_many_blanks_result(
+    monkeypatch,
+) -> None:
+    FakeAsyncClient.calls = []
+    evidence = "송도체험공방과 가상기획사는 2026년 4월 1일부터 2027년 3월 31일까지 계약한다."
+    coordinates = [
+        {"x": 0.1, "y": 0.1},
+        {"x": 0.9, "y": 0.1},
+        {"x": 0.9, "y": 0.2},
+        {"x": 0.1, "y": 0.2},
+    ]
+    FakeAsyncClient.response_payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "contract_start_date": "2026-04-01",
+                            "contract_end_date": "2027년 3월 31일",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "additional_values",
+                                "arguments": json.dumps(
+                                    {
+                                        "contract_start_date": {
+                                            "_value": "2026-04-01",
+                                            "confidence": "high",
+                                            "page": 1,
+                                            "coordinates": coordinates,
+                                        },
+                                        "contract_end_date": {
+                                            "_value": "2027년 3월 31일",
+                                            "confidence": "high",
+                                            "page": 1,
+                                            "coordinates": coordinates,
+                                        },
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    parsed = ParsedDocument(
+        pages=(ParsedPage(number=1, text=evidence),),
+        model="document-parse",
+        elements=(
+            ParsedElement(
+                page=1,
+                text=evidence,
+                coordinates=((0.1, 0.1), (0.9, 0.1), (0.9, 0.2), (0.1, 0.2)),
+            ),
+        ),
+    )
+    target_fields = (
+        ExtractedField.CONTRACT_START_DATE,
+        ExtractedField.CONTRACT_END_DATE,
+        ExtractedField.CONTENT_QUANTITY,
+        ExtractedField.DELIVERABLE_DUE_DATE,
+        ExtractedField.REPORTING_FREQUENCY,
+        ExtractedField.SHOOTING_SAFETY,
+    )
+    adapter = UpstageAdapter(
+        api_key="test-key",
+        base_url="https://api.upstage.ai",
+        mode="live",
+    )
+
+    terms = await adapter.extract_terms(
+        content=b"%PDF-test",
+        content_type="application/pdf",
+        parsed_document=parsed,
+        target_fields=target_fields,
+    )
+
+    assert [term.field for term in terms] == list(target_fields)
+    terms_by_field = {term.field: term for term in terms}
+    start_date = terms_by_field[ExtractedField.CONTRACT_START_DATE]
+    assert start_date.value == "2026-04-01"
+    assert start_date.verification_status == VerificationStatus.VERIFIED
+    assert start_date.source_page == 1
+    assert start_date.source_text == evidence
+
+    malformed_end_date = terms_by_field[ExtractedField.CONTRACT_END_DATE]
+    assert malformed_end_date.value is None
+    assert malformed_end_date.verification_status == VerificationStatus.NEEDS_CHECK
+    assert malformed_end_date.source_page == 1
+    assert malformed_end_date.source_text == evidence
+    assert malformed_end_date.confidence == 0.9
+
+    omitted_fields = target_fields[2:]
+    assert all(
+        terms_by_field[field].value is None
+        and terms_by_field[field].verification_status == VerificationStatus.NOT_FOUND
+        and terms_by_field[field].source_page is None
+        and terms_by_field[field].source_text is None
+        for field in omitted_fields
+    )
+
+
+async def test_live_extract_marks_malformed_date_without_evidence_as_not_found(
+    monkeypatch,
+) -> None:
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.response_payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {"contract_end_date": "2027년 3월 31일"},
+                        ensure_ascii=False,
+                    ),
+                    "tool_calls": [],
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    adapter = UpstageAdapter(
+        api_key="test-key",
+        base_url="https://api.upstage.ai",
+        mode="live",
+    )
+
+    terms = await adapter.extract_terms(
+        content=b"%PDF-test",
+        content_type="application/pdf",
+        parsed_document=ParsedDocument(
+            pages=(ParsedPage(number=1, text="계약 종료일은 원문에 없다."),),
+            model="document-parse",
+        ),
+        target_fields=(ExtractedField.CONTRACT_END_DATE,),
+    )
+
+    assert len(terms) == 1
+    assert terms[0].field == ExtractedField.CONTRACT_END_DATE
+    assert terms[0].value is None
+    assert terms[0].verification_status == VerificationStatus.NOT_FOUND
+    assert terms[0].source_page is None
+    assert terms[0].source_text is None
+    assert terms[0].confidence == 0
+
+
 async def test_live_parse_logs_safe_metadata_without_document_or_response(
     monkeypatch,
     caplog,

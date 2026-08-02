@@ -542,8 +542,14 @@ text 파일을 선택 자료로 받는다. 확장자만 신뢰하지 않고 MIME
 원문을 읽어 Upstage Adapter의 mock/live 모드로 파싱·추출한다. live 모드는
 Document Parse와 Universal Extraction의 location 메타데이터를 연결해
 `source_page`, `source_text`, `confidence`를 검증한다. 1차 결과의 누락·근거 부족
-필드만 한 번 재추출하며 두 번째 결과도 Pydantic AI 스키마에 맞지 않으면
-`FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다.
+필드와 개별 값 검증에 실패한 필드만 한 번 재추출한다. Universal Extraction 응답이
+JSON 객체가 아니거나 요청하지 않은 필드를 포함하는 구조 오류는 호출 전체를 실패
+처리하고, 두 번째 추출 시도에서 발생하면 `FAILED/ANALYSIS_SCHEMA_INVALID`로 종료한다.
+요청한 필드 하나의 타입·형식·enum·범위만 잘못된 경우는 다른 정상 후보를 보존하고
+해당 필드만 격리한다. 원문 location을 검증할 수 있으면 `value=null`과 근거를 가진
+`NEEDS_CHECK`, 없으면 `value`, `source_page`, `source_text`가 모두 `null`이고
+`confidence=0`인 `NOT_FOUND`로 두며, 두 번째에도 해결되지 않으면 그 상태로
+분석을 완료한다.
 
 추출·근거 검증 뒤 서버 코드가 누락, 불일치, 명시적인 불명확 표현과 책임 확인
 후보를 판정한다. Solar Adapter는 후보별 최소 원문·사용자 이해조건을 받아 쉬운 설명과

@@ -659,6 +659,8 @@ def _verify_candidate_evidence(
         or candidate.source_text is None
         or _normalized_text(candidate.source_text) not in _normalized_text(page_text)
     ):
+        if candidate.value is None:
+            return _not_found_candidate(candidate.field)
         return ExtractedTermCandidate(
             field=candidate.field,
             value_type=candidate.value_type,

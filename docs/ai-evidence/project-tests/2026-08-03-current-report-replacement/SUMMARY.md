@@ -2,7 +2,7 @@
 
 ## 결론
 
-제품 기준 커밋 `d3af764db180fc85ed5ecc5c4e3d0abc40497c8f` 위의 현재 작업 트리에서
+검증된 런타임 커밋 `4dfd74d576f7bb86e48f426177b2b1927935e137`에서
 구 8개 지표 광고 리포트를 3페이지·10개 후보의
 `브릿지웨이브_2026-07_광고성과리포트.pdf`로 교체했다. 새 PDF의 SHA-256·페이지 수·
 기대 근거·현재 `performance-report-metrics-v3` 스키마를 자동 테스트로 고정했다.
@@ -48,3 +48,5 @@
 
 세부 버전은 [environment.txt](environment.txt), 검증 대상은
 [source-state.txt](source-state.txt), 파일 무결성은 `SHA256SUMS.txt`에서 확인한다.
+최종 증빙 커밋은 런타임 커밋 뒤에 AI_USAGE·검증 요약·ZIP만 고정하며, Hook은 두 커밋
+사이의 runtime path 변경이 없음을 검사한다.

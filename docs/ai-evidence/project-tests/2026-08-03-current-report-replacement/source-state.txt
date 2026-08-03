@@ -1,7 +1,7 @@
-base_git_head=d3af764db180fc85ed5ecc5c4e3d0abc40497c8f
-verification_scope=current_worktree
-runtime_paths_match_head=false
-commit_created_by_verification=false
+verified_runtime_commit=4dfd74d576f7bb86e48f426177b2b1927935e137
+verification_scope=committed_runtime
+runtime_paths_match_verified_commit=true
+evidence_packaging_commit_separate=true
 external_api_called=true
 external_persistent_data_created=false
 new_fixture=fixtures/demo/performance-reports/브릿지웨이브_2026-07_광고성과리포트.pdf

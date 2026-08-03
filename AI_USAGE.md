@@ -184,8 +184,9 @@ Supabase 이메일·비밀번호 가입·로그인·복구·세션 토큰 경로
 
 JUnit XML, Ruff JSON, 프론트 실행 출력, 빌드 출력, 환경, 재현 범위와 SHA-256은
 [2026-08-03 현재 리포트 교체 검증 패키지](docs/ai-evidence/project-tests/2026-08-03-current-report-replacement/SUMMARY.md)에
-보관한다. 기준은 `d3af764...` 위의 현재 작업 트리이며, 새 PDF·mock·v3 10개 후보
-runner·문서 변경을 포함해 다시 실행했다. 아직 이 변경을 담은 커밋은 만들지 않았다.
+보관한다. 검증된 런타임 커밋은
+`4dfd74d576f7bb86e48f426177b2b1927935e137`이며, 새 PDF·mock·v3 10개 후보 runner·
+근거 교정 워크플로우·문서 변경을 포함한다. 증빙 ZIP은 이 커밋 위에서 생성했다.
 
 ### 7.2 고정 계약 10건 — `OFFLINE_SNAPSHOT`
 

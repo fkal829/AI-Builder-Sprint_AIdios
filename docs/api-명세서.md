@@ -1962,7 +1962,7 @@ report revision은 flag에서 유도한다. 조회 시 다시 만들거나 외�
   남기지 않는다.
 - Upstage·Solar는 지표 추출에만 사용하고 기존 Adapter 규칙에 따라 `mock`/`live`를
   분리한다. private 원본 다운로드 → Upstage Parse →
-  `performance-report-metrics-v2` Solar strict-schema 매핑을 내부 조합기로
+  `performance-report-metrics-v3` Solar strict-schema 매핑을 내부 조합기로
   제공한다. 문의 문안은 결정적 템플릿으로 만들며, 일반 `pytest`는 외부
   네트워크를 호출하지 않는다.
 - 반응률·월 정렬·수량 비교·상태 전이는 AI가 아닌 결정적 코드와 DB 제약으로

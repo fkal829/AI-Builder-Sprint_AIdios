@@ -1,0 +1,11 @@
+base_git_head=d3af764db180fc85ed5ecc5c4e3d0abc40497c8f
+verification_scope=current_worktree
+runtime_paths_match_head=false
+commit_created_by_verification=false
+external_api_called=true
+external_persistent_data_created=false
+new_fixture=fixtures/demo/performance-reports/브릿지웨이브_2026-07_광고성과리포트.pdf
+new_fixture_sha256=4ba0dbc5d1c2283b21feb81e668a098e1f0a0c5fff65c8c7943a9362ea255f3f
+removed_active_fixture=fixtures/demo/performance-reports/브릿지웨이브_7월_광고리포트.pdf
+runtime_changes=apps/api/app/adapters/performance_metrics.py,apps/api/evaluation/performance_e2e_live.py,apps/api/evaluation/performance_fixture_live.py,apps/api/tests/test_performance_e2e_live.py,apps/api/tests/test_performance_fixture_live.py,apps/api/tests/test_performance_demo_fixture.py,apps/frontend/src/lib/adapter.ts,apps/frontend/tests/performance-api-wiring.test.mjs,packages/contracts/openapi/openapi.yaml,fixtures/demo/performance-reports/
+documentation_changes=AI_USAGE.md,README.md,docs/api-명세서.md,docs/ai-evidence/,.claude/settings.json,.agents/hooks/validate-ai-evidence.sh

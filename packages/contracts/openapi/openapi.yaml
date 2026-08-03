@@ -3135,7 +3135,7 @@ components:
       description: |
         Upstage·Solar가 만든 strict 후보. 기존 8개 required 후보는 그대로 유지하고
         광고비(ad_spend)와 클릭(clicks)은 이전 payload 호환을 위해 optional 후보로 추가한다.
-        v2 Solar strict output은 10개 후보를 모두 요구하고 새 두 후보가 원문에 없으면
+        v3 Solar strict output은 10개 후보를 모두 요구하고 새 두 후보가 원문에 없으면
         NOT_FOUND로 반환한다. 원문에 없는 숫자를 행 수나 URL 수로 추정하지 않으며
         strict output의 NOT_FOUND 필드도 생략하지 않는다. 확정 전에는 집계·비교에 사용하지 않는다.
     PerformanceMetricItemUnit:

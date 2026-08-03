@@ -1,0 +1,8 @@
+checked_at=2026-08-03 15:54:27 KST
+bash_syntax=PASS
+settings_json=PASS
+direct_execution=PASS
+stop_loop_guard=PASS
+output=AI evidence guard: PASS (d3af764db180fc85ed5ecc5c4e3d0abc40497c8f)
+execution_mode=bash .agents/hooks/validate-ai-evidence.sh
+external_api_calls=false

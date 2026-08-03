@@ -85,6 +85,14 @@ VERIFIED와 NEEDS_CHECK의 source_text는 해당 source_page에 실제로 존재
 설명이나 JSON 밖의 문장을 출력하지 마세요.
 """
 
+PERFORMANCE_METRIC_EVIDENCE_RETRY_PROMPT = """\
+이전 출력은 스키마 또는 원문 근거 검증을 통과하지 못했습니다.
+source_text를 요약·교정·재작성하지 말고 입력 pages의 text에 실제 존재하는 연속 문자열로
+그대로 복사하세요. 공백, 쉼표, 단위, 기호도 원문을 유지하세요.
+지표명과 값이 함께 있는 짧은 원문을 그대로 복사할 수 없으면 그 지표는 NOT_FOUND로
+반환하세요. 모든 필드를 다시 반환하고 JSON 밖의 문장을 출력하지 마세요.
+"""
+
 _MOCK_LABELS: dict[str, tuple[str, ...]] = {
     "ad_spend": (
         "광고비",
@@ -191,6 +199,15 @@ class SolarPerformanceMetricMapperError(ValueError):
     """Solar did not produce a complete, evidence-grounded metric payload."""
 
 
+class PerformanceMetricEvidenceError(ValueError):
+    """Safe evidence failure identified only by metric key and fixed code."""
+
+    def __init__(self, *, metric_name: str, error_code: str) -> None:
+        super().__init__(error_code)
+        self.metric_name = metric_name
+        self.error_code = error_code
+
+
 class SolarPerformanceMetricMapper:
     """Map parsed report pages to the shared strict performance payload."""
 
@@ -270,56 +287,61 @@ class SolarPerformanceMetricMapper:
         if self.transport is not None:
             client_kwargs["transport"] = self.transport
 
-        try:
-            async with httpx.AsyncClient(**client_kwargs) as client:
-                response = await self._post_with_retry(client=client, body=body)
-        except (httpx.HTTPError, ValueError) as error:
-            _log_mapping_run(
-                model=self.model,
-                started_at=started_at,
-                started=started,
-                page_count=len(parsed_document.pages),
-                status="failed",
-                http_status=_http_status_from_error(error),
-                schema_valid=False,
-            )
-            raise SolarPerformanceMetricMapperError(
-                "Solar 성과 지표 매핑 요청에 실패했습니다."
-            ) from error
+        for evidence_attempt in (1, 2):
+            if evidence_attempt == 2:
+                body["messages"].append(
+                    {"role": "system", "content": PERFORMANCE_METRIC_EVIDENCE_RETRY_PROMPT}
+                )
+            try:
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    response = await self._post_with_retry(client=client, body=body)
+            except (httpx.HTTPError, ValueError) as error:
+                _log_mapping_run(
+                    model=self.model,
+                    started_at=started_at,
+                    started=started,
+                    page_count=len(parsed_document.pages),
+                    status="failed",
+                    http_status=_http_status_from_error(error),
+                    schema_valid=False,
+                )
+                raise SolarPerformanceMetricMapperError(
+                    "Solar 성과 지표 매핑 요청에 실패했습니다."
+                ) from error
 
-        try:
-            response_payload = response.json()
-            if not isinstance(response_payload, dict):
-                raise TypeError("Solar response must be an object.")
-            content = response_payload["choices"][0]["message"]["content"]
-            if not isinstance(content, str):
-                raise TypeError("Solar message content must be a JSON string.")
-            mapped = PerformanceExtractedPayload.model_validate_json(content)
-            _validate_metric_evidence(mapped, parsed_document)
-        except (IndexError, KeyError, TypeError, ValueError) as error:
+            try:
+                mapped = _validated_mapped_payload(
+                    response,
+                    parsed_document,
+                    downgrade_unmatched_source=evidence_attempt == 2,
+                )
+            except (IndexError, KeyError, TypeError, ValueError) as error:
+                if evidence_attempt == 1:
+                    continue
+                _log_mapping_run(
+                    model=self.model,
+                    started_at=started_at,
+                    started=started,
+                    page_count=len(parsed_document.pages),
+                    status="failed",
+                    http_status=response.status_code,
+                    schema_valid=False,
+                )
+                raise SolarPerformanceMetricMapperError(
+                    "Solar 성과 지표 매핑 결과가 스키마와 원문 근거에 맞지 않습니다."
+                ) from error
+
             _log_mapping_run(
                 model=self.model,
                 started_at=started_at,
                 started=started,
                 page_count=len(parsed_document.pages),
-                status="failed",
+                status="completed",
                 http_status=response.status_code,
-                schema_valid=False,
+                schema_valid=True,
             )
-            raise SolarPerformanceMetricMapperError(
-                "Solar 성과 지표 매핑 결과가 스키마와 원문 근거에 맞지 않습니다."
-            ) from error
-
-        _log_mapping_run(
-            model=self.model,
-            started_at=started_at,
-            started=started,
-            page_count=len(parsed_document.pages),
-            status="completed",
-            http_status=response.status_code,
-            schema_valid=True,
-        )
-        return mapped
+            return mapped
+        raise AssertionError("Solar evidence retry loop must return or raise.")
 
     async def _post_with_retry(
         self,
@@ -398,6 +420,64 @@ def _mock_payload(parsed_document: ParsedDocument) -> PerformanceExtractedPayloa
     return mapped
 
 
+def _validated_mapped_payload(
+    response: httpx.Response,
+    parsed_document: ParsedDocument,
+    *,
+    downgrade_unmatched_source: bool = False,
+) -> PerformanceExtractedPayload:
+    response_payload = response.json()
+    if not isinstance(response_payload, dict):
+        raise TypeError("Solar response must be an object.")
+    content = response_payload["choices"][0]["message"]["content"]
+    if not isinstance(content, str):
+        raise TypeError("Solar message content must be a JSON string.")
+    mapped = PerformanceExtractedPayload.model_validate_json(content)
+    if downgrade_unmatched_source:
+        mapped = _downgrade_unmatched_source_candidates(mapped, parsed_document)
+    _validate_metric_evidence(mapped, parsed_document)
+    return mapped
+
+
+def _downgrade_unmatched_source_candidates(
+    payload: PerformanceExtractedPayload,
+    parsed_document: ParsedDocument,
+) -> PerformanceExtractedPayload:
+    """Move only source-less model claims to NOT_FOUND after one correction attempt.
+
+    A value attached to the wrong metric label is intentionally not repaired here;
+    `_validate_metric_evidence` must still reject that higher-risk mismatch.
+    """
+
+    pages = {page.number: _normalize(page.text) for page in parsed_document.pages}
+    updates: dict[str, Any] = {}
+    for name in PERFORMANCE_METRIC_NAMES:
+        candidate = getattr(payload, name)
+        if candidate.verification_status is PerformanceMetricVerificationStatus.NOT_FOUND:
+            continue
+        source_page = candidate.source_page
+        source_text = candidate.source_text
+        if (
+            source_page is not None
+            and source_text is not None
+            and source_page in pages
+            and _normalize(source_text) in pages[source_page]
+        ):
+            continue
+        updates[name] = candidate.model_copy(
+            update={
+                "value": None,
+                "source_page": None,
+                "source_text": None,
+                "confidence": 0.0,
+                "verification_status": PerformanceMetricVerificationStatus.NOT_FOUND,
+            }
+        )
+    if not updates:
+        return payload
+    return payload.model_copy(update=updates)
+
+
 def _validate_parsed_document(parsed_document: ParsedDocument) -> None:
     if not parsed_document.pages:
         raise SolarPerformanceMetricMapperError("성과 리포트 파싱 페이지가 필요합니다.")
@@ -435,7 +515,10 @@ def _validate_metric_evidence(
         candidate = getattr(payload, name)
         if candidate.verification_status is PerformanceMetricVerificationStatus.NOT_FOUND:
             if candidate.confidence != 0:
-                raise ValueError("NOT_FOUND 성과 지표 confidence는 0이어야 합니다.")
+                raise PerformanceMetricEvidenceError(
+                    metric_name=name,
+                    error_code="NOT_FOUND_CONFIDENCE_INVALID",
+                )
             continue
         source_page = candidate.source_page
         source_text = candidate.source_text
@@ -445,13 +528,19 @@ def _validate_metric_evidence(
             or source_page not in pages
             or _normalize(source_text) not in pages[source_page]
         ):
-            raise ValueError("성과 지표 원문 근거가 지정한 페이지에 없습니다.")
+            raise PerformanceMetricEvidenceError(
+                metric_name=name,
+                error_code="SOURCE_EVIDENCE_NOT_ON_PAGE",
+            )
         if candidate.value is not None and not _has_labeled_metric_value(
             metric_name=name,
             value=candidate.value,
             source_text=source_text,
         ):
-            raise ValueError("성과 지표 값이 source_text의 해당 지표 라벨에 연결되지 않았습니다.")
+            raise PerformanceMetricEvidenceError(
+                metric_name=name,
+                error_code="VALUE_NOT_ATTACHED_TO_METRIC_LABEL",
+            )
 
 
 def _normalize(value: str) -> str:

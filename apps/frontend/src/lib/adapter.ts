@@ -507,9 +507,9 @@ export const PERFORMANCE_BASE_METRICS = [
   unit: PerformanceMetricUnit;
 }[];
 
-export const DEMO_PERFORMANCE_REPORT_FILE_NAME = "브릿지웨이브_7월_광고리포트.pdf";
+export const DEMO_PERFORMANCE_REPORT_FILE_NAME = "브릿지웨이브_2026-07_광고성과리포트.pdf";
 const DEMO_PERFORMANCE_REPORT_SHA256 =
-  "2bbccabc2f49971bad0425235a0261dd6590ec83d5254dbd3d5a01c1be9c3d12";
+  "4ba0dbc5d1c2283b21feb81e668a098e1f0a0c5fff65c8c7943a9362ea255f3f";
 
 export function calculatePerformanceCtr(
   clicks: number | null,
@@ -1063,25 +1063,12 @@ function createMockContractPerformance(contractId: string): ContractPerformance 
   const points = [
     { period: "2026-05", payload: mockConfirmedPayload(800_000, 12_400, 620, 4) },
     { period: "2026-06", payload: mockConfirmedPayload(900_000, 15_200, 760, 4) },
-    { period: "2026-07", payload: mockConfirmedPayload(650_000, 8_300, 249, 2) },
+    { period: "2026-07", payload: mockConfirmedPayload(438_200, 113_700, 2_035, 10) },
   ];
   const reports = points.map(({ period, payload }, index): PerformanceReport => {
     const reportId = `mock-performance-${period}`;
     const flags: PerformanceFlag[] = index === 2
       ? [
-          {
-            id: "mock-shortfall-flag",
-            flagType: "DELIVERABLE_COUNT_SHORTFALL",
-            expectedContentCount: 4,
-            actualContentCount: 2,
-            previousEngagementRate: null,
-            currentEngagementRate: null,
-            issueNote: null,
-            basisSnapshots: [
-              { sourcePage: 3, sourceText: "월 게시물 4건", confidence: 0.96 },
-              { sourcePage: 3, sourceText: "매월 콘텐츠를 게시한다.", confidence: 0.92 },
-            ],
-          },
           {
             id: "mock-engagement-flag",
             flagType: "ENGAGEMENT_RATE_DROP",
@@ -1097,14 +1084,9 @@ function createMockContractPerformance(contractId: string): ContractPerformance 
     const inquiryDrafts: PerformanceInquiryDraft[] = index === 2
       ? [
           {
-            id: "mock-shortfall-inquiry",
-            flagId: "mock-shortfall-flag",
-            text: "2026-07 리포트의 게시물 수는 2건으로 기록되어 있습니다. 계약 원문에서 확인한 월 4건과 차이가 있어 해당 월 게시 수와 집계 기준을 확인 부탁드립니다.",
-          },
-          {
             id: "mock-engagement-inquiry",
             flagId: "mock-engagement-flag",
-            text: "2026-06 반응률 4.03%에서 2026-07 2.89%로 낮아진 것으로 계산됩니다. 두 달 리포트의 집계 기준과 변동 사유를 확인 부탁드립니다.",
+            text: "2026-06 반응률 5.00%에서 2026-07 1.79%로 낮아진 것으로 계산됩니다. 두 달 리포트의 집계 기준과 변동 사유를 확인 부탁드립니다.",
           },
         ]
       : [];
@@ -1160,8 +1142,12 @@ function buildMockContractPerformance(
 function mockExtractedPayload(): PerformanceExtractedPayload {
   const candidate = (
     value: number | null,
-    label: string,
-  ): PerformanceMetricCandidate => value === null
+    sourcePage: number | null,
+    sourceText: string | null,
+    verificationStatus: PerformanceMetricVerificationStatus = value === null
+      ? "NOT_FOUND"
+      : "VERIFIED",
+  ): PerformanceMetricCandidate => verificationStatus === "NOT_FOUND"
     ? {
         value: null,
         sourcePage: null,
@@ -1171,22 +1157,22 @@ function mockExtractedPayload(): PerformanceExtractedPayload {
       }
     : {
         value,
-        sourcePage: 1,
-        sourceText: `${label}: ${value.toLocaleString()}`,
-        confidence: 0.94,
-        verificationStatus: "VERIFIED",
+        sourcePage,
+        sourceText,
+        confidence: verificationStatus === "VERIFIED" ? 0.94 : 0.72,
+        verificationStatus,
       };
   return {
-    adSpend: candidate(720000, "집행 광고비"),
-    impressions: candidate(9100, "노출"),
-    clicks: candidate(310, "클릭 수"),
-    likes: candidate(230, "좋아요"),
-    comments: candidate(32, "댓글"),
-    reach: candidate(7400, "도달"),
-    saves: candidate(48, "저장"),
-    shares: candidate(12, "공유"),
-    followerNetChange: candidate(35, "팔로워 순증"),
-    publishedContentCount: candidate(4, "게시물 수"),
+    adSpend: candidate(438200, 1, "집행 광고비 438,200원"),
+    impressions: candidate(113700, 1, "노출 수 113,700회"),
+    clicks: candidate(2035, 1, "클릭 수 2,035회"),
+    likes: candidate(null, 2, "합계 1,977 164 267 112 2,520 2.22%", "NEEDS_CHECK"),
+    comments: candidate(null, 2, "합계 1,977 164 267 112 2,520 2.22%", "NEEDS_CHECK"),
+    reach: candidate(null, 3, "Instagram 66,900명 +214명 3,846명", "NEEDS_CHECK"),
+    saves: candidate(null, 2, "합계 1,977 164 267 112 2,520 2.22%", "NEEDS_CHECK"),
+    shares: candidate(null, 2, "합계 1,977 164 267 112 2,520 2.22%", "NEEDS_CHECK"),
+    followerNetChange: candidate(null, null, null),
+    publishedContentCount: candidate(10, 1, "게시물 수 10건"),
   };
 }
 

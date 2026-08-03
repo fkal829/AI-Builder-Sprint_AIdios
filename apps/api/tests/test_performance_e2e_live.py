@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from supabase_auth.errors import AuthApiError
 
 from app.core.enums import PerformanceMetricVerificationStatus
+from app.schemas.performance import PerformanceConfirmedPayloadInput
 from evaluation.performance_e2e_live import (
     EXPECTED_METRICS,
     UPLOAD_ID_NAMESPACE,
@@ -19,6 +20,7 @@ from evaluation.performance_e2e_live import (
     LivePerformanceE2ESummary,
     LiveStageSummary,
     _cleanup_created_fixture,
+    _confirmation_body,
     _create_synthetic_fixture,
     _get_auth_user,
     _matches_fixture_contract_rows,
@@ -76,7 +78,7 @@ def _summary_kwargs() -> dict:
         "request_id_match_count": 3,
         "no_store_response_count": 7,
         "verified_state_count": 6,
-        "verified_metric_count": 8,
+        "verified_metric_count": 10,
         "flag_count": 1,
         "inquiry_count": 1,
         "verified_audit_event_count": 3,
@@ -409,7 +411,9 @@ def test_synthetic_pdf_is_valid_single_page_and_contains_all_expected_metrics() 
     assert content.startswith(b"%PDF-")
     assert len(reader.pages) == 1
     assert "SYNTHETIC" in text
+    assert "Ad spend: KRW 438200" in text
     assert "Impressions: 12000" in text
+    assert "Clicks: 2035" in text
     assert "Likes: 420" in text
     assert "Comments: 35" in text
     assert "Reach: 9500" in text
@@ -417,7 +421,21 @@ def test_synthetic_pdf_is_valid_single_page_and_contains_all_expected_metrics() 
     assert "Shares: 47" in text
     assert "Follower net change: 120" in text
     assert "Published content count: 4" in text
-    assert len(EXPECTED_METRICS) == 8
+    assert len(EXPECTED_METRICS) == 10
+
+
+def test_confirmation_body_projects_ten_ai_candidates_into_the_public_input_contract() -> None:
+    body = _confirmation_body()
+    confirmed = PerformanceConfirmedPayloadInput.model_validate(body["confirmed_payload"])
+    items = {item.key: item for item in confirmed.metric_items}
+
+    assert len(EXPECTED_METRICS) == 10
+    assert confirmed.impressions == EXPECTED_METRICS["impressions"]
+    assert confirmed.published_content_count == EXPECTED_METRICS["published_content_count"]
+    assert items["ad_spend"].value == EXPECTED_METRICS["ad_spend"]
+    assert items["clicks"].value == EXPECTED_METRICS["clicks"]
+    assert items["ctr"].value is None
+    assert items["cpc"].value is None
 
 
 def test_metric_verification_rejects_needs_check_even_when_value_matches() -> None:
@@ -484,8 +502,8 @@ def test_success_summary_accepts_complete_retained_fixture_result() -> None:
 
     assert summary.status == "passed"
     assert summary.fixture_retained is True
-    assert summary.expected_metric_count == 8
-    assert summary.verified_metric_count == 8
+    assert summary.expected_metric_count == 10
+    assert summary.verified_metric_count == 10
     assert summary.replay_verified_count == 3
 
 
@@ -514,7 +532,7 @@ def test_success_summary_accepts_complete_cleanup_result() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("verified_metric_count", 7),
+        ("verified_metric_count", 9),
         ("replay_verified_count", 2),
         ("request_id_match_count", 2),
         ("no_store_response_count", 6),

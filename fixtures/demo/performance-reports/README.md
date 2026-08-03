@@ -1,68 +1,42 @@
-# 가상 광고효과 리포트
+# 가상 광고성과 리포트
 
-16.2 리포트 업로드와 16.3 Upstage·Solar 지표 추출 흐름을 검증하기 위한 가상 대행사
-월간 리포트입니다. 실제 업체·인물·연락처·계정 데이터는 포함하지 않습니다.
+16.2 리포트 업로드와 16.3 Upstage·Solar 지표 추출 흐름을 검증하기 위한 현재 형식의
+가상 대행사 월간 리포트입니다. 문서 안의 업체·인물·연락처·URL·성과 수치는 모두
+시연용이며 실제 개인정보나 운영 데이터가 아닙니다.
 
 ## 파일
 
-- `브릿지웨이브_7월_광고리포트.pdf`: API에 업로드할 검색 가능한 PDF
-- `expected-extraction.json`: 기대 추출값, 확인 payload, 서버 파생값
-- `generate_report.py`: 동일한 PDF를 다시 만드는 생성기
-- `assets/`: 가상 게시물에 사용하는 AI 생성 카페 이미지 2장
+- `브릿지웨이브_2026-07_광고성과리포트.pdf`: API에 업로드할 검색 가능한 3페이지 PDF
+- `expected-extraction.json`: 현재 10개 후보의 기대값·근거 범위·확인 payload
 
-샘플은 프론트엔드 광고효과 화면과 같은 `2026-07` 값을 사용합니다. 추출 대상은
-`impressions`, `likes`, `comments`, `reach`, `saves`, `shares`,
-`follower_net_change`, `published_content_count` 8개뿐입니다. 문의·예약·구매 수는
-소유자가 직접 확인해 입력하며, 반응률은 서버가 확인된 원본 정수로 계산합니다.
+PDF SHA-256은
+`4ba0dbc5d1c2283b21feb81e668a098e1f0a0c5fff65c8c7943a9362ea255f3f`입니다.
 
-PDF는 실제 대행사 클라이언트 보고서에서 자주 쓰는 16:9 가로형 6쪽 덱으로 구성했습니다.
+## 리포트 구성
 
-1. 브랜드 표지와 보고 기간
-2. 8개 월간 KPI 및 전월 대비 요약
-3. 콘텐츠별 노출과 반응 구성
-4. 게시물 이미지와 콘텐츠별 성과
-5. 운영 메모와 다음 달 제안
-6. 데이터 범위·지표 정의·가상 데이터 고지
+1. 광고주·대행사·기간, 총괄 6개 KPI, 광고비 집행 내역
+2. 매체별 광고비·노출·클릭과 반응 지표, 게시물별 성과
+3. 나머지 게시물, 플랫폼별 도달·팔로워 순증, 운영 메모와 데이터 기준
 
-2쪽을 추출 기준 페이지로 사용합니다. 다른 페이지의 게시물별 숫자는 2쪽 월간 총계와
-일치하며, 성과 판정·전환율·CPA·ROAS·매출 기여도는 포함하지 않습니다.
+현재 `performance-report-metrics-v3`의 10개 후보를 기준으로 검토합니다.
 
-## 구성 참고 자료
-
-- [Meta Instagram Insights](https://www.facebook.com/help/instagram/788388387972460):
-  조회, 도달, 반응 및 콘텐츠 단위 인사이트 정의
-- [AgencyAnalytics Social Media Report Template](https://agencyanalytics.com/templates/reports/social-media):
-  브랜드 표지, 요약, 추이, 상위 콘텐츠, 제안으로 이어지는 클라이언트 보고서 구조
-- [Sprout Social Reporting Guide](https://sproutsocial.com/insights/social-media-reporting/):
-  기간별 KPI, 콘텐츠 성과, 인사이트와 다음 액션 구성
-- [SC Digital Monthly Report](https://scdigital.com/wp-content/uploads/2020/12/Monthly-Digital-Report.pdf):
-  실제 다페이지 대행사 리포트의 KPI·차트·상위 게시물 배치 사례
-
-## 재생성
-
-저장소 루트에서 실행합니다.
-
-```bash
-apps/api/.venv/bin/python fixtures/demo/performance-reports/generate_report.py
-```
-
-기본 글꼴은 Windows의 맑은 고딕을 사용합니다. 다른 환경에서는 아래 환경 변수로
-한글 TTF/TTC 글꼴 경로를 지정할 수 있습니다.
-
-```bash
-DANDI_KOREAN_FONT_REGULAR=/path/to/regular.ttf \
-DANDI_KOREAN_FONT_BOLD=/path/to/bold.ttf \
-apps/api/.venv/bin/python fixtures/demo/performance-reports/generate_report.py
-```
+- 카드에 라벨과 값이 함께 있는 `ad_spend`, `impressions`, `clicks`,
+  `published_content_count`는 직접 근거가 있는 기대값입니다.
+- `likes`, `comments`, `saves`, `shares`는 표의 합계 행, `reach`는 Instagram 행에
+  있습니다. 라벨과 값이 같은 짧은 원문 조각에 붙어 있지 않으므로 원문 행만 보존하고
+  후보 값은 `null`, 상태는 `NEEDS_CHECK`로 두어 사용자가 직접 입력합니다.
+- `follower_net_change`는 플랫폼별 값만 있고 전 매체 합계가 명시되지 않았습니다.
+  세 값을 합산하거나 한 플랫폼을 전체 값으로 선택하지 않고 `NOT_FOUND`로 둡니다.
+- CTR·CPC·반응률은 추출값을 신뢰하지 않고 확인된 원본 정수로 서버가 계산합니다.
 
 ## API 사용 순서
 
-1. `period=2026-07`, `file=@브릿지웨이브_7월_광고리포트.pdf`로 16.2 업로드 API를 호출합니다.
+1. `period=2026-07`, `file=@브릿지웨이브_2026-07_광고성과리포트.pdf`로 16.2 업로드
+   API를 호출합니다.
 2. 응답의 `report_id`로 16.3 추출 API를 호출합니다.
-3. 응답 후보를 `expected-extraction.json`의 8개 값 및 근거 문구와 비교합니다.
-4. 소유자 확인 단계에서 `expected_confirmation_payload`를 기준으로 값을 확인합니다.
-5. 계약에 `월 4건` 근거가 `VERIFIED`로 존재할 때만 게시물 2건 부족 신호를 확인합니다.
+3. 응답 후보를 `expected-extraction.json`의 10개 후보와 비교합니다.
+4. `NEEDS_CHECK`와 `NOT_FOUND` 범위를 포함해 소유자가 원문을 확인합니다.
+5. 확인값을 저장한 뒤 계약 근거와 월별 추이를 결정적 코드로 대조합니다.
 
-
-> 로컬 `mock` Upstage 어댑터는 업로드한 PDF 본문을 실제로 파싱하지 않습니다. 이 PDF의
-> 본문 기반 종단 추출은 `live` Upstage 모드에서 검증해야 합니다.
+> 로컬 `mock` Upstage Adapter는 업로드한 PDF 본문을 직접 파싱하지 않습니다. 새 PDF의
+> 실제 Document Parse·Solar 결과는 명시적 live 실행 전까지 검증됐다고 기록하지 않습니다.

@@ -7,6 +7,7 @@ import pytest
 
 from app.adapters.base import ParsedDocument, ParsedPage
 from app.adapters.performance_metrics import (
+    PERFORMANCE_METRIC_EVIDENCE_RETRY_PROMPT,
     PERFORMANCE_METRIC_NAMES,
     PERFORMANCE_METRIC_OUTPUT_SCHEMA,
     PERFORMANCE_METRIC_PROMPT_VERSION,
@@ -465,8 +466,8 @@ async def test_live_rejects_rate_or_duration_as_a_metric_count(
         await mapper.map_metrics(parsed_document=parsed)
 
 
-@pytest.mark.parametrize("failure_kind", ["schema", "evidence", "value"])
-async def test_live_rejects_invalid_payload_without_logging_raw_content(
+@pytest.mark.parametrize("failure_kind", ["schema", "value"])
+async def test_live_rejects_invalid_schema_or_labeled_value_without_logging_raw_content(
     caplog,
     failure_kind: str,
 ) -> None:
@@ -475,8 +476,6 @@ async def test_live_rejects_invalid_payload_without_logging_raw_content(
     secret = "raw-response-must-not-appear-in-logs"
     if failure_kind == "schema":
         raw_output["unexpected"] = secret
-    elif failure_kind == "evidence":
-        raw_output["published_content_count"]["source_text"] = secret
     else:
         raw_output["published_content_count"]["value"] = 7
 
@@ -506,3 +505,72 @@ async def test_live_rejects_invalid_payload_without_logging_raw_content(
     assert secret not in caplog.text
     assert "private-test-key" not in caplog.text
     assert parsed.pages[0].text not in caplog.text
+
+
+async def test_live_downgrades_unmatched_source_after_one_bounded_retry(caplog) -> None:
+    parsed, expected = load_fixture("02-explicit-zero.json")
+    raw_output = expected.model_dump(mode="json")
+    secret = "rewritten-source-must-not-appear-in-logs"
+    raw_output["published_content_count"]["source_text"] = secret
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": json.dumps(raw_output)}}]},
+        )
+
+    caplog.set_level(logging.INFO, logger="app.adapters.performance_metrics")
+    mapper = SolarPerformanceMetricMapper(
+        mode="live",
+        api_key="private-test-key",
+        base_url="https://api.upstage.ai",
+        transport=httpx.MockTransport(handler),
+    )
+
+    mapped = await mapper.map_metrics(parsed_document=parsed)
+
+    assert request_count == 2
+    assert mapped.published_content_count.value is None
+    assert (
+        mapped.published_content_count.verification_status
+        is PerformanceMetricVerificationStatus.NOT_FOUND
+    )
+    assert "status=completed" in caplog.text
+    assert secret not in caplog.text
+    assert parsed.pages[0].text not in caplog.text
+
+
+async def test_live_retries_one_invalid_evidence_response_with_bounded_feedback() -> None:
+    parsed, expected = load_fixture("02-explicit-zero.json")
+    invalid = expected.model_dump(mode="json")
+    invalid["published_content_count"]["source_text"] = "rewritten evidence"
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        content = invalid if len(calls) == 1 else expected.model_dump(mode="json")
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": json.dumps(content)}}]},
+        )
+
+    mapper = SolarPerformanceMetricMapper(
+        mode="live",
+        api_key="private-test-key",
+        base_url="https://api.upstage.ai",
+        transport=httpx.MockTransport(handler),
+    )
+
+    mapped = await mapper.map_metrics(parsed_document=parsed)
+
+    assert mapped == expected
+    assert len(calls) == 2
+    assert calls[1]["messages"][-1] == {
+        "role": "system",
+        "content": PERFORMANCE_METRIC_EVIDENCE_RETRY_PROMPT,
+    }

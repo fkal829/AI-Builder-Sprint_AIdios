@@ -1,0 +1,7 @@
+verification_scope=apps/,packages/,supabase/
+git_head=d3af764db180fc85ed5ecc5c4e3d0abc40497c8f
+runtime_paths_match_head=true
+documentation_changes_present=true
+documentation_paths=AI_USAGE.md,README.md,.claude/settings.json,.agents/hooks/validate-ai-evidence.sh,docs/ai-evidence/README.md,docs/ai-evidence/project-tests/2026-08-03-submission-candidate/,docs/ai-evidence.zip
+commit_created_by_verification=false
+external_state_changed=false

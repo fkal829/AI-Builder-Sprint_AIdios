@@ -1,0 +1,48 @@
+
+> frontend@0.1.0 test
+> node --test tests/*.test.mjs
+
+✔ ApiAdapter implements every remaining P0 owner workflow (3.358375ms)
+✔ tone polishing uses the owner API and requires explicit preview approval (1.789458ms)
+✔ adjustment link creation remains a manual delivery boundary (1.03725ms)
+✔ counteroffers require an explicit owner resolution (0.503125ms)
+✔ obligation and renewal decisions persist through their APIs (0.618041ms)
+✔ dashboard routes each persisted contract status to its live workflow (0.658459ms)
+✔ failed contract analysis can be explicitly retried with the same documents (0.551459ms)
+✔ live review loads all parsed clauses and exposes the signed PDF only as a new-tab link (1.482625ms)
+✔ audit timeline is rendered in Korean and distinguishes every signature status (1.919792ms)
+✔ signature page keeps polling the timeline until Modusign reaches a terminal status (1.065625ms)
+✔ owner requests resolve a current Supabase session token (4.772916ms)
+✔ owners sign up and log in with Supabase email and password (1.253417ms)
+✔ password recovery sends a scoped email link and updates only an authenticated user (1.370375ms)
+✔ logout only runs from the explicit header control (0.352583ms)
+✔ dashboard authentication failures offer a login recovery path (0.628917ms)
+✔ owner route guard follows Supabase sessions without restoring mock password auth (0.887917ms)
+✔ login and public landing expose the real signup path (0.610458ms)
+✔ frontend configuration never accepts a service-role secret (0.982166ms)
+✔ performance adapter covers upload, extraction, confirmation, correction, and aggregate read (2.870042ms)
+✔ mock performance extraction only accepts the current fictitious demo report (2.729875ms)
+✔ performance page uses evidence-backed API data and keeps inquiry delivery manual (1.480875ms)
+✔ performance metric editor keeps six defaults, dynamic rows, and deterministic derived values (1.121625ms)
+✔ aggregate performance and integrated obligation use live adapter data (0.839958ms)
+✔ public token pages prevent referrer, cache, and crawler exposure (0.522834ms)
+✔ evidence page does not claim a fixed deliverable or due date (3.87175ms)
+✔ owner navigation keeps integrated management and aggregate performance adjacent (3.556083ms)
+✔ integrated management lets the owner choose an eligible contract before upload (2.33625ms)
+✔ develop-style comparison keeps independent left and right font controls (1.155875ms)
+✔ live clause detail reuses the develop clause card without inventing source pages (0.870375ms)
+✔ live contract review keeps the five answers beside original-clause evidence (0.945708ms)
+✔ understood answers only compare against their structured extracted field (0.908875ms)
+✔ public adjustment response renders the stored original clause text (0.932041ms)
+✔ live comparison shows every parsed clause on the left and selected requests on the right (0.825ms)
+✔ live contract text decodes escaped quotation marks without rendering HTML (1.235834ms)
+✔ public adjustment links are restored, copied explicitly, and never auto-sent (0.516583ms)
+✔ live adjustment responses keep the develop response dashboard layout (0.253125ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 54.965459

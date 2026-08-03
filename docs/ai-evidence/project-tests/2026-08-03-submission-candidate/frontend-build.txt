@@ -1,0 +1,55 @@
+
+> frontend@0.1.0 build
+> next build
+
+▲ Next.js 16.2.12 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 11.5s
+  Running TypeScript ...
+  Finished TypeScript in 1569ms ...
+  Collecting page data using 9 workers ...
+  Generating static pages using 9 workers (0/17) ...
+  Generating static pages using 9 workers (4/17)
+  Generating static pages using 9 workers (8/17)
+  Generating static pages using 9 workers (12/17)
+✓ Generating static pages using 9 workers (17/17) in 144ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /auth/callback
+├ ƒ /contracts/[id]
+├ ƒ /contracts/[id]/agreement
+├ ƒ /contracts/[id]/analysis
+├ ƒ /contracts/[id]/clauses/[clauseId]
+├ ƒ /contracts/[id]/obligations
+├ ƒ /contracts/[id]/performance
+├ ƒ /contracts/[id]/renewal
+├ ƒ /contracts/[id]/request
+├ ƒ /contracts/[id]/responses
+├ ƒ /contracts/[id]/revision
+├ ƒ /contracts/[id]/signature
+├ ○ /contracts/new
+├ ○ /dashboard
+├ ○ /demo
+├ ○ /forgot-password
+├ ○ /icon.svg
+├ ○ /login
+├ ○ /manage
+├ ○ /performance
+├ ○ /privacy
+├ ƒ /r/[token]
+├ ƒ /r/[token]/done
+├ ƒ /r/[token]/evidence
+├ ƒ /r/[token]/respond
+├ ○ /reset-password
+├ ○ /signup
+├ ○ /states
+└ ○ /terms
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

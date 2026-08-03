@@ -50,7 +50,9 @@ SAFE_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
 UPLOAD_ID_NAMESPACE = UUID("cdce6a82-929f-4af6-ae30-8a88c0fc71b2")
 
 EXPECTED_METRICS: dict[str, int] = {
+    "ad_spend": 438_200,
     "impressions": 12000,
+    "clicks": 2_035,
     "likes": 420,
     "comments": 35,
     "reach": 9500,
@@ -145,7 +147,7 @@ class LivePerformanceE2ESummary(StrictModel):
     no_store_response_count: int = Field(ge=0)
     expected_state_count: Literal[6] = 6
     verified_state_count: int = Field(ge=0)
-    expected_metric_count: Literal[8] = 8
+    expected_metric_count: Literal[10] = 10
     verified_metric_count: int = Field(ge=0)
     flag_count: int = Field(ge=0)
     inquiry_count: int = Field(ge=0)
@@ -257,7 +259,7 @@ class LiveE2EFailure(RuntimeError):
 
 
 def build_synthetic_performance_pdf() -> bytes:
-    """Build one in-memory, fictitious report with all eight AI metrics."""
+    """Build one in-memory, fictitious report with all ten AI metrics."""
 
     buffer = BytesIO()
     canvas = Canvas(buffer, pagesize=A4, pageCompression=0)
@@ -267,7 +269,9 @@ def build_synthetic_performance_pdf() -> bytes:
     canvas.setFont("Helvetica", 11)
     lines = (
         "Reporting period: 2026-08",
+        "Ad spend: KRW 438200",
         "Impressions: 12000",
+        "Clicks: 2035",
         "Likes: 420",
         "Comments: 35",
         "Reach: 9500",
@@ -870,13 +874,54 @@ def _verify_extracted_metrics(
 
 
 def _confirmation_body() -> dict[str, Any]:
+    legacy_metrics = {
+        name: EXPECTED_METRICS[name]
+        for name in (
+            "impressions",
+            "likes",
+            "comments",
+            "reach",
+            "saves",
+            "shares",
+            "follower_net_change",
+            "published_content_count",
+        )
+    }
     return {
         "expected_revision": 0,
         "confirmed_payload": {
-            **EXPECTED_METRICS,
+            **legacy_metrics,
             "inquiries": 6,
             "reservations": 3,
             "purchases": 2,
+            "metric_items": [
+                {
+                    "key": "ad_spend",
+                    "label": "Ad spend",
+                    "value": EXPECTED_METRICS["ad_spend"],
+                    "unit": "KRW",
+                },
+                {
+                    "key": "impressions",
+                    "label": "Impressions",
+                    "value": EXPECTED_METRICS["impressions"],
+                    "unit": "COUNT",
+                },
+                {
+                    "key": "clicks",
+                    "label": "Clicks",
+                    "value": EXPECTED_METRICS["clicks"],
+                    "unit": "COUNT",
+                },
+                {"key": "ctr", "label": "CTR", "value": None, "unit": "PERCENT"},
+                {"key": "cpc", "label": "CPC", "value": None, "unit": "KRW"},
+                {
+                    "key": "published_content_count",
+                    "label": "Published content count",
+                    "value": EXPECTED_METRICS["published_content_count"],
+                    "unit": "COUNT",
+                },
+            ],
         },
         "has_issue": True,
         "issue_note": "합성 live 검증에서 소유자 확인이 필요한 항목입니다.",

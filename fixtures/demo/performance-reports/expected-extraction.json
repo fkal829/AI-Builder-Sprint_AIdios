@@ -1,87 +1,123 @@
 {
-  "fixture_name": "브릿지웨이브 2026년 7월 소셜 미디어 월간 리포트",
+  "fixture_name": "브릿지웨이브 2026년 7월 광고 성과 리포트",
   "fictional": true,
+  "prompt_version": "performance-report-metrics-v3",
+  "source_file_sha256": "4ba0dbc5d1c2283b21feb81e668a098e1f0a0c5fff65c8c7943a9362ea255f3f",
   "upload": {
     "period": "2026-07",
-    "filename": "브릿지웨이브_7월_광고리포트.pdf",
-    "content_type": "application/pdf"
+    "filename": "브릿지웨이브_2026-07_광고성과리포트.pdf",
+    "content_type": "application/pdf",
+    "page_count": 3
   },
   "expected_extraction": {
+    "ad_spend": {
+      "value": 438200,
+      "source_page": 1,
+      "source_text": "집행 광고비 438,200원",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
     "impressions": {
-      "value": 8300,
-      "source_page": 2,
-      "source_text": "노출 수: 8,300회",
+      "value": 113700,
+      "source_page": 1,
+      "source_text": "노출 수 113,700회",
+      "confidence": 1.0,
+      "verification_status": "VERIFIED"
+    },
+    "clicks": {
+      "value": 2035,
+      "source_page": 1,
+      "source_text": "클릭 수 2,035회",
+      "confidence": 1.0,
       "verification_status": "VERIFIED"
     },
     "likes": {
-      "value": 180,
+      "value": null,
       "source_page": 2,
-      "source_text": "좋아요: 180회",
-      "verification_status": "VERIFIED"
+      "source_text": "합계 1,977 164 267 112 2,520 2.22%",
+      "confidence": 0.72,
+      "verification_status": "NEEDS_CHECK"
     },
     "comments": {
-      "value": 20,
+      "value": null,
       "source_page": 2,
-      "source_text": "댓글: 20건",
-      "verification_status": "VERIFIED"
+      "source_text": "합계 1,977 164 267 112 2,520 2.22%",
+      "confidence": 0.72,
+      "verification_status": "NEEDS_CHECK"
     },
     "reach": {
-      "value": 6740,
-      "source_page": 2,
-      "source_text": "도달: 6,740명",
-      "verification_status": "VERIFIED"
+      "value": null,
+      "source_page": 3,
+      "source_text": "Instagram 66,900명 +214명 3,846명",
+      "confidence": 0.72,
+      "verification_status": "NEEDS_CHECK"
     },
     "saves": {
-      "value": 40,
+      "value": null,
       "source_page": 2,
-      "source_text": "저장: 40회",
-      "verification_status": "VERIFIED"
+      "source_text": "합계 1,977 164 267 112 2,520 2.22%",
+      "confidence": 0.72,
+      "verification_status": "NEEDS_CHECK"
     },
     "shares": {
-      "value": 0,
+      "value": null,
       "source_page": 2,
-      "source_text": "공유: 0회",
-      "verification_status": "VERIFIED"
+      "source_text": "합계 1,977 164 267 112 2,520 2.22%",
+      "confidence": 0.72,
+      "verification_status": "NEEDS_CHECK"
     },
     "follower_net_change": {
-      "value": 27,
-      "source_page": 2,
-      "source_text": "팔로워 순증: +27명",
-      "verification_status": "VERIFIED"
+      "value": null,
+      "source_page": null,
+      "source_text": null,
+      "confidence": 0.0,
+      "verification_status": "NOT_FOUND"
     },
     "published_content_count": {
-      "value": 2,
-      "source_page": 2,
-      "source_text": "게시물 수: 2건",
+      "value": 10,
+      "source_page": 1,
+      "source_text": "게시물 수 10건",
+      "confidence": 1.0,
       "verification_status": "VERIFIED"
     }
   },
   "expected_confirmation_payload": {
-    "impressions": 8300,
-    "likes": 180,
-    "comments": 20,
-    "reach": 6740,
-    "saves": 40,
-    "shares": 0,
-    "follower_net_change": 27,
-    "published_content_count": 2,
+    "impressions": 113700,
+    "likes": 1977,
+    "comments": 164,
+    "reach": 66900,
+    "saves": 267,
+    "shares": 112,
+    "follower_net_change": null,
+    "published_content_count": 10,
     "inquiries": null,
     "reservations": null,
-    "purchases": null
+    "purchases": null,
+    "metric_items": [
+      {"key": "ad_spend", "label": "집행 광고비", "value": 438200, "unit": "KRW"},
+      {"key": "impressions", "label": "노출 수", "value": 113700, "unit": "COUNT"},
+      {"key": "clicks", "label": "클릭 수", "value": 2035, "unit": "COUNT"},
+      {"key": "ctr", "label": "CTR", "value": 1.79, "unit": "PERCENT"},
+      {"key": "cpc", "label": "CPC", "value": 215, "unit": "KRW"},
+      {"key": "published_content_count", "label": "게시물 수", "value": 10, "unit": "COUNT"}
+    ]
   },
   "expected_server_derived": {
-    "reaction_count": 240,
-    "engagement_rate": "0.028916"
+    "reaction_count": 2520,
+    "engagement_rate": "0.022164",
+    "ctr_percent": "1.79",
+    "cpc_krw": 215
   },
   "conditional_contract_comparison": {
     "requires_verified_monthly_expected_count": 4,
-    "actual_content_count": 2,
-    "expected_flag": "DELIVERABLE_COUNT_SHORTFALL",
-    "note": "계약에서 월 4건 약정이 VERIFIED 근거로 추출된 경우에만 생성해야 한다."
+    "actual_content_count": 10,
+    "expected_flag": null,
+    "note": "월 4건 약정 대비 10건이므로 수량 부족 신호를 만들지 않는다."
   },
   "notes": [
-    "confidence는 live 모델 결과에 따라 달라질 수 있어 고정 기대값에서 제외한다.",
-    "문의·예약·구매 수는 AI 추출 대상이 아니며 소유자가 확인 후 입력한다.",
-    "반응률은 서버가 확인된 원본 정수로 계산하며 요청값이나 AI 추출값으로 받지 않는다."
+    "confidence는 fixture 분류 검증용 값이며 live 모델 confidence를 예측하거나 보정하지 않는다.",
+    "표 합계 행과 플랫폼별 도달은 원문만 보존하고 후보 값은 null로 두며 사용자가 확인 후 입력한다.",
+    "플랫폼별 팔로워 순증을 합산해 전체 값으로 추정하지 않는다.",
+    "CTR, CPC, 반응률은 확인된 원본 정수로 서버가 다시 계산한다."
   ]
 }

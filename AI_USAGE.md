@@ -13,8 +13,8 @@
 | 항목 | 값 |
 | --- | --- |
 | 사실 검증일 | 2026-08-03 KST |
-| 제품 코드 기준 | `origin/main` / `e4cb13ec6fe397f44eb346a81ccfe514e1fb7de7` |
-| 최신 자동 검증 | [2026-08-03 전체 자동 검증](docs/ai-evidence/project-tests/2026-08-03/SUMMARY.md) |
+| 제품 코드 기준 | `origin/main` / `d3af764db180fc85ed5ecc5c4e3d0abc40497c8f` + 현재 리포트 fixture 교체 작업 트리 |
+| 최신 자동 검증 | [2026-08-03 현재 리포트 교체 검증](docs/ai-evidence/project-tests/2026-08-03-current-report-replacement/SUMMARY.md) |
 | 테스트 데이터 | 실제 개인정보가 없는 가상 계약·합성 PDF |
 
 - `LIVE_EXTERNAL`: 실제 외부 API를 호출한 기록이다. 실행일·모델·프롬프트 버전과
@@ -23,6 +23,37 @@
 - `OFFLINE_SNAPSHOT`: 사람이 만든 정답·고정 추출 snapshot의 회귀 평가다. 실제 모델
   정확도가 아니다.
 - `IMPLEMENTED_NOT_LIVE_VERIFIED`: 코드·자동 테스트는 있지만 별도 live 성공 산출물은 없다.
+
+## 제출용 채점 기준별 증빙 색인
+
+심사위원이 문서와 코드를 역추적하지 않아도 되도록 OT의 AI 활용도와 Upstage 가점 기준을
+아래 증빙에 바로 연결한다.
+
+| 채점 관점 | 단디계약의 선택 | 직접 확인할 증빙 | 현재 한계 |
+| --- | --- | --- | --- |
+| 개발 프로세스 전반의 AI 통합 | Codex·Claude Code를 구현·테스트에 사용하고 저장소 지침과 팀 Skill로 변경 절차를 통제 | [개발 과정 AI 활용](#8-개발-과정의-ai-활용과-증빙-범위), [dandi-issue-to-pr Skill](.agents/skills/dandi-issue-to-pr/SKILL.md) | 세션별 소요 시간과 토큰은 저장하지 않아 시간 절감률은 주장하지 않음 |
+| 에이전트 설정·지침 체계성 | 공통·백엔드·프론트 지침, Issue→PR 반복 절차, 제출 증빙 Stop Hook을 저장소에 버전 관리 | [AGENTS.md](AGENTS.md), [apps/api/AGENTS.md](apps/api/AGENTS.md), [apps/frontend/CLAUDE.md](apps/frontend/CLAUDE.md), [Hook 설정](.claude/settings.json) | Hook은 제출 직전 도입되어 장기간 효율 효과는 아직 측정하지 않음 |
+| 결과물 품질 기여도 | 고정 계약 평가, strict schema, 근거 좌표 검증, 안전 검사, 전체 자동 테스트로 AI 출력 품질을 검증 | [테스트·평가 산출물](#7-테스트평가검증-산출물), [RESULTS.md](fixtures/evaluation/RESULTS.md) | 오프라인 snapshot 수치를 실제 모델 정확도로 해석하지 않음 |
+| Upstage 실질 통합 | 핵심 계약 흐름의 PDF 읽기·28개 조건 구조화·검토 문구와 성과 리포트 매핑에 사용 | [사용자 흐름 기준 AI 호출](#3-사용자-흐름-기준-ai-호출-위치), [실제 외부 API 검증](#73-실제-외부-api-검증--live_external) | 배포 FastAPI 전체 경로의 최신 live 재검증은 별도 필요 |
+
+## Workflow와 Agent를 구분한 설계
+
+단디계약 제품 런타임은 자율 에이전트가 아니라 **검증 가능한 고정 Workflow**다. 계약처럼
+금액·상태·당사자 행동의 오류 비용이 큰 영역에서는 모델이 다음 행동이나 도구를 스스로
+선택하게 하지 않고, 생성형 AI가 필요한 좁은 단계에만 Upstage를 배치했다.
+
+| 구간 | 분류 | 선택 근거 |
+| --- | --- | --- |
+| 업로드 → Parse → Extract → 근거 검증 → 저장 | 결정적 Workflow | 실행 순서, 입력·출력 schema, 실패 상태가 서버 코드로 고정됨 |
+| 미해결 필드 최대 1회 재추출 | 제한된 Evaluator Workflow | 대상 필드와 최대 2라운드가 코드로 고정되고 모델이 루프 지속 여부를 결정하지 않음 |
+| 성과 지표 근거 검증 → 1회 교정 → 개별 안전 강등 | 제한된 Evaluator Workflow | 재시도 상한과 `NOT_FOUND` 강등 조건이 코드로 고정되고 라벨-값 불일치는 계속 거부됨 |
+| Solar 설명·조정 문구 생성 | Workflow 안의 LLM 단계 | 서버가 만든 검토 신호만 표현하며 도구 선택·상태 전이 권한이 없음 |
+| 발송·역제안 수락·서명·증빙 승인·갱신 | 사람 승인 Gate | 사용자 명시 행동 없이는 실행되지 않음 |
+| Codex·Claude Code | 개발용 Coding Agent | 저장소를 읽고 구현·검증하지만 AGENTS·CLAUDE·Skill의 권한과 절차를 따름 |
+
+따라서 제품에 자율 에이전트를 억지로 추가하지 않은 것은 기능 부족이 아니라 안전성과
+재현성을 위한 의도적인 범위 결정이다. 날짜·금액·비율·상태 전이는 일반 코드가 맡고,
+Upstage는 문서 이해와 원문 근거 범위 안의 사용자 설명에 집중한다.
 
 ## 2. 어떤 AI를 어디에 사용했는가
 
@@ -33,7 +64,7 @@
 | 계약 검토 문구 | Upstage Solar Chat `solar-pro3` | 서버가 찾은 누락·불일치·모호 신호의 쉬운 설명과 문구 3종 생성 | `LIVE_EXTERNAL` |
 | 대행사 역제안 비교 | Upstage Solar Chat `solar-pro3` | 달라진 점·남은 확인사항·최종 확인 문구 생성 | `LIVE_EXTERNAL` |
 | 조정 요청 문구 다듬기 | Upstage Solar Chat `solar-pro3` | 사용자가 쓴 문구를 조건과 숫자를 유지하며 정중하게 변환 | `IMPLEMENTED_NOT_LIVE_VERIFIED` |
-| 성과 리포트 지표 매핑 | Upstage Document Parse + Solar Chat `solar-pro3` | 광고비·노출·클릭 등 10개 후보와 원문 근거 매핑 | `LIVE_EXTERNAL`(v1 8개) / `AUTOMATED_OFFLINE`(v2 10개) |
+| 성과 리포트 지표 매핑 | Upstage Document Parse + Solar Chat `solar-pro3` | 광고비·노출·클릭 등 10개 후보와 원문 근거 매핑 | `LIVE_EXTERNAL`(v3 10개) |
 
 서비스는 OpenAI·Claude 등 다른 회사의 모델을 제품 런타임에서 호출하지 않는다.
 Codex·Claude Code는 개발 과정에서 사용한 코딩 도구이며 제품 사용자 데이터 처리 경로와
@@ -48,7 +79,7 @@ Codex·Claude Code는 개발 과정에서 사용한 코딩 도구이며 제품 �
 | 조정 문구 작성 | 사용자가 누른 경우에만 입력 문구를 정중하게 다듬고 미리보기를 반환 | 자동 적용·저장·발송, 숫자·조건 변경 |
 | 상대방 역제안 확인 | 실제 요청·역제안·사유의 차이와 확인사항을 요약 | 역제안 자동 수락·거절, 상태 변경 |
 | 수정계약서 검증 | Parse로 최신 PDF의 페이지별 원문을 추출 | 합의 반영 여부를 생성형 모델 의미 판단으로 확정 |
-| 광고효과 리포트 | Parse 후 v2의 10개 성과 후보와 페이지·인용문을 매핑 | 없는 지표 추정, 비율·금액을 다른 실적 건수로 오인 |
+| 광고효과 리포트 | Parse 후 v3의 10개 성과 후보와 페이지·인용문을 매핑 | 없는 지표 추정, 비율·금액을 다른 실적 건수로 오인 |
 
 수정계약서는 Parse 단계에만 AI API가 사용된다. 확정 문구와 수정본의 일치 여부는 서버가
 NFKC 정규화·소문자화·공백 제거 후 정확 포함 여부로 검사한다. 정확히 찾은 경우만
@@ -67,7 +98,7 @@ NFKC 정규화·소문자화·공백 제거 후 정확 포함 여부로 검사�
 | 계약 검토 문구 | `solar-pro3` / `contract-review-copy-v1` | [solar.py](apps/api/app/adapters/solar.py), [analysis.py](apps/api/app/services/analysis.py) |
 | 역제안 비교 | `solar-pro3` / `counterproposal-comparison-v1` | [solar.py](apps/api/app/adapters/solar.py), [counterproposal.py](apps/api/app/services/counterproposal.py) |
 | 조정 문구 다듬기 | `solar-pro3` / `adjustment-copy-polish-v1` | [solar.py](apps/api/app/adapters/solar.py), [tone_polish.py](apps/api/app/services/tone_polish.py) |
-| 성과 지표 매핑 | `solar-pro3` / `performance-report-metrics-v2` | [performance_metrics.py](apps/api/app/adapters/performance_metrics.py), [performance_ai.py](apps/api/app/services/performance_ai.py) |
+| 성과 지표 매핑 | `solar-pro3` / `performance-report-metrics-v3` | [performance_metrics.py](apps/api/app/adapters/performance_metrics.py), [performance_ai.py](apps/api/app/services/performance_ai.py) |
 
 ### 4.2 요청 설정
 
@@ -78,7 +109,7 @@ NFKC 정규화·소문자화·공백 제거 후 정확 포함 여부로 검사�
 | 계약 검토 문구 | `temperature=0.3`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, 현재 chunk 최대 4건, timeout 120초 | 일시 오류 1회 재전송; 모델 문구를 버리고 결정 규칙 항목으로 fallback |
 | 역제안 비교 | `temperature=0.2`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, 서비스 batch 최대 4건, timeout 120초 | 안전한 `502`; 저장된 상대방 응답과 상태는 유지 |
 | 조정 문구 다듬기 | `temperature=0.2`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, 1건, timeout 120초 | 안전한 `502`; 자동 저장·적용·발송하지 않음 |
-| 성과 지표 매핑 | `temperature=0`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, timeout 120초 | 일시 오류 1회 재전송 후 추출 attempt 실패 보존 |
+| 성과 지표 매핑 | `temperature=0`, `reasoning_effort=medium`, `stream=false`, strict JSON Schema, timeout 120초 | 일시 오류 1회 재전송; 근거 실패는 교정 1회 뒤 원문에 없는 개별 후보만 `NOT_FOUND`, 라벨-값 불일치는 실패 보존 |
 
 Solar의 일시 오류 재전송 대상은 transport 오류와 HTTP `429`, `500`, `502`, `503`,
 `504`이며 최대 한 번이다. 설정 기본값은 [config.py](apps/api/app/core/config.py), 실제
@@ -90,7 +121,7 @@ system prompt와 JSON Schema는 각 Adapter 상수에 함께 버전 관리한다
 - 역제안 비교: 실제 요청·역제안·사유만 비교하고, 수락·거절이나 신뢰성 판단을 하지 않는다.
 - 문구 다듬기: 입력을 신뢰할 수 없는 데이터로 취급하고, 의도·주체·조건·날짜·금액·기간·
   비율·숫자 개수를 유지한다. 결과는 사용자가 확인한 뒤 적용한다.
-- 성과 지표: v2의 10개 후보만 반환하고 각 값에 짧은 실제 원문과 페이지를 붙인다.
+- 성과 지표: v3의 10개 후보만 반환하고 각 값에 짧은 실제 원문과 페이지를 붙인다.
   `ad_spend`는 원화 정수 금액, 나머지는 명시된 정수만 허용한다. 원문에 없으면
   `NOT_FOUND`, `null`, `confidence=0`으로 반환한다.
 
@@ -115,6 +146,9 @@ system prompt와 JSON Schema는 각 Adapter 상수에 함께 버전 관리한다
    아니다. Solar 자기평가도 법적 정확도나 원문 추출 confidence로 사용하지 않는다.
 10. **사람 승인 게이트**: 발송, 역제안 수락, 최종 합의, 서명 초안 시작, 증빙 승인,
    재계약·종료는 사용자 명시 행동 없이는 실행하지 않는다.
+11. **성과 표 지표의 안전 강등**: Solar가 표 헤더와 합계 값을 합쳐 원문에 없는
+   `source_text`를 만들면 1회 교정한다. 두 번째에도 원문과 일치하지 않는 해당 후보만
+   `NOT_FOUND`로 넘기며, 다른 지표의 숫자를 붙인 라벨-값 불일치는 계속 전체 거부한다.
 
 날짜·금액·비율·총액·D-day·계약 상태 전이는 결정적 Python·SQL 코드가 처리한다.
 
@@ -137,20 +171,21 @@ Supabase 이메일·비밀번호 가입·로그인·복구·세션 토큰 경로
 
 ## 7. 테스트·평가·검증 산출물
 
-### 7.1 2026-08-03 현재 자동 검증 — `AUTOMATED_OFFLINE`
+### 7.1 2026-08-03 현재 리포트 교체 검증 — `AUTOMATED_OFFLINE`
 
 | 검증 | 결과 |
 | --- | ---: |
-| 백엔드 pytest | 820 passed, 실패·오류·skip 0 |
+| 백엔드 pytest | 850 passed, 실패·오류·skip 0 |
 | Ruff | 진단 0건 |
-| 프론트 소스 회귀 테스트 | 35 passed, 실패 0 |
+| 프론트 소스 회귀 테스트 | 36 passed, 실패·skip 0 |
 | 프론트 ESLint | 통과 |
 | Next.js 프로덕션 빌드 | 통과 |
 | 고정 계약 10건 오프라인 평가 | 선언 목표 전체 통과 |
 
 JUnit XML, Ruff JSON, 프론트 실행 출력, 빌드 출력, 환경, 재현 범위와 SHA-256은
-[2026-08-03 검증 패키지](docs/ai-evidence/project-tests/2026-08-03/SUMMARY.md)에 보관한다.
-제품 코드 기준은 `e4cb13e...`이며, 이 문서 통합 브랜치에서 다시 실행했다.
+[2026-08-03 현재 리포트 교체 검증 패키지](docs/ai-evidence/project-tests/2026-08-03-current-report-replacement/SUMMARY.md)에
+보관한다. 기준은 `d3af764...` 위의 현재 작업 트리이며, 새 PDF·mock·v3 10개 후보
+runner·문서 변경을 포함해 다시 실행했다. 아직 이 변경을 담은 커밋은 만들지 않았다.
 
 ### 7.2 고정 계약 10건 — `OFFLINE_SNAPSHOT`
 
@@ -176,6 +211,7 @@ JUnit XML, Ruff JSON, 프론트 실행 출력, 빌드 출력, 환경, 재현 범
 | 2026-08-01 | 저장 계약 실패 격리 | Parse 5페이지·74요소, 28필드·2라운드 후 안전 검증 실패를 결정 규칙 14건으로 fallback; [기술 기록](#2026-08-01-저장-계약-live-실패-재현과-fallback-검증) |
 | 2026-08-01 | 성과 지표 Adapter | 합성 PDF 기대 지표 8/8, 근거 있는 `VERIFIED`; [기술 기록](#p2-성과-리포트-지표-매핑-기반) |
 | 2026-08-01 | 광고효과 16.2~16.5 수직 E2E | 로컬 FastAPI TCP·live Supabase·Upstage·Solar, 멱등 3/3, `no-store` 7/7, cleanup 6/6; [runner](apps/api/evaluation/performance_e2e_live.py) |
+| 2026-08-03 | 현재 3페이지 광고성과 PDF | exact SHA PDF를 Document Parse `document-parse-260630` + Solar `solar-pro3`/v3로 실행; 10개 중 직접 근거 4개 `VERIFIED`, 표·플랫폼 합산 6개 `NOT_FOUND`, 기대 안전 조건 10/10; [실행 요약](docs/ai-evidence/project-tests/2026-08-03-current-report-replacement/live-integration-summary.md) |
 
 live 호출 기록에는 API key·계약 원문·`source_text`·Storage 경로·원시 응답을 넣지 않는다.
 
@@ -188,8 +224,10 @@ live 호출 기록에는 API key·계약 원문·`source_text`·Storage 경로·
 - `adjustment-copy-polish-v1`은 자동 테스트가 있지만 별도 Solar live 성공 산출물은 없다.
 - 2026-08-02 발견한 단일 추출 후보 형식 오류 격리와 환불 조건 명시적 부재 처리는
   고정 응답 회귀 테스트를 통과했지만 해당 두 live 케이스를 다시 호출하지 않았다.
-- 현재 성과 매핑은 `performance-report-metrics-v2` 10개 후보다. live 증거는 확장 전
-  v1의 8개 후보에 관한 것이며, 새 `ad_spend`·`clicks` strict 출력은 live 미검증이다.
+- 현재 데모 fixture의 첫 live 시도들은 Solar가 표의 `likes` 헤더와 값을 합쳐 원문에 없는
+  인용문을 만든 탓에 근거 검증에서 실패했다. 재시도 상한과 개별 `NOT_FOUND` 강등을
+  구현한 뒤 exact SHA 파일이 v3 기대 안전 조건 10/10을 통과했다. 실패 순서와 외부 호출
+  횟수는 [live-attempts.md](docs/ai-evidence/project-tests/2026-08-03-current-report-replacement/live-attempts.md)에 남겼다.
 - 광고효과 수직 E2E는 배포 서버가 아니라 로컬 FastAPI를 실제 TCP로 기동한 검증이다.
 - 2026-08-03 자동 검증은 외부 Adapter를 재호출하지 않았다.
 
@@ -216,13 +254,52 @@ live 호출 기록에는 API key·계약 원문·`source_text`·Storage 경로·
 저장소에는 포함하지 않는다. 따라서 개발 AI의 세션별 기여도를 제품 live 증빙이나 자동
 테스트 수치와 혼합하지 않는다.
 
+### 8.1 공용 Skill 도입 뒤 관찰 가능한 변화
+
+`dandi-issue-to-pr` Skill과 Issue·PR 템플릿은 2026-08-01 17:58 KST 커밋
+`7e43f9f`에서 추가되고 `5007bf1`에서 통합됐다. 이후 현재 `main`까지의 로컬 Git 이력에서
+직접 재현 가능한 관찰값은 다음과 같다.
+
+| 관찰 항목 | 결과 | 해석 제한 |
+| --- | ---: | --- |
+| Skill 통합 뒤 GitHub PR merge | 9건 | merge commit 제목에 `Merge pull request`가 있는 건만 계산 |
+| `<type>/#issue/...` 브랜치 규칙 준수 | 7/9건 | 절차 일관성 지표이며 Skill이 PR을 만들었다는 증명은 아님 |
+| 백엔드 전체 회귀 테스트 | 719건(08-01) → 850건(현재 작업 트리), +131건 | 품질 검증 범위의 증가이며 개발 시간 단축과 동일하지 않음 |
+| 자동 검증 snapshot | 4회 | 실행 환경·JUnit·Ruff·평가·SHA-256을 덮어쓰지 않고 보관 |
+| 제출 증빙 Stop Hook | 직접 실행 1회 통과 | 제출 직전 도입했으므로 과거 작업 시간 절감의 증거로 사용하지 않음 |
+
+규칙을 따른 7건은 PR #115, #119, #121, #123, #127, #129, #131이다. 예외는 통합
+브랜치 PR #125와 별도 프론트 브랜치 PR #132다. 이 수치는 저장소 이력에서 다시 셀 수
+있는 **절차 준수와 검증 범위**만 보여준다. 작업별 시작·종료 시각, AI 세션 재시도 횟수,
+사람의 수정 시간은 수집하지 않았으므로 “개발 시간이 N% 줄었다”는 주장은 하지 않는다.
+
+### 8.2 Skill·Hook 사용 범위
+
+- **Skill 사용:** 반복되는 Issue→브랜치→영향 범위 확인→테스트→PR 인계 절차를 한 문서로
+  재사용한다. P0 우선순위, 원문 근거 보존, 문서 선행 변경, 외부 Adapter와 승인 경계를
+  작업마다 다시 설명하는 비용을 줄인다.
+- **지침 사용:** 디렉터리별 AGENTS·CLAUDE 파일이 에이전트의 읽기 범위, 코드 소유권,
+  테스트와 안전 규칙을 세션 시작 시 제공한다.
+- **공유 Hook:** Claude Code가 응답을 마칠 때 [validate-ai-evidence.sh](.agents/hooks/validate-ai-evidence.sh)를
+  실행하도록 [.claude/settings.json](.claude/settings.json)에 `Stop` Hook을 등록했다. 제출
+  증빙 파일이 변경된 경우에만 `git diff --check`, 현재 HEAD의 전체 SHA, 최신 검증 요약
+  링크, ZIP 유효성과 핵심 파일 최신성을 결정적으로 검사한다. Hook이 한 번 작업을 계속시킨
+  뒤 무한 반복하지 않도록 `stop_hook_active=true`에서는 종료한다.
+
+이 Hook은 2026-08-03 제출 정리 시점에 새로 도입했고 직접 실행 검증만 마쳤다. 따라서
+향후 낡은 증빙 제출을 막는 재사용 장치로는 제시하지만, 과거 개발 시간을 줄였다는
+근거로 사용하지 않는다. 정적 검사와 전체 제품 검증은 여전히 명시적 명령으로 실행한다.
+
+다음 작업부터 실제 시간 효율을 비교하려면 Issue마다 `started_at`, 최초 테스트 결과,
+AI 수정 반복 수, `completed_at` 네 값만 남기면 된다. 이 측정이 쌓이기 전까지는 위의
+재현 가능한 운영 지표만 제출 증빙으로 사용한다.
+
 ## 9. 현재 한계
 
 - 배포 FastAPI·배포 Supabase·배포 프론트를 모두 묶은 운영 환경 live E2E는 별도 검증이
   필요하다.
 - 계약 검토 4건 chunk와 문구 다듬기의 별도 live 성공 산출물이 필요하다.
-- 추출 후보 격리·환불 부재 처리의 수정 후 live 재검증과 성과 지표 v2 10개 후보의 live
-  재검증이 필요하다.
+- 추출 후보 격리·환불 부재 처리의 수정 후 별도 live 재검증이 필요하다.
 - 모델 confidence는 확률 보정 결과가 아니다.
 - 이 서비스는 법률 자문, 사기·위법성 판정, 업체 신뢰성 판정, 승소 가능성 예측을 제공하지
   않는다.
@@ -256,6 +333,7 @@ cd apps/api
 .venv/bin/python -m evaluation.counterproposal_live --confirm-live
 .venv/bin/python -m evaluation.performance_e2e_live \
   --confirm-live --cleanup-created-data
+.venv/bin/python -m evaluation.performance_fixture_live --confirm-live
 ```
 
 ## 11. 기술 상세 부록
@@ -310,7 +388,7 @@ API key·계약 원문·파일명·Storage 경로·원시 모델 응답은 기�
 
 ### 11.4 2026-08-01 성과 지표 Adapter와 수직 E2E
 
-현재 `performance-report-metrics-v2`는 `ad_spend`, `impressions`, `clicks`, `likes`,
+현재 `performance-report-metrics-v3`는 `ad_spend`, `impressions`, `clicks`, `likes`,
 `comments`, `reach`, `saves`, `shares`, `follower_net_change`,
 `published_content_count` 10개 후보를 strict 출력으로 요구한다. 공유 payload에서는
 기존 v1 호환을 위해 새 두 후보만 optional이지만, Solar v2 출력에서는 누락 시에도
@@ -323,6 +401,12 @@ API key·계약 원문·파일명·Storage 경로·원시 모델 응답은 기�
 성공으로 해석하지 않는다. 로컬 FastAPI TCP·live Supabase Auth/Storage/PostgreSQL·Upstage·Solar를
 통과한 수직 E2E는 업로드 `201`, 추출·확정·조회 `200`, 멱등 재생 3/3,
 `no-store` 7/7, 감사 이벤트 3/3, 테스트 데이터 cleanup 6/6을 확인했다.
+
+활성 데모 PDF는 `브릿지웨이브_2026-07_광고성과리포트.pdf`로 교체했다. 새 문서에 전
+매체 팔로워 순증 합계는 없으므로 플랫폼별 수치를 더해 만들지 않는다. 표 합계 행의 반응
+지표와 Instagram 한정 도달은 원문만 보존하고 값은 `null`인 `NEEDS_CHECK`, 전체 팔로워
+순증은 `NOT_FOUND` 기대값으로 고정했다. 이 분류는 오프라인 fixture 기대값이며 새 PDF의
+live 성공 결과가 아니다.
 
 ### 11.5 2026-08-02 live에서 발견한 추출 경계와 수정 범위
 

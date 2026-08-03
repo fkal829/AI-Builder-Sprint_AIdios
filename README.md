@@ -54,32 +54,54 @@ Solar를 함께 거친 16.2~16.5 수직 E2E도 통과했습니다. 배포 환경
 
 ## 서비스 화면
 
-아래 자리는 실제 운영 화면 캡처로 교체할 예정입니다. 캡처 파일 규격과 안전 확인 사항은
-[docs/screenshots/README.md](docs/screenshots/README.md)를 참고하세요.
+실제 구현 화면을 가상 계약과 비식별 데모 데이터로 촬영했습니다. 업로드와 사용자 이해조건,
+원문 근거 검토, 상대방 조정 요청까지 핵심 흐름을 순서대로 보여줍니다.
 
 <table>
   <tr>
     <td width="50%" align="center">
-      <strong>계약 원문·근거 검토</strong><br /><br />
-      <img src="docs/screenshots/placeholder.svg" alt="계약 원문과 근거 검토 화면 캡처 자리" width="100%" /><br />
-      <code>docs/screenshots/01-contract-review.png</code>
+      <strong>1. 계약서 PDF 업로드</strong><br /><br />
+      <img src="apps/frontend/public/previews/step1-upload.png" alt="계약서 PDF 업로드 화면" width="100%" />
     </td>
     <td width="50%" align="center">
-      <strong>조정 요청·대행사 응답</strong><br /><br />
-      <img src="docs/screenshots/placeholder.svg" alt="조정 요청과 대행사 응답 화면 캡처 자리" width="100%" /><br />
-      <code>docs/screenshots/02-adjustment-response.png</code>
+      <strong>2. 사용자가 이해한 조건 입력</strong><br /><br />
+      <img src="apps/frontend/public/previews/step2-questions.png" alt="사용자가 이해한 계약 조건 입력 화면" width="100%" />
     </td>
   </tr>
   <tr>
     <td width="50%" align="center">
-      <strong>이행·광고효과 관리</strong><br /><br />
-      <img src="docs/screenshots/placeholder.svg" alt="이행과 광고효과 관리 화면 캡처 자리" width="100%" /><br />
-      <code>docs/screenshots/03-performance-management.png</code>
+      <strong>3. AI 분석과 원문 근거 검토</strong><br /><br />
+      <img src="apps/frontend/public/previews/step3-viewer.png" alt="AI 분석 결과와 계약 원문 근거를 함께 확인하는 화면" width="100%" />
     </td>
     <td width="50%" align="center">
-      <strong>만료·재계약 검토</strong><br /><br />
-      <img src="docs/screenshots/placeholder.svg" alt="만료와 재계약 검토 화면 캡처 자리" width="100%" /><br />
-      <code>docs/screenshots/04-renewal-review.png</code>
+      <strong>4. 원문이 연결된 조정 요청</strong><br /><br />
+      <img src="apps/frontend/public/previews/step4-agency.png" alt="계약 원문과 요청 변경사항이 연결된 조정 요청 화면" width="100%" />
+    </td>
+  </tr>
+</table>
+
+계약 검토 이후 조정 응답, 이행 확인, 재계약 판단까지 이어지는 전체 계약 생애주기도
+하나의 서비스 안에서 관리합니다.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <strong>5. 계약 원문 검토와 조정 요청 작성</strong><br /><br />
+      <img src="docs/screenshots/01-contract-review.png" alt="계약 원문을 근거와 함께 검토하고 조정 요청을 작성하는 화면" width="100%" />
+    </td>
+    <td width="50%" align="center">
+      <strong>6. 조정 요청 응답</strong><br /><br />
+      <img src="docs/screenshots/02-adjustment-response.png" alt="대행사가 조정 요청별로 수락, 거절 또는 역제안을 선택하는 화면" width="100%" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <strong>7. 월별 광고효과 대조</strong><br /><br />
+      <img src="docs/screenshots/03-performance-management.png" alt="월별 광고 성과를 계약 조건 및 전월 기록과 대조하는 화면" width="100%" />
+    </td>
+    <td width="50%" align="center">
+      <strong>8. 만료·재계약 검토</strong><br /><br />
+      <img src="docs/screenshots/04-renewal-review.png" alt="계약 만료와 자동갱신 시점을 확인하고 재계약 의사를 저장하는 화면" width="100%" />
     </td>
   </tr>
 </table>

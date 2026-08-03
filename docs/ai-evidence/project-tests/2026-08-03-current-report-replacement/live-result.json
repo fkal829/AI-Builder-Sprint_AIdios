@@ -1,0 +1,31 @@
+{
+  "mode": "LIVE_CURRENT_PERFORMANCE_REPORT",
+  "status": "passed",
+  "executed_at": "2026-08-03T07:41:03.716570Z",
+  "source_sha256": "4ba0dbc5d1c2283b21feb81e668a098e1f0a0c5fff65c8c7943a9362ea255f3f",
+  "prompt_version": "performance-report-metrics-v3",
+  "parse_model": "document-parse-260630",
+  "solar_model": "solar-pro3",
+  "page_count": 3,
+  "expected_page_count": 3,
+  "candidate_count": 10,
+  "strict_verified_count": 4,
+  "safe_unresolved_count": 6,
+  "evidence_attached_count": 4,
+  "status_counts": {
+    "VERIFIED": 4,
+    "NOT_FOUND": 6
+  },
+  "metrics": [
+    {"key": "ad_spend", "verification_status": "VERIFIED", "value_present": true, "source_page": 1, "expectation_satisfied": true},
+    {"key": "impressions", "verification_status": "VERIFIED", "value_present": true, "source_page": 1, "expectation_satisfied": true},
+    {"key": "clicks", "verification_status": "VERIFIED", "value_present": true, "source_page": 1, "expectation_satisfied": true},
+    {"key": "likes", "verification_status": "NOT_FOUND", "value_present": false, "source_page": null, "expectation_satisfied": true},
+    {"key": "comments", "verification_status": "NOT_FOUND", "value_present": false, "source_page": null, "expectation_satisfied": true},
+    {"key": "reach", "verification_status": "NOT_FOUND", "value_present": false, "source_page": null, "expectation_satisfied": true},
+    {"key": "saves", "verification_status": "NOT_FOUND", "value_present": false, "source_page": null, "expectation_satisfied": true},
+    {"key": "shares", "verification_status": "NOT_FOUND", "value_present": false, "source_page": null, "expectation_satisfied": true},
+    {"key": "follower_net_change", "verification_status": "NOT_FOUND", "value_present": false, "source_page": null, "expectation_satisfied": true},
+    {"key": "published_content_count", "verification_status": "VERIFIED", "value_present": true, "source_page": 1, "expectation_satisfied": true}
+  ]
+}

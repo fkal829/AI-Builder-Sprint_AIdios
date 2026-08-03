@@ -33,11 +33,11 @@ test("performance adapter covers upload, extraction, confirmation, correction, a
   assert.match(adapter, /데모 모드에서는.*샘플만 분석할 수 있어요/);
 });
 
-test("mock performance extraction only accepts the exact fictitious demo report", async () => {
+test("mock performance extraction only accepts the current fictitious demo report", async () => {
   const [adapter, fixture] = await Promise.all([
     source("src/lib/adapter.ts"),
     readFile(new URL(
-      "../../../fixtures/demo/performance-reports/브릿지웨이브_7월_광고리포트.pdf",
+      "../../../fixtures/demo/performance-reports/브릿지웨이브_2026-07_광고성과리포트.pdf",
       import.meta.url,
     )),
   ]);
@@ -45,6 +45,12 @@ test("mock performance extraction only accepts the exact fictitious demo report"
 
   assert.match(adapter, new RegExp(`DEMO_PERFORMANCE_REPORT_SHA256[^]*${expectedHash}`));
   assert.match(adapter, /throw new PublicApiError\(\s*422,\s*"VALIDATION_ERROR"/);
+  assert.match(adapter, /adSpend: candidate\(438200, 1, "집행 광고비 438,200원"\)/);
+  assert.match(adapter, /impressions: candidate\(113700, 1, "노출 수 113,700회"\)/);
+  assert.match(adapter, /clicks: candidate\(2035, 1, "클릭 수 2,035회"\)/);
+  assert.match(adapter, /likes: candidate\(null, 2,[^]*"NEEDS_CHECK"\)/);
+  assert.match(adapter, /followerNetChange: candidate\(null, null, null\)/);
+  assert.match(adapter, /publishedContentCount: candidate\(10, 1, "게시물 수 10건"\)/);
 });
 
 test("performance page uses evidence-backed API data and keeps inquiry delivery manual", async () => {

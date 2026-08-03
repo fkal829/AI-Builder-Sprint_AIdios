@@ -6,7 +6,9 @@
 
 ## 최신 실행
 
-- [2026-08-03 전체 자동 검증](2026-08-03/SUMMARY.md)
+- [2026-08-03 현재 광고성과 리포트 교체 검증](2026-08-03-current-report-replacement/SUMMARY.md)
+- [2026-08-03 교체 전 제출 후보 자동 검증](2026-08-03-submission-candidate/SUMMARY.md)
+- [2026-08-03 최초 전체 자동 검증](2026-08-03/SUMMARY.md)
 
 ## 원칙
 
